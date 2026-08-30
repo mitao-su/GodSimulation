@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "id": "starter-world",
+  "name": "Starter Home",
+  "tileSize": 16,
+  "width": 18,
+  "height": 12,
+  "plugins": [
+    { "id": "god-sim.spatial-objects", "version": "0.1.0" },
+    { "id": "god-sim.home-objects", "version": "0.1.0" },
+    { "id": "god-sim.starter-agents", "version": "0.1.0" }
+  ],
+  "floorRegions": [
+    {
+      "x": 0,
+      "y": 0,
+      "width": 9,
+      "height": 6,
+      "resourceId": "pixel-16-interiors.floor",
+      "frameId": "living-wood"
+    },
+    {
+      "x": 0,
+      "y": 7,
+      "width": 9,
+      "height": 5,
+      "resourceId": "pixel-16-interiors.floor",
+      "frameId": "bedroom-wood"
+    },
+    {
+      "x": 10,
+      "y": 0,
+      "width": 8,
+      "height": 6,
+      "resourceId": "pixel-16-interiors.floor",
+      "frameId": "kitchen-tile"
+    },
+    {
+      "x": 10,
+      "y": 7,
+      "width": 8,
+      "height": 5,
+      "resourceId": "pixel-16-interiors.floor",
+      "frameId": "bathroom-tile"
+    }
+  ],
+  "zones": [
+    { "id": "living-room", "name": "Living Room", "x": 0, "y": 0, "width": 9, "height": 6 },
+    { "id": "bedroom", "name": "Bedroom", "x": 0, "y": 7, "width": 9, "height": 5 },
+    { "id": "kitchen", "name": "Kitchen", "x": 10, "y": 0, "width": 8, "height": 6 },
+    { "id": "bathroom", "name": "Bathroom", "x": 10, "y": 7, "width": 8, "height": 5 }
+  ],
+  "objects": [
+    { "id": "wall-v-00", "definitionId": "spatial.wall", "position": { "x": 9, "y": 0 }, "facing": "north", "state": {} },
+    { "id": "wall-v-01", "definitionId": "spatial.wall", "position": { "x": 9, "y": 1 }, "facing": "north", "state": {} },
+    { "id": "wall-v-02", "definitionId": "spatial.wall", "position": { "x": 9, "y": 2 }, "facing": "north", "state": {} },
+    { "id": "wall-v-03", "definitionId": "spatial.wall", "position": { "x": 9, "y": 3 }, "facing": "north", "state": {} },
+    { "id": "door-living-kitchen", "definitionId": "spatial.door", "position": { "x": 9, "y": 4 }, "facing": "east", "state": { "open": false, "locked": false } },
+    { "id": "wall-v-05", "definitionId": "spatial.wall", "position": { "x": 9, "y": 5 }, "facing": "north", "state": {} },
+    { "id": "wall-v-06", "definitionId": "spatial.wall", "position": { "x": 9, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-v-07", "definitionId": "spatial.wall", "position": { "x": 9, "y": 7 }, "facing": "north", "state": {} },
+    { "id": "door-bedroom-bathroom", "definitionId": "spatial.door", "position": { "x": 9, "y": 8 }, "facing": "east", "state": { "open": false, "locked": false } },
+    { "id": "wall-v-09", "definitionId": "spatial.wall", "position": { "x": 9, "y": 9 }, "facing": "north", "state": {} },
+    { "id": "wall-v-10", "definitionId": "spatial.wall", "position": { "x": 9, "y": 10 }, "facing": "north", "state": {} },
+    { "id": "wall-v-11", "definitionId": "spatial.wall", "position": { "x": 9, "y": 11 }, "facing": "north", "state": {} },
+
+    { "id": "wall-left-00", "definitionId": "spatial.wall", "position": { "x": 0, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-left-01", "definitionId": "spatial.wall", "position": { "x": 1, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-left-02", "definitionId": "spatial.wall", "position": { "x": 2, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-left-03", "definitionId": "spatial.wall", "position": { "x": 3, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-left-04", "definitionId": "spatial.wall", "position": { "x": 4, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "door-living-bedroom", "definitionId": "spatial.door", "position": { "x": 5, "y": 6 }, "facing": "south", "state": { "open": false, "locked": false } },
+    { "id": "wall-left-06", "definitionId": "spatial.wall", "position": { "x": 6, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-left-07", "definitionId": "spatial.wall", "position": { "x": 7, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-left-08", "definitionId": "spatial.wall", "position": { "x": 8, "y": 6 }, "facing": "north", "state": {} },
+
+    { "id": "wall-right-10", "definitionId": "spatial.wall", "position": { "x": 10, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-right-11", "definitionId": "spatial.wall", "position": { "x": 11, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-right-12", "definitionId": "spatial.wall", "position": { "x": 12, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-right-13", "definitionId": "spatial.wall", "position": { "x": 13, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "door-kitchen-bathroom", "definitionId": "spatial.door", "position": { "x": 14, "y": 6 }, "facing": "south", "state": { "open": false, "locked": false } },
+    { "id": "wall-right-15", "definitionId": "spatial.wall", "position": { "x": 15, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-right-16", "definitionId": "spatial.wall", "position": { "x": 16, "y": 6 }, "facing": "north", "state": {} },
+    { "id": "wall-right-17", "definitionId": "spatial.wall", "position": { "x": 17, "y": 6 }, "facing": "north", "state": {} },
+
+    { "id": "fridge-1", "definitionId": "home.refrigerator", "position": { "x": 16, "y": 2 }, "facing": "south", "state": { "occupiedBy": null } },
+    { "id": "toilet-1", "definitionId": "home.toilet", "position": { "x": 16, "y": 8 }, "facing": "south", "state": { "occupiedBy": null } }
+  ],
+  "spawns": [
+    { "agentId": "alice", "definitionId": "starter.alice", "position": { "x": 2, "y": 2 }, "facing": "east", "needs": { "bladder": 30 } },
+    { "agentId": "bob", "definitionId": "starter.bob", "position": { "x": 7, "y": 3 }, "facing": "east", "needs": { "bladder": 20 } }
+  ]
+}

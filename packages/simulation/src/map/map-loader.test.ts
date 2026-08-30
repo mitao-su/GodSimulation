@@ -1,0 +1,154 @@
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+
+import { definePlugin, PluginManifestSchema, type ObjectDefinition } from "@god-sim/plugin-sdk";
+
+import { loadWorldDefinition } from "./map-loader";
+import { createPluginRegistry } from "../world/plugin-registry";
+
+const testDoor: ObjectDefinition<{ open: boolean; locked: boolean }> = {
+  id: "test.door",
+  version: "0.1.0",
+  stateVersion: 1,
+  displayName: "Door",
+  tags: ["door"],
+  stateSchema: z.object({ open: z.boolean(), locked: z.boolean() }).strict(),
+  initialState: () => ({ open: false, locked: false }),
+  resourceId: "test.door",
+  placement: {
+    kind: "cell",
+    footprint: [{ x: 0, y: 0 }],
+    interactionOffsets: [{ x: 0, y: 1 }],
+  },
+  interactions: [],
+  observe: (state) => ({
+    status: state.open ? "open" : "closed",
+    summary: state.open ? "Open door" : "Closed door",
+    details: { open: state.open },
+  }),
+};
+
+const registry = createPluginRegistry([
+  definePlugin(
+    PluginManifestSchema.parse({
+      schemaVersion: 1,
+      id: "test.plugin",
+      version: "0.1.0",
+      stateVersion: 1,
+      engineApiVersion: 1,
+      entry: "./dist/index.js",
+      objectDefinitionIds: ["test.door"],
+      agentDefinitionIds: ["test.alice"],
+    }),
+    {
+      objects: [testDoor],
+      agents: [
+        {
+          id: "test.alice",
+          version: "0.1.0",
+          displayName: "Alice",
+          persona: {
+            background: "Test",
+            personality: "Test",
+            values: [],
+            language: "Chinese",
+            thinkingStyle: "Test",
+          },
+          initialMemories: [{ id: "start", summary: "Test memory" }],
+          resourceId: "test.alice",
+          animationSetId: "test.humanoid",
+        },
+      ],
+    },
+  ),
+]);
+
+function validMap() {
+  return {
+    schemaVersion: 1,
+    id: "test-world",
+    name: "Test World",
+    tileSize: 16,
+    width: 4,
+    height: 4,
+    plugins: [
+      { id: "test.plugin", version: "0.1.0" },
+    ],
+    floorRegions: [
+      {
+        x: 0,
+        y: 0,
+        width: 4,
+        height: 4,
+        resourceId: "pixel-16-interiors.floor",
+        frameId: "wood",
+      },
+    ],
+    zones: [{ id: "room", name: "Room", x: 0, y: 0, width: 4, height: 4 }],
+    objects: [
+      {
+        id: "door-1",
+        definitionId: "test.door",
+        position: { x: 2, y: 1 },
+        facing: "south",
+        state: { open: false, locked: false },
+      },
+    ],
+    spawns: [
+      {
+        agentId: "alice",
+        definitionId: "test.alice",
+        position: { x: 1, y: 1 },
+        facing: "east",
+        needs: { bladder: 20 },
+      },
+    ],
+  };
+}
+
+describe("loadWorldDefinition", () => {
+  it("creates instance state owned by the world", () => {
+    const world = loadWorldDefinition(validMap(), registry);
+
+    expect(world.objects.get("door-1" as never)).toMatchObject({
+      definitionId: "test.door",
+      version: 0,
+      state: { open: false, locked: false },
+    });
+    expect(world.agents.get("alice" as never)).toMatchObject({
+      definitionId: "test.alice",
+      bladder: 20,
+    });
+    expect(world.mode).toBe("THINKING");
+  });
+
+  it("rejects an object whose definition is not registered", () => {
+    const base = validMap();
+    const input = {
+      ...base,
+      objects: [{ ...base.objects[0]!, definitionId: "missing.object" }],
+    };
+
+    expect(() => loadWorldDefinition(input, registry)).toThrow(/missing\.object/);
+  });
+
+  it("rejects plugin state that violates the definition schema", () => {
+    const base = validMap();
+    const input = {
+      ...base,
+      objects: [{ ...base.objects[0]!, state: { open: "yes", locked: false } }],
+    };
+
+    expect(() => loadWorldDefinition(input, registry)).toThrow(/door-1/);
+  });
+
+  it("rejects footprints that leave map bounds", () => {
+    const base = validMap();
+    const input = {
+      ...base,
+      objects: [{ ...base.objects[0]!, position: { x: 4, y: 1 } }],
+    };
+
+    expect(() => loadWorldDefinition(input, registry)).toThrow(/bounds/i);
+  });
+});

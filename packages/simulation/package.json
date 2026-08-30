@@ -12,6 +12,7 @@
   "dependencies": {
     "@god-sim/plugin-sdk": "workspace:*",
     "@god-sim/protocol": "workspace:*",
-    "rot-js": "2.2.1"
+    "rot-js": "2.2.1",
+    "zod": "4.5.4"
   }
 }
