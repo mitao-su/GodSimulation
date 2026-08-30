@@ -1,8 +1,12 @@
 import type {
   AgentId,
   Coordinate,
+  DecisionCycleId,
+  DecisionIdentity,
+  DecisionPromptInput,
   EntityId,
   Facing,
+  GoalProposal,
   JsonValue,
   PluginLockHash,
   TechnicalFailure,
@@ -13,6 +17,7 @@ import type {
 import type { MapDefinition } from "../map/map-definition";
 import type { ActionPlan, ActiveGoal } from "../execution/action";
 import type { BodySlotReservations } from "../execution/body-slots";
+import type { AgentKnowledge, ImmediateMemory } from "../perception/agent-knowledge";
 
 export interface ObjectInstance {
   readonly id: EntityId;
@@ -38,12 +43,21 @@ export interface AgentState {
   readonly currentGoal: ActiveGoal | null;
   readonly actionPlan: ActionPlan | null;
   readonly bodySlots: BodySlotReservations;
+  readonly knowledge: AgentKnowledge;
+  readonly memories: readonly ImmediateMemory[];
 }
 
 export interface DecisionCycleState {
-  readonly id: string;
+  readonly id: DecisionCycleId;
   readonly baseWorldVersion: number;
   readonly requestedAgentIds: readonly AgentId[];
+  readonly requests: ReadonlyMap<AgentId, DecisionRequestState>;
+}
+
+export interface DecisionRequestState {
+  readonly identity: DecisionIdentity;
+  readonly promptInput: DecisionPromptInput;
+  readonly acceptedProposal: GoalProposal | null;
 }
 
 export interface WorldState {

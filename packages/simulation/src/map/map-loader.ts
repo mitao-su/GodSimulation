@@ -1,4 +1,4 @@
-import { JsonValueSchema, PluginLockHashSchema } from "@god-sim/protocol";
+import { EventIdSchema, JsonValueSchema, PluginLockHashSchema } from "@god-sim/protocol";
 
 import { MapDefinitionSchema, type MapDefinition } from "./map-definition";
 import { ZoneIndex } from "./zone-index";
@@ -10,6 +10,7 @@ import {
   type WorldState,
 } from "../world/world-state";
 import { createEmptyBodySlots } from "../execution/body-slots";
+import { createEmptyKnowledge } from "../perception/agent-knowledge";
 
 const DEFAULT_PLUGIN_LOCK_HASH = "0".repeat(64);
 
@@ -80,7 +81,7 @@ export function loadWorldDefinition(
     "zone ID",
     map.zones.map((zone) => zone.id),
   );
-  new ZoneIndex(map);
+  const zoneIndex = new ZoneIndex(map);
 
   assertUnique(
     "entity instance ID",
@@ -138,6 +139,8 @@ export function loadWorldDefinition(
       );
     }
     assertCoordinateInBounds(`Agent ${spawn.agentId}`, spawn.position, map);
+    const zoneId = zoneIndex.at(spawn.position)?.id;
+    if (!zoneId) throw new Error(`Agent ${spawn.agentId} does not spawn inside a named zone`);
     agents.set(spawn.agentId, {
       id: spawn.agentId,
       definitionId: spawn.definitionId,
@@ -151,6 +154,15 @@ export function loadWorldDefinition(
       currentGoal: null,
       actionPlan: null,
       bodySlots: createEmptyBodySlots(),
+      knowledge: createEmptyKnowledge(zoneId),
+      memories: registered.definition.initialMemories.map((memory, index) => ({
+        id: memory.id,
+        sourceEventId: EventIdSchema.parse(`event:initial:${spawn.agentId}:${index}`),
+        formedAtTick: 0,
+        observationKind: "interaction",
+        summary: memory.summary,
+        relatedEntityId: null,
+      })),
     });
   }
 
