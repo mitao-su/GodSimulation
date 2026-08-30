@@ -5,8 +5,10 @@ free_model.local
 
 node_modules/
 dist/
+dist-types/
 coverage/
 .vite/
+*.tsbuildinfo
 
 data/
 playwright-report/
