@@ -23,6 +23,12 @@ describe("starter home", () => {
       .toHaveLength(4);
     expect(world.objects.get("fridge-1" as never)?.definitionId).toBe("home.refrigerator");
     expect(world.objects.get("toilet-1" as never)?.definitionId).toBe("home.toilet");
+    expect(world.map.decorations).toEqual([
+      expect.objectContaining({ id: "rug-living", frameId: "blue" }),
+      expect.objectContaining({ id: "rug-bedroom", frameId: "orange" }),
+      expect.objectContaining({ id: "rug-kitchen", frameId: "purple" }),
+      expect.objectContaining({ id: "rug-bathroom", frameId: "red" }),
+    ]);
     expect(world.map.width * world.map.height).toBeGreaterThan(150);
   });
 });

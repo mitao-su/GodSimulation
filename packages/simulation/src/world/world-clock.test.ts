@@ -25,6 +25,7 @@ function world(mode: WorldMode, tick = 12): WorldState {
       height: 1,
       plugins: [],
       floorRegions: [],
+      decorations: [],
       zones: [],
       objects: [],
       spawns: [],

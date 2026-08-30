@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "sheets": [
+    {
+      "id": "memao.alice",
+      "resourceId": "starter-agents.memao.alice",
+      "file": "memao/alice.png",
+      "width": 384,
+      "height": 384,
+      "frameWidth": 48,
+      "frameHeight": 48,
+      "columns": 8,
+      "rows": 8,
+      "anchor": { "x": 0.5, "y": 1 }
+    },
+    {
+      "id": "memao.bob",
+      "resourceId": "starter-agents.memao.bob",
+      "file": "memao/bob.png",
+      "width": 384,
+      "height": 384,
+      "frameWidth": 48,
+      "frameHeight": 48,
+      "columns": 8,
+      "rows": 8,
+      "anchor": { "x": 0.5, "y": 1 }
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "starter-agents.memao.alice",
+      "sheetId": "memao.alice",
+      "animationSetId": "starter-agents.memao.humanoid"
+    },
+    {
+      "resourceId": "starter-agents.memao.bob",
+      "sheetId": "memao.bob",
+      "animationSetId": "starter-agents.memao.humanoid"
+    }
+  ],
+  "animationSets": [
+    {
+      "id": "starter-agents.memao.humanoid",
+      "frameDurationMs": 180,
+      "animations": {
+        "idle": {
+          "south": [0, 1, 2, 3],
+          "north": [4, 5, 6, 7],
+          "west": [8, 9, 10, 11],
+          "east": [12, 13, 14, 15]
+        },
+        "walk": {
+          "south": [16, 17, 18, 19],
+          "north": [20, 21, 22, 23],
+          "west": [24, 25, 26, 27],
+          "east": [28, 29, 30, 31]
+        },
+        "interact": {
+          "south": [32, 33, 34, 35],
+          "north": [36, 37, 38, 39],
+          "west": [40, 41, 42, 43],
+          "east": [44, 45, 46, 47]
+        }
+      }
+    }
+  ]
+}

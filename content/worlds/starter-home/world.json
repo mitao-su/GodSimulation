@@ -44,6 +44,36 @@
       "frameId": "bathroom-tile"
     }
   ],
+  "decorations": [
+    {
+      "id": "rug-living",
+      "position": { "x": 4, "y": 3 },
+      "resourceId": "pixel-16-interiors.carpet",
+      "frameId": "blue",
+      "renderLayer": 5
+    },
+    {
+      "id": "rug-bedroom",
+      "position": { "x": 4, "y": 9 },
+      "resourceId": "pixel-16-interiors.carpet",
+      "frameId": "orange",
+      "renderLayer": 5
+    },
+    {
+      "id": "rug-kitchen",
+      "position": { "x": 13, "y": 3 },
+      "resourceId": "pixel-16-interiors.carpet",
+      "frameId": "purple",
+      "renderLayer": 5
+    },
+    {
+      "id": "rug-bathroom",
+      "position": { "x": 13, "y": 9 },
+      "resourceId": "pixel-16-interiors.carpet",
+      "frameId": "red",
+      "renderLayer": 5
+    }
+  ],
   "zones": [
     { "id": "living-room", "name": "Living Room", "x": 0, "y": 0, "width": 9, "height": 6 },
     { "id": "bedroom", "name": "Bedroom", "x": 0, "y": 7, "width": 9, "height": 5 },

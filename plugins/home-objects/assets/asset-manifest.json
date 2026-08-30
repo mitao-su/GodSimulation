@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "sheets": [
+    {
+      "id": "pixel-16-interiors.tiles",
+      "file": "pixel-16-interiors/tiles.png",
+      "width": 528,
+      "height": 224
+    },
+    {
+      "id": "pixel-16-interiors.furniture",
+      "file": "pixel-16-interiors/furniture.png",
+      "width": 584,
+      "height": 300
+    },
+    {
+      "id": "pixel-16-interiors.carpets",
+      "file": "pixel-16-interiors/carpets.png",
+      "width": 256,
+      "height": 128
+    }
+  ],
+  "resources": [
+    {
+      "id": "pixel-16-interiors.floor",
+      "anchor": { "x": 0, "y": 0 },
+      "frames": {
+        "living-wood": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 16,
+          "y": 16,
+          "width": 16,
+          "height": 16
+        },
+        "bedroom-wood": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 80,
+          "y": 16,
+          "width": 16,
+          "height": 16
+        },
+        "kitchen-tile": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 368,
+          "y": 32,
+          "width": 16,
+          "height": 16
+        },
+        "bathroom-tile": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 368,
+          "y": 64,
+          "width": 16,
+          "height": 16
+        }
+      }
+    },
+    {
+      "id": "pixel-16-interiors.wall",
+      "anchor": { "x": 0, "y": 0 },
+      "frames": {
+        "default": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 48,
+          "y": 112,
+          "width": 16,
+          "height": 16
+        },
+        "north": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 48,
+          "y": 112,
+          "width": 16,
+          "height": 16
+        },
+        "south": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 48,
+          "y": 192,
+          "width": 16,
+          "height": 16
+        },
+        "east": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 128,
+          "y": 128,
+          "width": 16,
+          "height": 16
+        },
+        "west": {
+          "sheetId": "pixel-16-interiors.tiles",
+          "x": 32,
+          "y": 128,
+          "width": 16,
+          "height": 16
+        }
+      }
+    },
+    {
+      "id": "pixel-16-interiors.door",
+      "anchor": { "x": 0.5, "y": 1 },
+      "frames": {
+        "default": {
+          "sheetId": "pixel-16-interiors.furniture",
+          "x": 464,
+          "y": 152,
+          "width": 32,
+          "height": 40
+        }
+      }
+    },
+    {
+      "id": "pixel-16-interiors.refrigerator",
+      "anchor": { "x": 0.5, "y": 1 },
+      "frames": {
+        "default": {
+          "sheetId": "pixel-16-interiors.furniture",
+          "x": 240,
+          "y": 240,
+          "width": 32,
+          "height": 48
+        }
+      }
+    },
+    {
+      "id": "pixel-16-interiors.toilet",
+      "anchor": { "x": 0.5, "y": 1 },
+      "frames": {
+        "default": {
+          "sheetId": "pixel-16-interiors.furniture",
+          "x": 272,
+          "y": 240,
+          "width": 48,
+          "height": 32
+        }
+      }
+    },
+    {
+      "id": "pixel-16-interiors.carpet",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "frames": {
+        "blue": {
+          "sheetId": "pixel-16-interiors.carpets",
+          "x": 8,
+          "y": 24,
+          "width": 40,
+          "height": 32
+        },
+        "purple": {
+          "sheetId": "pixel-16-interiors.carpets",
+          "x": 56,
+          "y": 24,
+          "width": 40,
+          "height": 32
+        },
+        "orange": {
+          "sheetId": "pixel-16-interiors.carpets",
+          "x": 152,
+          "y": 24,
+          "width": 40,
+          "height": 32
+        },
+        "red": {
+          "sheetId": "pixel-16-interiors.carpets",
+          "x": 56,
+          "y": 72,
+          "width": 40,
+          "height": 40
+        }
+      }
+    }
+  ]
+}

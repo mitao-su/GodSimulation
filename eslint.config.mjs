@@ -6,6 +6,7 @@ export default tseslint.config(
     ignores: [
       ".worktrees/**",
       "**/dist/**",
+      "**/dist-types/**",
       "**/coverage/**",
       "data/**",
       "playwright-report/**",
@@ -29,4 +30,3 @@ export default tseslint.config(
     },
   },
 );
-

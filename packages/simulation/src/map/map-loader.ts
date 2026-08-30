@@ -76,6 +76,13 @@ export function loadWorldDefinition(
   const referencedPlugins = validatePluginReferences(map, registry);
 
   for (const region of map.floorRegions) assertRegionInBounds("Floor region", region, map);
+  assertUnique(
+    "decoration ID",
+    map.decorations.map((decoration) => decoration.id),
+  );
+  for (const decoration of map.decorations) {
+    assertCoordinateInBounds(`Decoration ${decoration.id}`, decoration.position, map);
+  }
   for (const zone of map.zones) assertRegionInBounds(`Zone ${zone.id}`, zone, map);
   assertUnique(
     "zone ID",

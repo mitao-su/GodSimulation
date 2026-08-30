@@ -151,4 +151,21 @@ describe("loadWorldDefinition", () => {
 
     expect(() => loadWorldDefinition(input, registry)).toThrow(/bounds/i);
   });
+
+  it("rejects a render-only decoration outside the map", () => {
+    const input = {
+      ...validMap(),
+      decorations: [
+        {
+          id: "rug-1",
+          position: { x: 4, y: 1 },
+          resourceId: "pixel-16-interiors.carpet",
+          frameId: "blue",
+          renderLayer: 5,
+        },
+      ],
+    };
+
+    expect(() => loadWorldDefinition(input, registry)).toThrow(/decoration.*bounds/i);
+  });
 });

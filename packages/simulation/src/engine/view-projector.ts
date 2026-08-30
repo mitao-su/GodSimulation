@@ -35,7 +35,7 @@ function mapView(world: WorldState): WorldView["map"] {
     }
     return { id: zone.id, name: zone.name, cells };
   });
-  const tiles = world.map.floorRegions.flatMap((region) => {
+  const floorTiles = world.map.floorRegions.flatMap((region) => {
     const result = [];
     for (let y = region.y; y < region.y + region.height; y += 1) {
       for (let x = region.x; x < region.x + region.width; x += 1) {
@@ -49,12 +49,18 @@ function mapView(world: WorldState): WorldView["map"] {
     }
     return result;
   });
+  const decorationTiles = world.map.decorations.map((decoration) => ({
+    position: decoration.position,
+    resourceId: decoration.resourceId,
+    frameId: decoration.frameId,
+    renderLayer: decoration.renderLayer,
+  }));
   return {
     width: world.map.width,
     height: world.map.height,
     tileSize: world.map.tileSize,
     zones,
-    tiles,
+    tiles: [...floorTiles, ...decorationTiles],
   };
 }
 

@@ -30,6 +30,16 @@ export const FloorRegionSchema = z
   })
   .strict();
 
+export const DecorationPlacementSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    position: CoordinateSchema,
+    resourceId: ResourceIdSchema,
+    frameId: z.string().min(1).max(128),
+    renderLayer: z.number().int().min(1).max(19),
+  })
+  .strict();
+
 export const ZoneDefinitionSchema = z
   .object({
     id: z.string().min(1).max(128),
@@ -71,6 +81,7 @@ export const MapDefinitionSchema = z
     height: z.number().int().positive().max(256),
     plugins: z.array(PluginReferenceSchema),
     floorRegions: z.array(FloorRegionSchema),
+    decorations: z.array(DecorationPlacementSchema).default([]),
     zones: z.array(ZoneDefinitionSchema).min(1),
     objects: z.array(ObjectPlacementSchema),
     spawns: z.array(AgentSpawnSchema).min(1),
@@ -79,6 +90,7 @@ export const MapDefinitionSchema = z
 
 export type MapDefinition = z.infer<typeof MapDefinitionSchema>;
 export type FloorRegion = z.infer<typeof FloorRegionSchema>;
+export type DecorationPlacement = z.infer<typeof DecorationPlacementSchema>;
 export type ZoneDefinition = z.infer<typeof ZoneDefinitionSchema>;
 export type ObjectPlacement = z.infer<typeof ObjectPlacementSchema>;
 export type AgentSpawn = z.infer<typeof AgentSpawnSchema>;
