@@ -54,6 +54,13 @@ const DecisionResultMessageSchema = z
   })
   .strict();
 
+const DecisionFailureMessageSchema = z
+  .object({
+    type: z.literal("decision_failure"),
+    failure: TechnicalFailureSchema,
+  })
+  .strict();
+
 const RequestSnapshotMessageSchema = z
   .object({
     type: z.literal("request_snapshot"),
@@ -67,6 +74,7 @@ export const HostToWorkerMessageSchema = z.discriminatedUnion("type", [
   InitializeMessageSchema,
   WorldCommandMessageSchema,
   DecisionResultMessageSchema,
+  DecisionFailureMessageSchema,
   RequestSnapshotMessageSchema,
   ShutdownMessageSchema,
 ]);

@@ -10,6 +10,7 @@ import {
   type Goal,
   type GoalOptionId,
   type ModelDecisionResult,
+  type TechnicalFailure,
   type WorldCommand,
   type WorldSnapshot,
   type WorldView,
@@ -18,7 +19,9 @@ import type { GamePlugin } from "@god-sim/plugin-sdk";
 
 import {
   acceptDecisionResult,
+  recordDecisionFailure,
   requestDecisions,
+  retryDecisionRequest,
   type DecisionRequestSpec,
 } from "../decision/decision-gate";
 import { buildGoalOptions } from "../decision/goal-option-provider";
@@ -58,6 +61,7 @@ export interface BufferResult {
 export interface SimulationEngine {
   dispatch(command: WorldCommand): BufferResult;
   acceptDecision(decision: AdoptedDecision): BufferResult;
+  reportDecisionFailure(failure: TechnicalFailure): BufferResult;
   tick(): WorldView;
   getView(): WorldView;
   getPendingDecisionInputs(): readonly DecisionPromptInput[];
@@ -155,6 +159,16 @@ class DeterministicSimulationEngine implements SimulationEngine {
     };
     this.#decisionQueue.set(identity.data.requestId, decision);
     return { accepted: true, reason: "Decision buffered" };
+  }
+
+  reportDecisionFailure(failure: TechnicalFailure): BufferResult {
+    try {
+      this.#world = recordDecisionFailure(this.#world, failure);
+      this.#revision += 1;
+      return { accepted: true, reason: "Decision failure recorded" };
+    } catch (error) {
+      return { accepted: false, reason: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   tick(): WorldView {
@@ -280,8 +294,30 @@ class DeterministicSimulationEngine implements SimulationEngine {
           }
           break;
         }
-        case "retry_decision":
-          throw new Error("Decision retry is handled after a recorded technical failure");
+        case "retry_decision": {
+          this.#world = retryDecisionRequest(this.#world, command.requestId);
+          const request = [...this.#world.decisionCycle!.requests.values()].find(
+            (candidate) => candidate.identity.retryOfRequestId === command.requestId,
+          );
+          if (!request) throw new Error(`Retry did not create a request for ${command.requestId}`);
+          const written = appendDomainEvent(
+            this.#world,
+            {
+              type: "decision_requested",
+              agentId: request.identity.agentId,
+              requestId: request.identity.requestId,
+              decisionCycleId: request.identity.decisionCycleId,
+              reasonCode: request.promptInput.decisionReason.code,
+            },
+            {
+              causationId: command.commandId,
+              correlationId: request.identity.decisionCycleId,
+            },
+          );
+          this.#world = written.world;
+          this.#recordEvents([written.event]);
+          break;
+        }
         case "stop_session":
           this.#stopped = true;
           break;

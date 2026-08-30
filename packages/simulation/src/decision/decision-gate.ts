@@ -6,12 +6,15 @@ import {
   GoalOptionSchema,
   ModelDecisionResultSchema,
   RequestIdSchema,
+  TechnicalFailureSchema,
   type AgentId,
   type DecisionIdentity,
   type DecisionPromptInput,
   type DecisionReason,
   type GoalOption,
   type ModelDecisionResult,
+  type RequestId,
+  type TechnicalFailure,
 } from "@god-sim/protocol";
 
 import type { AgentState, DecisionRequestState, WorldState } from "../world/world-state";
@@ -229,5 +232,65 @@ export function acceptDecisionResult(
       version: world.version + 1,
       decisionCycle: { ...cycle, requests },
     },
+  };
+}
+
+export function recordDecisionFailure(
+  world: WorldState,
+  failureValue: TechnicalFailure,
+): WorldState {
+  const failure = TechnicalFailureSchema.parse(failureValue);
+  const requestId = failure.requestId;
+  if (!requestId) throw new Error("A decision failure requires a request ID");
+  const request = [...(world.decisionCycle?.requests.values() ?? [])].find(
+    (candidate) => candidate.identity.requestId === requestId,
+  );
+  if (!request) throw new Error(`Decision failure targets inactive request ${requestId}`);
+  if (request.acceptedProposal !== null) {
+    throw new Error(`Decision failure targets completed request ${requestId}`);
+  }
+  return {
+    ...world,
+    version: world.version + 1,
+    mode: "TECHNICALLY_BLOCKED",
+    technicalFailure: failure,
+  };
+}
+
+export function retryDecisionRequest(world: WorldState, requestId: RequestId): WorldState {
+  const cycle = world.decisionCycle;
+  const failure = world.technicalFailure;
+  if (!cycle || !failure || failure.requestId !== requestId) {
+    throw new Error(`Request ${requestId} has no active technical failure`);
+  }
+  if (!failure.retryable) throw new Error(`Failure for ${requestId} is not retryable`);
+  const entry = [...cycle.requests.entries()].find(
+    ([, request]) => request.identity.requestId === requestId,
+  );
+  if (!entry) throw new Error(`Decision request ${requestId} is no longer active`);
+  const [agentId, request] = entry;
+  const nextVersion = world.version + 1;
+  const nextRequestId = RequestIdSchema.parse(`decision-request:${nextVersion}:retry`);
+  const identity: DecisionIdentity = {
+    ...request.identity,
+    requestId: nextRequestId,
+    worldVersion: world.version,
+    retryOfRequestId: requestId,
+  };
+  const promptInput = DecisionPromptInputSchema.parse({
+    ...request.promptInput,
+    ...identity,
+  });
+  const requests = new Map(cycle.requests).set(agentId, {
+    identity,
+    promptInput,
+    acceptedProposal: null,
+  });
+  return {
+    ...world,
+    version: nextVersion,
+    mode: "THINKING",
+    decisionCycle: { ...cycle, requests },
+    technicalFailure: null,
   };
 }

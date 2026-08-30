@@ -37,4 +37,12 @@ describe("FixedDecisionProvider", () => {
       /not offered/,
     );
   });
+
+  it("selects the first offered option with the configured goal kind", async () => {
+    const provider = new FixedDecisionProvider({ defaultGoalKind: "wait" });
+
+    await expect(provider.decide(request, new AbortController().signal)).resolves.toMatchObject({
+      goalOptionId: "wait-10",
+    });
+  });
 });

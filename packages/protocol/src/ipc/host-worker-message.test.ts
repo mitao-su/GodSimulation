@@ -36,5 +36,20 @@ describe("host-worker messages", () => {
 
     expect(message.type).toBe("technical_failure");
   });
-});
 
+  it("accepts a host-reported decision failure for the authoritative worker", () => {
+    const message = HostToWorkerMessageSchema.parse({
+      type: "decision_failure",
+      failure: {
+        id: "failure-1",
+        category: "model",
+        message: "Provider unavailable",
+        requestId: "request-1",
+        retryable: true,
+        occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+      },
+    });
+
+    expect(message.type).toBe("decision_failure");
+  });
+});

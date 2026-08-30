@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { ModelDecisionResult } from "@god-sim/protocol";
 
-import { acceptDecisionResult, requestDecisions } from "./decision-gate";
+import {
+  acceptDecisionResult,
+  recordDecisionFailure,
+  requestDecisions,
+  retryDecisionRequest,
+} from "./decision-gate";
 import { simulationTestWorld } from "../testing/simulation-test-fixtures";
 
 const aliceWaitRequest = {
@@ -62,5 +67,52 @@ describe("decision gate", () => {
     expect(rejected.accepted).toBe(false);
     expect(rejected.reason).toMatch(/not offered/);
     expect(rejected.world).toBe(thinking);
+  });
+
+  it("retries only the failed request and keeps accepted peer results", () => {
+    const initial = requestDecisions(simulationTestWorld(), [
+      aliceWaitRequest,
+      {
+        ...aliceWaitRequest,
+        agentId: "bob" as never,
+        goalOptions: [
+          {
+            id: "bob-wait" as never,
+            label: "Wait",
+            goal: { kind: "wait" as const, durationTicks: 10 },
+          },
+        ],
+      },
+    ]).world;
+    const aliceRequest = initial.decisionCycle!.requests.get("alice" as never)!;
+    const aliceAccepted = acceptDecisionResult(initial, {
+      ...aliceRequest.identity,
+      proposal: {
+        schemaVersion: 1,
+        goalOptionId: "alice-wait" as never,
+        reason: "Wait",
+      },
+    }).world;
+    const bobRequest = aliceAccepted.decisionCycle!.requests.get("bob" as never)!;
+    const blocked = recordDecisionFailure(aliceAccepted, {
+      id: "failure-1",
+      category: "model",
+      message: "Provider unavailable",
+      requestId: bobRequest.identity.requestId,
+      retryable: true,
+      occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+    });
+
+    expect(blocked.mode).toBe("TECHNICALLY_BLOCKED");
+    const retried = retryDecisionRequest(blocked, bobRequest.identity.requestId);
+    const retriedAlice = retried.decisionCycle!.requests.get("alice" as never)!;
+    const retriedBob = retried.decisionCycle!.requests.get("bob" as never)!;
+
+    expect(retried.mode).toBe("THINKING");
+    expect(retried.technicalFailure).toBeNull();
+    expect(retriedAlice.acceptedProposal?.goalOptionId).toBe("alice-wait");
+    expect(retriedBob.acceptedProposal).toBeNull();
+    expect(retriedBob.identity.requestId).not.toBe(bobRequest.identity.requestId);
+    expect(retriedBob.identity.retryOfRequestId).toBe(bobRequest.identity.requestId);
   });
 });

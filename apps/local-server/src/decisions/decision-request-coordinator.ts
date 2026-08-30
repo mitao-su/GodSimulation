@@ -1,0 +1,115 @@
+import {
+  GoalProposalSchema,
+  ModelDecisionResultSchema,
+  TechnicalFailureSchema,
+  type ModelDecisionRequest,
+  type ModelDecisionResult,
+  type TechnicalFailure,
+} from "@god-sim/protocol";
+import type { DecisionProvider } from "@god-sim/model-gateway";
+
+import type { PersistenceWriter } from "../persistence/persistence-writer";
+
+export type CoordinatedDecision =
+  | { readonly type: "result"; readonly result: ModelDecisionResult }
+  | { readonly type: "failure"; readonly failure: TechnicalFailure };
+
+export interface DecisionRequestCoordinatorOptions {
+  readonly provider: DecisionProvider;
+  readonly persistence: PersistenceWriter;
+  readonly modelId: string;
+  readonly now: () => string;
+  readonly monotonicNow?: () => number;
+}
+
+export class DecisionRequestCoordinator {
+  readonly #provider: DecisionProvider;
+  readonly #persistence: PersistenceWriter;
+  readonly #modelId: string;
+  readonly #now: () => string;
+  readonly #monotonicNow: () => number;
+  readonly #controllers = new Map<string, AbortController>();
+
+  constructor(options: DecisionRequestCoordinatorOptions) {
+    this.#provider = options.provider;
+    this.#persistence = options.persistence;
+    this.#modelId = options.modelId;
+    this.#now = options.now;
+    this.#monotonicNow = options.monotonicNow ?? (() => performance.now());
+  }
+
+  async decide(request: ModelDecisionRequest): Promise<CoordinatedDecision> {
+    if (this.#controllers.has(request.requestId)) {
+      throw new Error(`Decision request ${request.requestId} is already in flight`);
+    }
+    const controller = new AbortController();
+    this.#controllers.set(request.requestId, controller);
+    const startedAt = this.#monotonicNow();
+    try {
+      const proposal = GoalProposalSchema.parse(
+        await this.#provider.decide(request, controller.signal),
+      );
+      if (!request.goalOptions.some((option) => option.id === proposal.goalOptionId)) {
+        throw new Error(`Goal option ${proposal.goalOptionId} was not offered`);
+      }
+      const result = ModelDecisionResultSchema.parse({
+        requestId: request.requestId,
+        agentId: request.agentId,
+        worldId: request.worldId,
+        worldVersion: request.worldVersion,
+        decisionCycleId: request.decisionCycleId,
+        schemaVersion: request.schemaVersion,
+        pluginLockHash: request.pluginLockHash,
+        ...(request.retryOfRequestId === undefined
+          ? {}
+          : { retryOfRequestId: request.retryOfRequestId }),
+        proposal,
+      });
+      await this.#persistence.saveModelCall({
+        requestId: request.requestId,
+        worldId: request.worldId,
+        worldVersion: request.worldVersion,
+        agentId: request.agentId,
+        modelId: this.#modelId,
+        status: "accepted",
+        goalOptionId: proposal.goalOptionId,
+        responseReason: proposal.reason,
+        latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
+        retryOfRequestId: request.retryOfRequestId ?? null,
+        recordedAtRealTime: this.#now(),
+      });
+      return { type: "result", result };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failure = TechnicalFailureSchema.parse({
+        id: `failure:model:${request.requestId}`,
+        category: "model",
+        message: message.slice(0, 2_000),
+        requestId: request.requestId,
+        retryable: true,
+        occurredAtRealTime: this.#now(),
+      });
+      await this.#persistence.saveModelCall({
+        requestId: request.requestId,
+        worldId: request.worldId,
+        worldVersion: request.worldVersion,
+        agentId: request.agentId,
+        modelId: this.#modelId,
+        status: "failed",
+        goalOptionId: null,
+        responseReason: failure.message,
+        latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
+        retryOfRequestId: request.retryOfRequestId ?? null,
+        recordedAtRealTime: failure.occurredAtRealTime,
+      });
+      await this.#persistence.recordFailure(request.worldId, failure);
+      return { type: "failure", failure };
+    } finally {
+      this.#controllers.delete(request.requestId);
+    }
+  }
+
+  cancelAll(reason = "Session stopped"): void {
+    for (const controller of this.#controllers.values()) controller.abort(new Error(reason));
+  }
+}
