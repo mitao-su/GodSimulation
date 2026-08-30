@@ -1,11 +1,12 @@
 import type { AgentDefinition, GamePlugin, ObjectDefinition } from "@god-sim/plugin-sdk";
+import type { JsonValue } from "@god-sim/protocol";
 
-interface RegisteredObjectDefinition {
+export interface RegisteredObjectDefinition {
   readonly ownerPluginId: string;
-  readonly definition: ObjectDefinition<unknown>;
+  readonly definition: ObjectDefinition<JsonValue>;
 }
 
-interface RegisteredAgentDefinition {
+export interface RegisteredAgentDefinition {
   readonly ownerPluginId: string;
   readonly definition: AgentDefinition;
 }
@@ -33,7 +34,10 @@ export function createPluginRegistry(plugins: readonly GamePlugin[]): PluginRegi
       if (objects.has(definition.id)) {
         throw new Error(`Duplicate object definition ID: ${definition.id}`);
       }
-      objects.set(definition.id, { ownerPluginId: plugin.manifest.id, definition });
+      objects.set(definition.id, {
+        ownerPluginId: plugin.manifest.id,
+        definition: definition as unknown as ObjectDefinition<JsonValue>,
+      });
     }
 
     for (const definition of plugin.agents) {

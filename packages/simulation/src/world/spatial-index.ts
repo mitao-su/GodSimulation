@@ -40,7 +40,7 @@ export class SpatialIndex {
     return this.objectsAt(position).filter((object) => {
       const registered = this.#registry.getObject(object.definitionId);
       if (!registered?.definition.movement) return false;
-      const state = registered.definition.stateSchema.parse(object.state) as Readonly<unknown>;
+      const state = registered.definition.stateSchema.parse(object.state);
       return registered.definition.movement.blocksMovement(state, {
         worldTick: this.#world.tick,
         ...(queryingAgentId === undefined ? {} : { queryingAgentId }),
@@ -52,7 +52,7 @@ export class SpatialIndex {
     return this.objectsAt(position).filter((object) => {
       const registered = this.#registry.getObject(object.definitionId);
       if (!registered?.definition.vision) return false;
-      const state = registered.definition.stateSchema.parse(object.state) as Readonly<unknown>;
+      const state = registered.definition.stateSchema.parse(object.state);
       return registered.definition.vision.blocksVision(state, {
         worldTick: this.#world.tick,
         ...(queryingAgentId === undefined ? {} : { queryingAgentId }),
@@ -75,7 +75,7 @@ export class SpatialIndex {
     if (!object) throw new Error(`Unknown object instance: ${entityId}`);
     const registered = this.#registry.getObject(object.definitionId);
     if (!registered?.definition.occupancy) return null;
-    const state = registered.definition.stateSchema.parse(object.state) as Readonly<unknown>;
+    const state = registered.definition.stateSchema.parse(object.state);
     return registered.definition.occupancy.occupant(state);
   }
 }

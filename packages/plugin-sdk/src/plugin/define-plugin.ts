@@ -1,6 +1,7 @@
 import type { AgentDefinition } from "../agent/agent-definition";
 import type { ObjectDefinition } from "../object/object-definition";
 import { PluginManifestSchema, type PluginManifest } from "./plugin-manifest";
+import { JsonValueSchema } from "@god-sim/protocol";
 
 export interface GamePlugin {
   readonly manifest: PluginManifest;
@@ -51,7 +52,7 @@ export function definePlugin(
   assertManifestMatches("agent", manifest.agentDefinitionIds, agentIds);
 
   for (const definition of registrations.objects) {
-    definition.stateSchema.parse(definition.initialState());
+    JsonValueSchema.parse(definition.stateSchema.parse(definition.initialState()));
   }
 
   return Object.freeze({
