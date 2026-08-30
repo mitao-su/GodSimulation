@@ -6,7 +6,7 @@
   "exports": "./src/index.ts",
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean --external better-sqlite3",
-    "test": "vitest run packages/sqlite-store/src",
+    "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -19,4 +19,3 @@
     "@types/better-sqlite3": "9.6.0"
   }
 }
-

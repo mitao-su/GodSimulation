@@ -6,11 +6,10 @@
   "exports": "./src/index.ts",
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
-    "test": "vitest run packages/protocol/src",
+    "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "zod": "4.5.4"
   }
 }
-

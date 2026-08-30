@@ -7,7 +7,7 @@
     "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
     "dev": "tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
-    "test": "vitest run apps/local-server/src",
+    "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -21,4 +21,3 @@
     "pino": "10.3.1"
   }
 }
-

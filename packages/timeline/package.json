@@ -6,11 +6,10 @@
   "exports": "./src/index.ts",
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
-    "test": "vitest run packages/timeline/src --passWithNoTests",
+    "test": "vitest run src --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@god-sim/protocol": "workspace:*"
   }
 }
-

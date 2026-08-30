@@ -6,7 +6,7 @@
   "exports": "./src/index.ts",
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
-    "test": "vitest run plugins/home-objects",
+    "test": "vitest run .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -15,4 +15,3 @@
     "zod": "4.5.4"
   }
 }
-

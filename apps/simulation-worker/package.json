@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
     "dev": "tsx watch src/index.ts",
-    "test": "vitest run apps/simulation-worker/src",
+    "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -16,4 +16,3 @@
     "@god-sim/simulation": "workspace:*"
   }
 }
-
