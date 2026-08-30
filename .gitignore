@@ -1,0 +1,17 @@
+.worktrees/
+.superpowers/
+workspace/
+free_model.local
+
+node_modules/
+dist/
+coverage/
+.vite/
+
+data/
+playwright-report/
+test-results/
+
+*.local
+*.log
+
