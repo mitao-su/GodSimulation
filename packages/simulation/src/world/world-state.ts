@@ -11,6 +11,8 @@ import type {
 } from "@god-sim/protocol";
 
 import type { MapDefinition } from "../map/map-definition";
+import type { ActionPlan, ActiveGoal } from "../execution/action";
+import type { BodySlotReservations } from "../execution/body-slots";
 
 export interface ObjectInstance {
   readonly id: EntityId;
@@ -33,6 +35,9 @@ export interface AgentState {
   readonly facing: Facing;
   readonly bladder: number;
   readonly bladderSensation: BladderSensation;
+  readonly currentGoal: ActiveGoal | null;
+  readonly actionPlan: ActionPlan | null;
+  readonly bodySlots: BodySlotReservations;
 }
 
 export interface DecisionCycleState {

@@ -9,6 +9,7 @@ import {
   type ObjectInstance,
   type WorldState,
 } from "../world/world-state";
+import { createEmptyBodySlots } from "../execution/body-slots";
 
 const DEFAULT_PLUGIN_LOCK_HASH = "0".repeat(64);
 
@@ -147,6 +148,9 @@ export function loadWorldDefinition(
       facing: spawn.facing,
       bladder: spawn.needs.bladder,
       bladderSensation: bladderSensation(spawn.needs.bladder),
+      currentGoal: null,
+      actionPlan: null,
+      bodySlots: createEmptyBodySlots(),
     });
   }
 
