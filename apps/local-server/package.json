@@ -1,0 +1,24 @@
+{
+  "name": "@god-sim/local-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
+    "dev": "tsx watch src/index.ts",
+    "start": "node --enable-source-maps dist/index.js",
+    "test": "vitest run apps/local-server/src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "10.1.3",
+    "@fastify/websocket": "11.3.0",
+    "@god-sim/model-gateway": "workspace:*",
+    "@god-sim/protocol": "workspace:*",
+    "@god-sim/sqlite-store": "workspace:*",
+    "@god-sim/timeline": "workspace:*",
+    "fastify": "5.12.1",
+    "pino": "10.3.1"
+  }
+}
+

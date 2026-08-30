@@ -6,7 +6,7 @@
 
 **Architecture:** A pnpm TypeScript monorepo separates the React/PixiJS browser, Fastify local host, and authoritative simulation worker. Packages communicate through Zod-validated DTOs; the pure simulation owns all mutable world state, while plugins only answer queries or propose effects and the model only proposes goals.
 
-**Tech Stack:** Node.js 24, pnpm 10, TypeScript 7, React 19, Vite 8, PixiJS 8, Fastify 5, Zod 4, rot-js 2, better-sqlite3 13, Kysely 0.29, Vitest 4, Playwright 1.62.
+**Tech Stack:** Node.js 24, pnpm 10, TypeScript 6, React 19, Vite 8, PixiJS 8, Fastify 5, Zod 4, rot-js 2, better-sqlite3 13, Kysely 0.29, Vitest 4, Playwright 1.62.
 
 **Spec:** `docs/superpowers/specs/2026-08-31-basic-simulation-loop-design.md`
 

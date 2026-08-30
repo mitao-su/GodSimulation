@@ -1,0 +1,16 @@
+{
+  "name": "@god-sim/timeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run packages/timeline/src --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@god-sim/protocol": "workspace:*"
+  }
+}
+

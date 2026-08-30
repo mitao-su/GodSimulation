@@ -1,0 +1,35 @@
+{
+  "name": "god-simulation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "build:plugins": "pnpm --filter './plugins/**' build",
+    "dev": "concurrently -k -n server,web \"pnpm --filter @god-sim/local-server dev\" \"pnpm --filter @god-sim/web dev\"",
+    "lint": "eslint . && depcruise apps packages plugins --config .dependency-cruiser.cjs --output-type err",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.62.1",
+    "@types/node": "24.13.3",
+    "concurrently": "10.0.5",
+    "dependency-cruiser": "18.2.0",
+    "eslint": "10.9.1",
+    "tsx": "4.23.13",
+    "tsup": "8.5.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.68.0",
+    "vitest": "4.1.11"
+  }
+}

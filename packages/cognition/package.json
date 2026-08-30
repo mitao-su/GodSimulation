@@ -1,0 +1,17 @@
+{
+  "name": "@god-sim/cognition",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run packages/cognition/src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@god-sim/plugin-sdk": "workspace:*",
+    "@god-sim/protocol": "workspace:*"
+  }
+}
+

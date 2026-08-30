@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "src", "tsBuildInfoFile": "dist/simulation.tsbuildinfo" },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../protocol" }, { "path": "../plugin-sdk" }]
+}
+

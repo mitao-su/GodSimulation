@@ -1,0 +1,19 @@
+{
+  "name": "@god-sim/simulation-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run apps/simulation-worker/src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@god-sim/cognition": "workspace:*",
+    "@god-sim/plugin-sdk": "workspace:*",
+    "@god-sim/protocol": "workspace:*",
+    "@god-sim/simulation": "workspace:*"
+  }
+}
+
