@@ -1,4 +1,4 @@
-import type { AgentId, Coordinate, EntityId } from "@god-sim/protocol";
+import type { AgentId, Coordinate, EntityId, Facing } from "@god-sim/protocol";
 
 import type { PluginRegistry } from "./plugin-registry";
 import type { ObjectInstance, WorldState } from "./world-state";
@@ -9,6 +9,22 @@ function key(position: Coordinate): string {
 
 function translate(origin: Coordinate, offset: { readonly x: number; readonly y: number }): Coordinate {
   return { x: origin.x + offset.x, y: origin.y + offset.y };
+}
+
+function rotateFromSouth(
+  offset: { readonly x: number; readonly y: number },
+  facing: Facing,
+): Coordinate {
+  switch (facing) {
+    case "south":
+      return offset;
+    case "east":
+      return { x: offset.y, y: -offset.x };
+    case "north":
+      return { x: -offset.x, y: -offset.y };
+    case "west":
+      return { x: -offset.y, y: offset.x };
+  }
 }
 
 export class SpatialIndex {
@@ -66,7 +82,7 @@ export class SpatialIndex {
     const registered = this.#registry.getObject(object.definitionId);
     if (!registered) throw new Error(`Unknown object definition: ${object.definitionId}`);
     return registered.definition.placement.interactionOffsets.map((offset) =>
-      translate(object.position, offset),
+      translate(object.position, rotateFromSouth(offset, object.facing)),
     );
   }
 
