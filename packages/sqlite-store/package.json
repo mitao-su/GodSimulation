@@ -5,9 +5,9 @@
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean --external better-sqlite3",
+    "build": "tsup src/index.ts --format esm --clean --external better-sqlite3",
     "test": "vitest run src",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -b tsconfig.json --pretty false"
   },
   "dependencies": {
     "@god-sim/protocol": "workspace:*",

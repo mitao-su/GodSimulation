@@ -5,9 +5,9 @@
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup --config tsup.config.ts",
     "test": "vitest run . --passWithNoTests",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -b tsconfig.json --pretty false"
   },
   "dependencies": {
     "@god-sim/plugin-sdk": "workspace:*",

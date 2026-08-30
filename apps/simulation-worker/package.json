@@ -7,7 +7,7 @@
     "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run src",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -b tsconfig.json --pretty false"
   },
   "dependencies": {
     "@god-sim/cognition": "workspace:*",

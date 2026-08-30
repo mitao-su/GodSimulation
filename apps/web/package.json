@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
     "test": "vitest run src",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -b tsconfig.json --pretty false"
   },
   "dependencies": {
     "@god-sim/protocol": "workspace:*",

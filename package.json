@@ -12,12 +12,12 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present build",
-    "build:plugins": "pnpm --filter './plugins/**' build",
+    "build:plugins": "pnpm --filter ./plugins/* build",
     "dev": "concurrently -k -n server,web \"pnpm --filter @god-sim/local-server dev\" \"pnpm --filter @god-sim/web dev\"",
     "lint": "eslint . && depcruise apps packages plugins --config .dependency-cruiser.cjs --output-type err",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

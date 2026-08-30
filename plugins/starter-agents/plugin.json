@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "god-sim.starter-agents",
+  "version": "0.1.0",
+  "stateVersion": 1,
+  "engineApiVersion": 1,
+  "entry": "./dist/index.js",
+  "objectDefinitionIds": [],
+  "agentDefinitionIds": ["starter.alice", "starter.bob"]
+}
