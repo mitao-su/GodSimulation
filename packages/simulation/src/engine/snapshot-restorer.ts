@@ -17,6 +17,7 @@ import {
   WorldSnapshotSchema,
   type AgentId,
   type EntityId,
+  type EventId,
   type WorldSnapshot,
 } from "@god-sim/protocol";
 import { BodySlotSchema } from "@god-sim/plugin-sdk";
@@ -30,8 +31,10 @@ import {
   type AgentState,
   type DecisionCycleState,
   type ObjectInstance,
+  type WorldHistory,
   type WorldState,
 } from "../world/world-state";
+import { assertSnapshotCausality } from "./snapshot-causality";
 
 const ObservationKindSchema = z.enum([
   "vision",
@@ -69,6 +72,22 @@ const ObjectInteractionActionSchema = z
   })
   .strict();
 
+const LegacyObjectActionSchema = z
+  .object({
+    ...ActionBaseShape,
+    kind: z.enum([
+      "open_object",
+      "close_object",
+      "lock_object",
+      "unlock_object",
+      "use_object",
+    ]),
+    targetEntityId: EntityIdSchema,
+    interactionId: z.string().min(1),
+    started: z.boolean(),
+  })
+  .strict();
+
 const WaitActionSchema = z
   .object({ ...ActionBaseShape, kind: z.literal("wait") })
   .strict();
@@ -88,6 +107,13 @@ const RunningActionSchema = z.discriminatedUnion("kind", [
   ObserveActionSchema,
 ]);
 
+const LegacyRunningActionSchema = z.discriminatedUnion("kind", [
+  MoveActionSchema,
+  LegacyObjectActionSchema,
+  WaitActionSchema,
+  ObserveActionSchema,
+]);
+
 const ActiveGoalSchema = z
   .object({
     id: z.string().min(1),
@@ -101,6 +127,18 @@ const ActionPlanSchema = z
     goalId: z.string().min(1),
     goal: GoalSchema,
     actions: z.array(RunningActionSchema).min(1),
+    currentActionIndex: z.number().int().nonnegative(),
+  })
+  .strict()
+  .refine((plan) => plan.currentActionIndex < plan.actions.length, {
+    message: "Snapshot action index is outside its action plan",
+  });
+
+const LegacyActionPlanSchema = z
+  .object({
+    goalId: z.string().min(1),
+    goal: GoalSchema,
+    actions: z.array(LegacyRunningActionSchema).min(1),
     currentActionIndex: z.number().int().nonnegative(),
   })
   .strict()
@@ -170,6 +208,16 @@ const SerializedKnowledgeSchema = z
   })
   .strict();
 
+const LegacySerializedKnowledgeSchema = z
+  .object({
+    zoneId: z.string().min(1),
+    objects: z.array(KnownObjectSchema),
+    agents: z.array(KnownAgentSchema),
+    visibleEntityIds: z.array(EntityIdSchema),
+    knownLockedDoorIds: z.array(EntityIdSchema),
+  })
+  .strict();
+
 const SerializedAgentSchema = z
   .object({
     id: AgentIdSchema,
@@ -185,6 +233,25 @@ const SerializedAgentSchema = z
     actionPlan: ActionPlanSchema.nullable(),
     bodySlots: BodySlotsSchema,
     knowledge: SerializedKnowledgeSchema,
+    memories: z.array(ImmediateMemorySchema),
+  })
+  .strict();
+
+const LegacySerializedAgentSchema = z
+  .object({
+    id: AgentIdSchema,
+    definitionId: z.string().min(1),
+    displayName: z.string().min(1),
+    resourceId: z.string().min(1),
+    animationSetId: z.string().min(1),
+    position: CoordinateSchema,
+    facing: FacingSchema,
+    bladder: z.number().int().min(0).max(100),
+    bladderSensation: z.enum(["comfortable", "noticeable", "urgent"]),
+    currentGoal: ActiveGoalSchema.nullable(),
+    actionPlan: LegacyActionPlanSchema.nullable(),
+    bodySlots: BodySlotsSchema,
+    knowledge: LegacySerializedKnowledgeSchema,
     memories: z.array(ImmediateMemorySchema),
   })
   .strict();
@@ -219,21 +286,32 @@ const SerializedDecisionCycleSchema = z
   })
   .strict();
 
+const SerializedWorldStateBaseShape = {
+  name: z.string().min(1),
+  mode: WorldModeSchema,
+  suspendedMode: z
+    .enum(["THINKING", "READY_FOR_RELEASE", "RUNNING"])
+    .nullable()
+    .optional(),
+  reviewRequired: z.boolean(),
+  randomState: z.number().int().min(0).max(0xffff_ffff),
+  map: MapDefinitionSchema,
+  objects: z.array(SerializedObjectSchema),
+  decisionCycle: SerializedDecisionCycleSchema.nullable(),
+  technicalFailure: TechnicalFailureSchema.nullable(),
+};
+
 const SerializedWorldStateSchema = z
   .object({
-    name: z.string().min(1),
-    mode: WorldModeSchema,
-    suspendedMode: z
-      .enum(["THINKING", "READY_FOR_RELEASE", "RUNNING"])
-      .nullable()
-      .optional(),
-    reviewRequired: z.boolean(),
-    randomState: z.number().int().min(0).max(0xffff_ffff),
-    map: MapDefinitionSchema,
+    ...SerializedWorldStateBaseShape,
     agents: z.array(SerializedAgentSchema).min(1),
-    objects: z.array(SerializedObjectSchema),
-    decisionCycle: SerializedDecisionCycleSchema.nullable(),
-    technicalFailure: TechnicalFailureSchema.nullable(),
+  })
+  .strict();
+
+const LegacySerializedWorldStateSchema = z
+  .object({
+    ...SerializedWorldStateBaseShape,
+    agents: z.array(LegacySerializedAgentSchema).min(1),
   })
   .strict();
 
@@ -249,6 +327,87 @@ function uniqueMap<Key, Value>(
     result.set(key, value);
   }
   return result;
+}
+
+function legacySourceEventId(agentId: AgentId, entityId: EntityId): EventId {
+  return EventIdSchema.parse(`event:legacy-locked-door:${agentId}:${entityId}`);
+}
+
+function normalizeLegacyState(
+  value: z.infer<typeof LegacySerializedWorldStateSchema>,
+): z.infer<typeof SerializedWorldStateSchema> {
+  const objects = uniqueMap(value.objects, (object) => object.id, "object ID");
+  return SerializedWorldStateSchema.parse({
+    ...value,
+    agents: value.agents.map((agent) => ({
+      ...agent,
+      actionPlan:
+        agent.actionPlan === null
+          ? null
+          : {
+              ...agent.actionPlan,
+              actions: agent.actionPlan.actions.map((action) => {
+                if (
+                  action.kind === "move" ||
+                  action.kind === "wait" ||
+                  action.kind === "observe"
+                ) {
+                  return action;
+                }
+                const { kind, ...rest } = action;
+                return {
+                  ...rest,
+                  kind: "interact_object",
+                  purpose: kind === "open_object" ? "automatic_traversal" : "goal",
+                };
+              }),
+            },
+      knowledge: {
+        zoneId: agent.knowledge.zoneId,
+        objects: agent.knowledge.objects,
+        agents: agent.knowledge.agents,
+        visibleEntityIds: agent.knowledge.visibleEntityIds,
+        knownTraversalBlockers: agent.knowledge.knownLockedDoorIds.map((entityId) => {
+          const object = objects.get(entityId);
+          if (!object) {
+            throw new Error(
+              `Snapshot agent ${agent.id} knows unknown legacy locked door ${entityId}`,
+            );
+          }
+          return {
+            entityId,
+            observedObjectVersion: object.version,
+            reasonCode: "legacy_locked_door",
+            sourceEventId: legacySourceEventId(agent.id, entityId),
+          };
+        }),
+      },
+    })),
+  });
+}
+
+function parseSerializedState(snapshot: WorldSnapshot): {
+  readonly state: z.infer<typeof SerializedWorldStateSchema>;
+  readonly history: WorldHistory;
+} {
+  if (snapshot.schemaVersion === 2) {
+    assertSnapshotCausality(snapshot);
+    return {
+      state: SerializedWorldStateSchema.parse(snapshot.state),
+      history: snapshot.history,
+    };
+  }
+
+  const currentState = SerializedWorldStateSchema.safeParse(snapshot.state);
+  return {
+    state: currentState.success
+      ? currentState.data
+      : normalizeLegacyState(LegacySerializedWorldStateSchema.parse(snapshot.state)),
+    history: {
+      mode: "legacy",
+      causalFromSequence: snapshot.lastEventSequence + 1,
+    },
+  };
 }
 
 function assertCoordinateInMap(
@@ -429,7 +588,7 @@ export function restoreWorldSnapshot(
   worldDefinition: unknown,
 ): WorldState {
   const snapshot = WorldSnapshotSchema.parse(snapshotValue);
-  const state = SerializedWorldStateSchema.parse(snapshot.state);
+  const { state, history } = parseSerializedState(snapshot);
   const expectedMap = MapDefinitionSchema.parse(worldDefinition);
   if (state.map.id !== snapshot.worldId || expectedMap.id !== snapshot.worldId) {
     throw new Error("Snapshot world ID does not match its map");
@@ -498,6 +657,7 @@ export function restoreWorldSnapshot(
     randomState: state.randomState,
     lastEventSequence: snapshot.lastEventSequence,
     pluginLockHash: snapshot.pluginLockHash,
+    history,
     map: expectedMap,
     agents,
     objects,

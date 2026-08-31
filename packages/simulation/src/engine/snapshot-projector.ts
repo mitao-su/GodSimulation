@@ -1,11 +1,16 @@
 import {
   JsonValueSchema,
-  WorldSnapshotSchema,
+  WorldSnapshotV2Schema,
+  type EventId,
   type JsonValue,
-  type WorldSnapshot,
+  type WorldSnapshotV2,
 } from "@god-sim/protocol";
 
 import type { WorldState } from "../world/world-state";
+import {
+  assertSnapshotCausality,
+  eventSequenceInWorld,
+} from "./snapshot-causality";
 
 function serializeWorldState(world: WorldState): JsonValue {
   return JsonValueSchema.parse({
@@ -53,14 +58,51 @@ function serializeWorldState(world: WorldState): JsonValue {
   });
 }
 
-export function projectWorldSnapshot(world: WorldState): WorldSnapshot {
-  return WorldSnapshotSchema.parse({
-    schemaVersion: 1,
+function collectCausalEventIds(world: WorldState): readonly EventId[] {
+  const sourceIds = new Set<EventId>();
+  for (const agent of world.agents.values()) {
+    for (const value of agent.knowledge.objects.values()) {
+      sourceIds.add(value.sourceEventId);
+    }
+    for (const value of agent.knowledge.agents.values()) {
+      sourceIds.add(value.sourceEventId);
+    }
+    for (const value of agent.knowledge.knownTraversalBlockers.values()) {
+      sourceIds.add(value.sourceEventId);
+    }
+    for (const memory of agent.memories) {
+      sourceIds.add(memory.sourceEventId);
+    }
+  }
+
+  return [...sourceIds]
+    .filter((eventId) => {
+      if (world.history.mode === "strict") return true;
+      const sequence = eventSequenceInWorld(world.id, eventId);
+      return sequence !== null && sequence >= world.history.causalFromSequence;
+    })
+    .sort((left, right) => {
+      const leftSequence = eventSequenceInWorld(world.id, left);
+      const rightSequence = eventSequenceInWorld(world.id, right);
+      if (leftSequence === null || rightSequence === null) {
+        return left.localeCompare(right);
+      }
+      return leftSequence - rightSequence || left.localeCompare(right);
+    });
+}
+
+export function projectWorldSnapshot(world: WorldState): WorldSnapshotV2 {
+  const snapshot = WorldSnapshotV2Schema.parse({
+    schemaVersion: 2,
     worldId: world.id,
     worldVersion: world.version,
     worldTick: world.tick,
     lastEventSequence: world.lastEventSequence,
     pluginLockHash: world.pluginLockHash,
+    history: world.history,
+    causalEventIds: collectCausalEventIds(world),
     state: serializeWorldState(world),
   });
+  assertSnapshotCausality(snapshot);
+  return snapshot;
 }

@@ -254,6 +254,7 @@ export function loadWorldDefinition(
       pluginLockHash: PluginLockHashSchema.parse(
         options.pluginLockHash ?? DEFAULT_PLUGIN_LOCK_HASH,
       ),
+      history: { mode: "strict", causalFromSequence: 1 },
       map,
       agents,
       objects,

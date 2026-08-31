@@ -17,6 +17,7 @@ function world(mode: WorldMode, tick = 12): WorldState {
     randomState: 123,
     lastEventSequence: 0,
     pluginLockHash: "0".repeat(64) as PluginLockHash,
+    history: { mode: "strict", causalFromSequence: 1 },
     map: {
       schemaVersion: 1,
       id: "starter-world" as WorldState["id"],

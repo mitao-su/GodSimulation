@@ -61,6 +61,10 @@ export interface DecisionRequestState {
   readonly failure: TechnicalFailure | null;
 }
 
+export type WorldHistory =
+  | { readonly mode: "strict"; readonly causalFromSequence: 1 }
+  | { readonly mode: "legacy"; readonly causalFromSequence: number };
+
 export interface WorldState {
   readonly id: WorldId;
   readonly name: string;
@@ -72,6 +76,7 @@ export interface WorldState {
   readonly randomState: number;
   readonly lastEventSequence: number;
   readonly pluginLockHash: PluginLockHash;
+  readonly history: WorldHistory;
   readonly map: MapDefinition;
   readonly agents: ReadonlyMap<AgentId, AgentState>;
   readonly objects: ReadonlyMap<EntityId, ObjectInstance>;
