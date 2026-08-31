@@ -63,4 +63,18 @@ describe("definePlugin", () => {
       }),
     ).toThrow(/manifest/i);
   });
+
+  it("rejects an automatic traversal interaction that is not registered", () => {
+    const definition = {
+      ...objectDefinition("test.object"),
+      traversal: { interactionId: "open" },
+    };
+
+    expect(() =>
+      definePlugin(manifest, {
+        objects: [definition],
+        agents: [],
+      }),
+    ).toThrow(/automatic traversal interaction open/i);
+  });
 });

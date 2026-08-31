@@ -27,6 +27,7 @@ export const doorDefinition: ObjectDefinition<DoorState> = {
   vision: {
     blocksVision: (state) => !state.open,
   },
+  traversal: { interactionId: "open" },
   interactions: doorInteractions,
   observe: observeDoor,
 };

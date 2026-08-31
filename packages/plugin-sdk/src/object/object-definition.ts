@@ -34,6 +34,10 @@ export interface VisionCapability<State> {
   blocksVision(state: Readonly<State>, context: QueryContext): boolean;
 }
 
+export interface AutomaticTraversalCapability {
+  readonly interactionId: string;
+}
+
 export interface OccupancyCapability<State> {
   readonly capacity: number;
   occupant(state: Readonly<State>): string | null;
@@ -52,6 +56,7 @@ export interface ObjectDefinition<State = unknown> {
   readonly placement: PlacementCapability;
   readonly movement?: MovementCapability<State>;
   readonly vision?: VisionCapability<State>;
+  readonly traversal?: AutomaticTraversalCapability;
   readonly occupancy?: OccupancyCapability<State>;
   readonly interactions: readonly InteractionDefinition<State>[];
   observe(state: Readonly<State>, context: ObservationContext): ObservableObjectState;

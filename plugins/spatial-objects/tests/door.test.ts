@@ -37,6 +37,12 @@ describe("door definition", () => {
     ]);
   });
 
+  it("declares its automatic traversal through the open interaction", () => {
+    expect(doorDefinition).toMatchObject({
+      traversal: { interactionId: "open" },
+    });
+  });
+
   it("proposes opening without mutating the supplied state", () => {
     const state = Object.freeze({ open: false, locked: false });
     const result = interaction("open").complete(state, context);

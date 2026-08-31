@@ -53,6 +53,16 @@ export function definePlugin(
 
   for (const definition of registrations.objects) {
     JsonValueSchema.parse(definition.stateSchema.parse(definition.initialState()));
+    if (
+      definition.traversal &&
+      !definition.interactions.some(
+        (interaction) => interaction.id === definition.traversal?.interactionId,
+      )
+    ) {
+      throw new Error(
+        `Object ${definition.id} automatic traversal interaction ${definition.traversal.interactionId} is not registered`,
+      );
+    }
   }
 
   return Object.freeze({
