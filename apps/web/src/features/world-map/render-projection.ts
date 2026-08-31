@@ -18,15 +18,7 @@ export interface RenderEntity {
 
 function animationForStatus(status: string): RenderAnimationId {
   if (status === "move") return "walk";
-  if (
-    status === "use_object" ||
-    status === "open_object" ||
-    status === "close_object" ||
-    status === "lock_object" ||
-    status === "unlock_object"
-  ) {
-    return "interact";
-  }
+  if (status === "interact_object") return "interact";
   return "idle";
 }
 

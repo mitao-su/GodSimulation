@@ -73,7 +73,8 @@ describe("advanceActions", () => {
         {
           id: "use-1",
           goalId: goal.id,
-          kind: "use_object",
+          kind: "interact_object",
+          purpose: "goal",
           targetEntityId: "fridge-1" as never,
           interactionId: "use",
           durationTicks: 10,
@@ -94,6 +95,7 @@ describe("advanceActions", () => {
         interactionId: "use",
         arrivalTick: 0,
         actionId: "use-1",
+        purpose: "goal",
       },
     ]);
     expect(result.world.objects.get("fridge-1" as never)?.state).toEqual({ occupiedBy: null });

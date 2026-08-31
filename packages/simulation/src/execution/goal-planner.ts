@@ -12,26 +12,20 @@ export type ActionPlanResult =
   | { readonly kind: "planned"; readonly plan: ActionPlan }
   | { readonly kind: "blocked"; readonly reasonCode: string; readonly summary: string };
 
-function closedDoorAt(
+function automaticTraversalObjectsAt(
   world: WorldState,
   registry: PluginRegistry,
+  agentId: AgentId,
   position: Coordinate,
-): ObjectInstance | null {
+): readonly ObjectInstance[] {
   const spatial = new SpatialIndex(world, registry);
-  for (const object of spatial.objectsAt(position)) {
-    const registered = registry.getObject(object.definitionId);
-    if (!registered?.definition.tags.includes("door")) continue;
-    const state = registered.definition.stateSchema.parse(object.state);
-    if (
-      typeof state === "object" &&
-      state !== null &&
-      "open" in state &&
-      state.open === false
-    ) {
-      return object;
-    }
-  }
-  return null;
+  return spatial
+    .blockingObjectsAt(position, agentId)
+    .filter((object) => {
+      const registered = registry.getObject(object.definitionId);
+      return registered?.definition.traversal !== undefined;
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function interactionDuration(
@@ -49,6 +43,7 @@ function interactionDuration(
 function createPathActions(
   world: WorldState,
   registry: PluginRegistry,
+  agentId: AgentId,
   goalId: string,
   path: readonly Coordinate[],
 ): RunningAction[] {
@@ -70,26 +65,39 @@ function createPathActions(
 
   for (let index = 1; index < path.length; index += 1) {
     const position = path[index]!;
-    const door = closedDoorAt(world, registry, position);
-    if (!door) {
+    const traversalObjects = automaticTraversalObjectsAt(
+      world,
+      registry,
+      agentId,
+      position,
+    );
+    if (traversalObjects.length === 0) {
       segment.push(position);
       continue;
     }
 
     pushMove();
-    const interaction = interactionDuration(registry, door, "open");
-    if (!interaction) throw new Error(`Door ${door.id} has no open interaction`);
-    actions.push({
-      id: `${goalId}:action:${actions.length}`,
-      goalId,
-      kind: "open_object",
-      targetEntityId: door.id,
-      interactionId: "open",
-      durationTicks: interaction.durationTicks,
-      progressTicks: 0,
-      slots: interaction.slots,
-      started: false,
-    });
+    for (const object of traversalObjects) {
+      const definition = registry.getObject(object.definitionId)?.definition;
+      const interactionId = definition?.traversal?.interactionId;
+      if (!interactionId) throw new Error(`Object ${object.id} has no traversal capability`);
+      const interaction = interactionDuration(registry, object, interactionId);
+      if (!interaction) {
+        throw new Error(`Object ${object.id} has no traversal interaction ${interactionId}`);
+      }
+      actions.push({
+        id: `${goalId}:action:${actions.length}`,
+        goalId,
+        kind: "interact_object",
+        purpose: "automatic_traversal",
+        targetEntityId: object.id,
+        interactionId,
+        durationTicks: interaction.durationTicks,
+        progressTicks: 0,
+        slots: interaction.slots,
+        started: false,
+      });
+    }
     segment = [path[index - 1]!, position];
   }
   pushMove();
@@ -151,7 +159,7 @@ export function planGoal(
     return { kind: "blocked", reasonCode: "no_known_route", summary: "No known route to target" };
   }
 
-  const actions = createPathActions(world, registry, goalId, pathResult.path);
+  const actions = createPathActions(world, registry, agentId, goalId, pathResult.path);
   if (goal.kind === "observe") {
     actions.push({
       id: `${goalId}:action:${actions.length}`,
@@ -174,7 +182,8 @@ export function planGoal(
     actions.push({
       id: `${goalId}:action:${actions.length}`,
       goalId,
-      kind: "use_object",
+      kind: "interact_object",
+      purpose: "goal",
       targetEntityId: object.id,
       interactionId: goal.interactionId,
       durationTicks: interaction.durationTicks,

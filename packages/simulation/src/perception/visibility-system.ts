@@ -117,7 +117,7 @@ export function refreshPerception(
     objects,
     agents: knownAgents,
     visibleEntityIds,
-    knownLockedDoorIds: agent.knowledge.knownLockedDoorIds,
+    knownTraversalBlockers: agent.knowledge.knownTraversalBlockers,
   };
   const memories = formImmediateMemories(agent.memories, changes);
   const updatedAgent = { ...agent, knowledge, memories };

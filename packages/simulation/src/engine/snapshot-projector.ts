@@ -30,8 +30,8 @@ function serializeWorldState(world: WorldState): JsonValue {
           visibleEntityIds: [...agent.knowledge.visibleEntityIds].sort((left, right) =>
             left.localeCompare(right),
           ),
-          knownLockedDoorIds: [...agent.knowledge.knownLockedDoorIds].sort((left, right) =>
-            left.localeCompare(right),
+          knownTraversalBlockers: [...agent.knowledge.knownTraversalBlockers.values()].sort(
+            (left, right) => left.entityId.localeCompare(right.entityId),
           ),
         },
       })),

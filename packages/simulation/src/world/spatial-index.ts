@@ -53,14 +53,20 @@ export class SpatialIndex {
   }
 
   blockingObjectsAt(position: Coordinate, queryingAgentId?: AgentId): readonly ObjectInstance[] {
-    return this.objectsAt(position).filter((object) => {
-      const registered = this.#registry.getObject(object.definitionId);
-      if (!registered?.definition.movement) return false;
-      const state = registered.definition.stateSchema.parse(object.state);
-      return registered.definition.movement.blocksMovement(state, {
-        worldTick: this.#world.tick,
-        ...(queryingAgentId === undefined ? {} : { queryingAgentId }),
-      });
+    return this.objectsAt(position).filter((object) =>
+      this.objectBlocksMovement(object.id, queryingAgentId),
+    );
+  }
+
+  objectBlocksMovement(entityId: EntityId, queryingAgentId?: AgentId): boolean {
+    const object = this.#world.objects.get(entityId);
+    if (!object) throw new Error(`Unknown object instance: ${entityId}`);
+    const registered = this.#registry.getObject(object.definitionId);
+    if (!registered?.definition.movement) return false;
+    const state = registered.definition.stateSchema.parse(object.state);
+    return registered.definition.movement.blocksMovement(state, {
+      worldTick: this.#world.tick,
+      ...(queryingAgentId === undefined ? {} : { queryingAgentId }),
     });
   }
 

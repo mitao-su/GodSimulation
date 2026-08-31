@@ -14,13 +14,11 @@ export interface MoveAction extends ActionBase {
   readonly path: readonly Coordinate[];
 }
 
-export interface ObjectAction extends ActionBase {
-  readonly kind:
-    | "open_object"
-    | "close_object"
-    | "lock_object"
-    | "unlock_object"
-    | "use_object";
+export type ObjectInteractionPurpose = "goal" | "automatic_traversal";
+
+export interface ObjectInteractionAction extends ActionBase {
+  readonly kind: "interact_object";
+  readonly purpose: ObjectInteractionPurpose;
   readonly targetEntityId: EntityId;
   readonly interactionId: string;
   readonly started: boolean;
@@ -35,7 +33,11 @@ export interface ObserveAction extends ActionBase {
   readonly targetEntityId: EntityId;
 }
 
-export type RunningAction = MoveAction | ObjectAction | WaitAction | ObserveAction;
+export type RunningAction =
+  | MoveAction
+  | ObjectInteractionAction
+  | WaitAction
+  | ObserveAction;
 
 export interface ActiveGoal {
   readonly id: string;
@@ -54,5 +56,6 @@ export interface ActionFailure {
   readonly code: string;
   readonly actionId: string;
   readonly entityId?: EntityId;
+  readonly purpose?: ObjectInteractionPurpose;
   readonly summary: string;
 }

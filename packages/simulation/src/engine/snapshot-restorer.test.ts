@@ -70,4 +70,59 @@ describe("simulation snapshot restoration", () => {
       }),
     );
   });
+
+  it("restores a generic object interaction and projects its plugin display name", () => {
+    const original = createSimulation({
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      reviewRequired: true,
+      seed: 1,
+      pluginLockHash: "a".repeat(64),
+    });
+    const snapshot = original.createSnapshot();
+    const state = structuredClone(snapshot.state) as {
+      agents: Array<{
+        id: string;
+        currentGoal: unknown;
+        actionPlan: unknown;
+      }>;
+    };
+    const alice = state.agents.find((agent) => agent.id === "alice");
+    if (!alice) throw new Error("Missing Alice in snapshot fixture");
+    const goal = {
+      kind: "use_object",
+      targetEntityId: "fridge-1",
+      interactionId: "use",
+    };
+    alice.currentGoal = { id: "goal:alice:test", goal, label: "Use fridge" };
+    alice.actionPlan = {
+      goalId: "goal:alice:test",
+      goal,
+      currentActionIndex: 0,
+      actions: [
+        {
+          id: "goal:alice:test:action:0",
+          goalId: "goal:alice:test",
+          kind: "interact_object",
+          purpose: "goal",
+          targetEntityId: "fridge-1",
+          interactionId: "use",
+          durationTicks: 10,
+          progressTicks: 3,
+          slots: ["HANDS", "BODY"],
+          started: true,
+        },
+      ],
+    };
+
+    const restored = restoreSimulation({
+      snapshot: { ...snapshot, state: state as never },
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+    });
+
+    expect(restored.createSnapshot()).toEqual({ ...snapshot, state });
+    expect(restored.getView().agents.find((agent) => agent.agentId === "alice")?.actionLabel)
+      .toBe("Use fridge");
+  });
 });

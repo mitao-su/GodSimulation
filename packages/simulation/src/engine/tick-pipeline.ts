@@ -3,6 +3,7 @@ import type {
   DecisionReason,
   DomainEvent,
   EntityId,
+  EventId,
 } from "@god-sim/protocol";
 
 import {
@@ -24,6 +25,7 @@ import {
 } from "../perception/visibility-system";
 import { advanceWorldClock } from "../world/world-clock";
 import type { PluginRegistry } from "../world/plugin-registry";
+import { SpatialIndex } from "../world/spatial-index";
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
 
@@ -43,6 +45,10 @@ interface InteractionProcessingResult {
   readonly events: readonly DomainEvent[];
   readonly failures: readonly AgentActionFailure[];
   readonly completedGoalAgentIds: readonly AgentId[];
+}
+
+interface RecordedActionFailure extends AgentActionFailure {
+  readonly sourceEventId: EventId;
 }
 
 function eventMetadata(causationId: string, correlationId = causationId) {
@@ -83,6 +89,7 @@ function ensureActionPlans(
 function interactionFailure(
   agentId: AgentId,
   actionId: string,
+  purpose: NonNullable<AgentActionFailure["failure"]["purpose"]>,
   reasonCode: string,
   summary: string,
   entityId?: EntityId,
@@ -90,12 +97,22 @@ function interactionFailure(
   return {
     agentId,
     failure: {
-      code: reasonCode === "locked" ? "locked_door" : reasonCode,
+      code: reasonCode,
       actionId,
+      purpose,
       summary,
       ...(entityId === undefined ? {} : { entityId }),
     },
   };
+}
+
+function automaticTraversalIsClear(
+  world: WorldState,
+  registry: PluginRegistry,
+  agentId: AgentId,
+  entityId: EntityId,
+): boolean {
+  return !new SpatialIndex(world, registry).objectBlocksMovement(entityId, agentId);
 }
 
 function processInteractions(
@@ -119,10 +136,29 @@ function processInteractions(
       phase: "complete",
     });
     if (!proposed.accepted) {
+      if (
+        completion.purpose === "automatic_traversal" &&
+        automaticTraversalIsClear(
+          world,
+          registry,
+          completion.agentId,
+          completion.entityId,
+        )
+      ) {
+        const completed = markInteractionCompleted(
+          world,
+          completion.agentId,
+          completion.actionId,
+        );
+        world = completed.world;
+        if (completed.goalCompleted) completedGoalAgentIds.push(completion.agentId);
+        continue;
+      }
       failures.push(
         interactionFailure(
           completion.agentId,
           completion.actionId,
+          completion.purpose,
           proposed.reasonCode,
           proposed.summary,
           completion.entityId,
@@ -141,6 +177,7 @@ function processInteractions(
         interactionFailure(
           completion.agentId,
           completion.actionId,
+          completion.purpose,
           committed.reason.code,
           committed.reason.message,
           completion.entityId,
@@ -150,6 +187,27 @@ function processInteractions(
     }
     world = committed.world;
     events.push(...committed.events);
+    if (
+      completion.purpose === "automatic_traversal" &&
+      !automaticTraversalIsClear(
+        world,
+        registry,
+        completion.agentId,
+        completion.entityId,
+      )
+    ) {
+      failures.push({
+        agentId: completion.agentId,
+        failure: {
+          code: "automatic_traversal_still_blocked",
+          actionId: completion.actionId,
+          entityId: completion.entityId,
+          purpose: "automatic_traversal",
+          summary: `${completion.entityId} still blocks movement after ${completion.interactionId}`,
+        },
+      });
+      continue;
+    }
     const completed = markInteractionCompleted(world, completion.agentId, completion.actionId);
     world = completed.world;
     if (completed.goalCompleted) completedGoalAgentIds.push(completion.agentId);
@@ -192,6 +250,7 @@ function processInteractions(
         interactionFailure(
           decision.agentId,
           intent.actionId,
+          intent.purpose,
           decision.reasonCode,
           `${decision.entityId} was claimed by another agent`,
           decision.entityId,
@@ -207,9 +266,10 @@ function processInteractions(
       phase: "start",
     });
     if (!proposed.accepted) {
-      const plan = world.agents.get(decision.agentId)?.actionPlan;
-      const currentAction = plan?.actions[plan.currentActionIndex];
-      if (currentAction?.kind === "open_object" && proposed.reasonCode === "already_open") {
+      if (
+        intent.purpose === "automatic_traversal" &&
+        automaticTraversalIsClear(world, registry, decision.agentId, decision.entityId)
+      ) {
         const completed = markInteractionCompleted(world, decision.agentId, intent.actionId);
         world = completed.world;
         if (completed.goalCompleted) completedGoalAgentIds.push(decision.agentId);
@@ -219,6 +279,7 @@ function processInteractions(
         interactionFailure(
           decision.agentId,
           intent.actionId,
+          intent.purpose,
           proposed.reasonCode,
           proposed.summary,
           decision.entityId,
@@ -238,6 +299,7 @@ function processInteractions(
         interactionFailure(
           decision.agentId,
           intent.actionId,
+          intent.purpose,
           committed.reason.code,
           committed.reason.message,
           decision.entityId,
@@ -352,28 +414,41 @@ export function refreshAllPerceptions(
 function recoverFailures(
   worldInput: WorldState,
   registry: PluginRegistry,
-  failures: readonly AgentActionFailure[],
+  failures: readonly RecordedActionFailure[],
 ): { readonly world: WorldState; readonly needs: readonly DecisionNeed[] } {
   let world = worldInput;
   const needs: DecisionNeed[] = [];
   for (const item of failures) {
     const agent = world.agents.get(item.agentId);
     if (!agent?.currentGoal) continue;
-    if (item.failure.code === "locked_door" && item.failure.entityId) {
+    if (
+      item.failure.purpose === "automatic_traversal" &&
+      item.failure.entityId
+    ) {
+      const object = world.objects.get(item.failure.entityId);
+      if (!object) {
+        needs.push({
+          agentId: item.agentId,
+          reason: { code: item.failure.code, summary: item.failure.summary },
+        });
+        continue;
+      }
       const recovered = recoverBlockedPlan(
         world,
         registry,
         item.agentId,
         {
-          code: "locked_door",
           entityId: item.failure.entityId,
           goal: agent.currentGoal.goal,
+          observedObjectVersion: object.version,
+          reasonCode: item.failure.code,
+          sourceEventId: item.sourceEventId,
         },
         agent.knowledge,
       );
       const knowledge = {
         ...agent.knowledge,
-        knownLockedDoorIds: recovered.knowledge.knownLockedDoorIds,
+        knownTraversalBlockers: recovered.knowledge.knownTraversalBlockers,
       };
       if (recovered.kind === "replanned") {
         world = {
@@ -443,6 +518,7 @@ export function runTickPipeline(
   world = interactions.world;
   events.push(...interactions.events);
   const failures = [...actions.failures, ...interactions.failures];
+  const recordedFailures: RecordedActionFailure[] = [];
 
   for (const failure of failures) {
     const written = appendDomainEvent(
@@ -452,12 +528,17 @@ export function runTickPipeline(
         agentId: failure.agentId,
         actionId: failure.failure.actionId,
         reasonCode: failure.failure.code,
+        summary: failure.failure.summary,
+        ...(failure.failure.entityId === undefined
+          ? {}
+          : { entityId: failure.failure.entityId }),
         perceivedByAgent: true,
       },
       eventMetadata(failure.failure.actionId),
     );
     world = written.world;
     events.push(written.event);
+    recordedFailures.push({ ...failure, sourceEventId: written.event.eventId });
   }
 
   const perception = refreshAllPerceptions(world, registry);
@@ -467,7 +548,7 @@ export function runTickPipeline(
     addDecisionNeed(needs, conflict.agentId, conflict.reason, true);
   }
 
-  const recovery = recoverFailures(world, registry, failures);
+  const recovery = recoverFailures(world, registry, recordedFailures);
   world = recovery.world;
   for (const need of recovery.needs) addDecisionNeed(needs, need.agentId, need.reason);
 

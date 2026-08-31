@@ -83,6 +83,25 @@ function decisionStatus(world: WorldState, agentId: AgentId): "none" | "thinking
   return request.acceptedProposal === null ? "thinking" : "ready";
 }
 
+function currentActionLabel(
+  world: WorldState,
+  registry: PluginRegistry,
+  agent: AgentState,
+): string | null {
+  const action = agent.actionPlan?.actions[agent.actionPlan.currentActionIndex];
+  if (!action) return null;
+  if (action.kind !== "interact_object") return action.kind;
+  const object = world.objects.get(action.targetEntityId);
+  const definition = object
+    ? registry.getObject(object.definitionId)?.definition
+    : undefined;
+  return (
+    definition?.interactions.find(
+      (interaction) => interaction.id === action.interactionId,
+    )?.displayName ?? "Interact"
+  );
+}
+
 function renderEntities(world: WorldState, registry: PluginRegistry): WorldView["entities"] {
   const observerAgentId = [...world.agents.keys()].sort((left, right) =>
     left.localeCompare(right),
@@ -144,12 +163,11 @@ export function projectWorldView(
     agents: [...world.agents.values()]
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((agent) => {
-        const action = agent.actionPlan?.actions[agent.actionPlan.currentActionIndex];
         return {
           agentId: agent.id,
           displayName: agent.displayName,
           currentGoalLabel: agent.currentGoal?.label ?? null,
-          actionLabel: action?.kind ?? null,
+          actionLabel: currentActionLabel(world, registry, agent),
           bladderLevel: agent.bladderSensation,
           decisionStatus: decisionStatus(world, agent.id),
           perceivedSummaries: perceivedSummaries(agent),

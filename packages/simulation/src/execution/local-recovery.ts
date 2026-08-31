@@ -1,14 +1,16 @@
-import type { AgentId, EntityId, Goal } from "@god-sim/protocol";
+import type { AgentId, EntityId, EventId, Goal } from "@god-sim/protocol";
 
 import { planGoal } from "./goal-planner";
 import type { AgentNavigationKnowledge } from "./path-planner";
 import type { PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 
-export interface LockedDoorFailure {
-  readonly code: "locked_door";
+export interface TraversalFailure {
   readonly entityId: EntityId;
   readonly goal: Goal;
+  readonly observedObjectVersion: number;
+  readonly reasonCode: string;
+  readonly sourceEventId: EventId;
 }
 
 export type RecoveryResult =
@@ -27,12 +29,17 @@ export function recoverBlockedPlan(
   world: WorldState,
   registry: PluginRegistry,
   agentId: AgentId,
-  failure: LockedDoorFailure,
+  failure: TraversalFailure,
   knowledge: AgentNavigationKnowledge,
 ): RecoveryResult {
-  const knownLockedDoorIds = new Set(knowledge.knownLockedDoorIds);
-  knownLockedDoorIds.add(failure.entityId);
-  const updatedKnowledge = { knownLockedDoorIds };
+  const knownTraversalBlockers = new Map(knowledge.knownTraversalBlockers);
+  knownTraversalBlockers.set(failure.entityId, {
+    entityId: failure.entityId,
+    observedObjectVersion: failure.observedObjectVersion,
+    reasonCode: failure.reasonCode,
+    sourceEventId: failure.sourceEventId,
+  });
+  const updatedKnowledge = { knownTraversalBlockers };
   const replanned = planGoal(
     world,
     registry,

@@ -74,4 +74,20 @@ describe("world render projection", () => {
       renderLayer: 0,
     });
   });
+
+  it("maps a generic object interaction to the interact animation", () => {
+    const view = worldView();
+    const interacting = WorldViewSchema.parse({
+      ...view,
+      entities: view.entities.map((entity) =>
+        entity.entityId === "alice"
+          ? { ...entity, status: "interact_object" }
+          : entity,
+      ),
+    });
+
+    expect(
+      projectWorldView(interacting).find((entity) => entity.entityId === "alice"),
+    ).toMatchObject({ animationId: "interact" });
+  });
 });

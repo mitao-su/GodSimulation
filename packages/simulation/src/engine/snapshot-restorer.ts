@@ -58,16 +58,11 @@ const MoveActionSchema = z
   })
   .strict();
 
-const ObjectActionSchema = z
+const ObjectInteractionActionSchema = z
   .object({
     ...ActionBaseShape,
-    kind: z.enum([
-      "open_object",
-      "close_object",
-      "lock_object",
-      "unlock_object",
-      "use_object",
-    ]),
+    kind: z.literal("interact_object"),
+    purpose: z.enum(["goal", "automatic_traversal"]),
     targetEntityId: EntityIdSchema,
     interactionId: z.string().min(1),
     started: z.boolean(),
@@ -88,7 +83,7 @@ const ObserveActionSchema = z
 
 const RunningActionSchema = z.discriminatedUnion("kind", [
   MoveActionSchema,
-  ObjectActionSchema,
+  ObjectInteractionActionSchema,
   WaitActionSchema,
   ObserveActionSchema,
 ]);
@@ -156,13 +151,22 @@ const ImmediateMemorySchema = z
   })
   .strict();
 
+const KnownTraversalBlockerSchema = z
+  .object({
+    entityId: EntityIdSchema,
+    observedObjectVersion: z.number().int().nonnegative(),
+    reasonCode: z.string().min(1),
+    sourceEventId: EventIdSchema,
+  })
+  .strict();
+
 const SerializedKnowledgeSchema = z
   .object({
     zoneId: z.string().min(1),
     objects: z.array(KnownObjectSchema),
     agents: z.array(KnownAgentSchema),
     visibleEntityIds: z.array(EntityIdSchema),
-    knownLockedDoorIds: z.array(EntityIdSchema),
+    knownTraversalBlockers: z.array(KnownTraversalBlockerSchema),
   })
   .strict();
 
@@ -266,7 +270,11 @@ function restoreKnowledge(
     objects: uniqueMap(value.objects, (object) => object.entityId, "known object ID"),
     agents: uniqueMap(value.agents, (agent) => agent.agentId, "known agent ID"),
     visibleEntityIds: new Set(value.visibleEntityIds),
-    knownLockedDoorIds: new Set(value.knownLockedDoorIds),
+    knownTraversalBlockers: uniqueMap(
+      value.knownTraversalBlockers,
+      (blocker) => blocker.entityId,
+      "known traversal blocker ID",
+    ),
   };
 }
 

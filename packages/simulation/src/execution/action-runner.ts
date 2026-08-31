@@ -1,6 +1,10 @@
 import type { AgentId, EntityId } from "@god-sim/protocol";
 
-import type { ActionFailure, ObjectAction, RunningAction } from "./action";
+import type {
+  ActionFailure,
+  ObjectInteractionAction,
+  RunningAction,
+} from "./action";
 import { releaseBodySlots, reserveBodySlots } from "./body-slots";
 import type { InteractionIntent } from "../interaction/effect-arbiter";
 import type { PluginRegistry } from "../world/plugin-registry";
@@ -11,6 +15,7 @@ const MOVE_TICKS_PER_CELL = 2;
 
 export interface ActionInteractionIntent extends InteractionIntent {
   readonly actionId: string;
+  readonly purpose: ObjectInteractionAction["purpose"];
 }
 
 export interface InteractionCompletionRequest {
@@ -18,6 +23,7 @@ export interface InteractionCompletionRequest {
   readonly agentId: AgentId;
   readonly entityId: EntityId;
   readonly interactionId: string;
+  readonly purpose: ObjectInteractionAction["purpose"];
 }
 
 export interface AgentActionFailure {
@@ -63,30 +69,7 @@ function finishCurrentAction(agent: AgentState): {
   };
 }
 
-function movementFailure(
-  world: WorldState,
-  registry: PluginRegistry,
-  actionId: string,
-  blockerId: EntityId,
-): ActionFailure {
-  const object = world.objects.get(blockerId);
-  const definition = object ? registry.getObject(object.definitionId)?.definition : undefined;
-  if (object && definition?.tags.includes("door")) {
-    const state = definition.stateSchema.parse(object.state);
-    if (
-      typeof state === "object" &&
-      state !== null &&
-      "locked" in state &&
-      state.locked === true
-    ) {
-      return {
-        code: "locked_door",
-        actionId,
-        entityId: blockerId,
-        summary: `Door ${blockerId} is locked`,
-      };
-    }
-  }
+function movementFailure(actionId: string, blockerId: EntityId): ActionFailure {
   return {
     code: "movement_blocked",
     actionId,
@@ -137,13 +120,7 @@ export function advanceActions(
       agent = { ...agent, bodySlots: reservation.slots };
     }
 
-    if (
-      action.kind === "open_object" ||
-      action.kind === "close_object" ||
-      action.kind === "lock_object" ||
-      action.kind === "unlock_object" ||
-      action.kind === "use_object"
-    ) {
+    if (action.kind === "interact_object") {
       if (!action.started) {
         interactionIntents.push({
           intentId: `${action.id}:start`,
@@ -152,6 +129,7 @@ export function advanceActions(
           entityId: action.targetEntityId,
           interactionId: action.interactionId,
           arrivalTick: world.tick,
+          purpose: action.purpose,
         });
         agents.set(agentId, agent);
         continue;
@@ -164,6 +142,7 @@ export function advanceActions(
           agentId,
           entityId: action.targetEntityId,
           interactionId: action.interactionId,
+          purpose: action.purpose,
         });
       }
       agents.set(agentId, agent);
@@ -181,7 +160,7 @@ export function advanceActions(
         if (blockers.length > 0) {
           failures.push({
             agentId,
-            failure: movementFailure(world, registry, action.id, blockers[0]!.id),
+            failure: movementFailure(action.id, blockers[0]!.id),
           });
           agents.set(agentId, agent);
           continue;
@@ -219,7 +198,7 @@ function updateObjectAction(
   world: WorldState,
   agentId: AgentId,
   actionId: string,
-  update: (action: ObjectAction) => ObjectAction,
+  update: (action: ObjectInteractionAction) => ObjectInteractionAction,
 ): WorldState {
   const agent = world.agents.get(agentId);
   const plan = agent?.actionPlan;

@@ -34,12 +34,19 @@ export interface KnownAgentState {
   readonly observedAtTick: number;
 }
 
+export interface KnownTraversalBlocker {
+  readonly entityId: EntityId;
+  readonly observedObjectVersion: number;
+  readonly reasonCode: string;
+  readonly sourceEventId: EventId;
+}
+
 export interface AgentKnowledge {
   readonly zoneId: string;
   readonly objects: ReadonlyMap<EntityId, KnownObjectState>;
   readonly agents: ReadonlyMap<AgentId, KnownAgentState>;
   readonly visibleEntityIds: ReadonlySet<EntityId>;
-  readonly knownLockedDoorIds: ReadonlySet<EntityId>;
+  readonly knownTraversalBlockers: ReadonlyMap<EntityId, KnownTraversalBlocker>;
 }
 
 export interface ImmediateMemory {
@@ -62,6 +69,6 @@ export function createEmptyKnowledge(zoneId: string): AgentKnowledge {
     objects: new Map(),
     agents: new Map(),
     visibleEntityIds: new Set(),
-    knownLockedDoorIds: new Set(),
+    knownTraversalBlockers: new Map(),
   };
 }

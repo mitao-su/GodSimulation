@@ -11,7 +11,7 @@ describe("findPath", () => {
       testPluginRegistry,
       "alice" as never,
       [{ x: 0, y: 2 }],
-      { knownLockedDoorIds: new Set() },
+      { knownTraversalBlockers: new Map() },
     );
 
     expect(result.kind).toBe("found");
@@ -28,7 +28,7 @@ describe("findPath", () => {
       testPluginRegistry,
       "alice" as never,
       [{ x: 2, y: 2 }],
-      { knownLockedDoorIds: new Set() },
+      { knownTraversalBlockers: new Map() },
     );
 
     expect(result).toEqual({ kind: "not_found" });
