@@ -28,6 +28,7 @@ export interface SnapshotRow {
   world_version: number;
   world_tick: number;
   last_event_sequence: number;
+  checkpoint_id: string | null;
   payload_json: string;
 }
 
@@ -36,6 +37,10 @@ export interface ModelCallRow {
   world_id: string;
   world_version: number;
   agent_id: string;
+  protocol_schema_version: number | null;
+  decision_cycle_id: string | null;
+  plugin_lock_hash: string | null;
+  decision_reason_code: string | null;
   model_id: string;
   status: string;
   goal_option_id: string | null;
@@ -63,4 +68,3 @@ export interface DatabaseSchema {
   model_calls: ModelCallRow;
   technical_failures: TechnicalFailureRow;
 }
-

@@ -1,8 +1,10 @@
 import type {
+  CheckpointId,
   DomainEvent,
   TechnicalFailure,
   WorldId,
   WorldSnapshot,
+  WorldSnapshotV2,
 } from "@god-sim/protocol";
 
 import type { ModelCallRecord } from "./model-call-record";
@@ -13,8 +15,17 @@ export interface RestoredTimeline {
   readonly events: readonly DomainEvent[];
 }
 
+export interface WorldCheckpoint {
+  readonly checkpointId: CheckpointId;
+  readonly events: readonly DomainEvent[];
+  readonly snapshot: WorldSnapshotV2;
+}
+
 export interface TimelineStore {
+  commitCheckpoint(checkpoint: WorldCheckpoint): Promise<void>;
+  /** @deprecated New world history must use commitCheckpoint. */
   appendEvents(events: readonly DomainEvent[]): Promise<void>;
+  /** @deprecated New world history must use commitCheckpoint. */
   saveSnapshot(snapshot: WorldSnapshot): Promise<void>;
   savePluginLock(record: PluginLockRecord): Promise<void>;
   saveModelCall(record: ModelCallRecord): Promise<void>;
@@ -22,4 +33,3 @@ export interface TimelineStore {
   loadLatest(worldId: WorldId): Promise<RestoredTimeline>;
   close(): Promise<void>;
 }
-
