@@ -23,10 +23,6 @@ export interface WorldCheckpoint {
 
 export interface TimelineStore {
   commitCheckpoint(checkpoint: WorldCheckpoint): Promise<void>;
-  /** @deprecated New world history must use commitCheckpoint. */
-  appendEvents(events: readonly DomainEvent[]): Promise<void>;
-  /** @deprecated New world history must use commitCheckpoint. */
-  saveSnapshot(snapshot: WorldSnapshot): Promise<void>;
   savePluginLock(record: PluginLockRecord): Promise<void>;
   saveModelCall(record: ModelCallRecord): Promise<void>;
   recordFailure(worldId: WorldId, failure: TechnicalFailure): Promise<void>;

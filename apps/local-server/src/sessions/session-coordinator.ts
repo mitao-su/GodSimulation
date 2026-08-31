@@ -1,11 +1,12 @@
 import type {
+  CheckpointId,
   HostToWorkerMessage,
   TechnicalFailure,
   WorkerToHostMessage,
   WorldCommand,
   WorldView,
 } from "@god-sim/protocol";
-import { RequestIdSchema, TechnicalFailureSchema, WorldViewSchema } from "@god-sim/protocol";
+import { TechnicalFailureSchema, WorldViewSchema } from "@god-sim/protocol";
 import type { DecisionProvider } from "@god-sim/model-gateway";
 
 import {
@@ -40,7 +41,6 @@ export class SessionCoordinator {
   readonly #onError: (error: unknown) => void;
   readonly #tasks = new Set<Promise<void>>();
   readonly #viewListeners = new Set<(view: WorldView) => void>();
-  readonly #snapshotKeys = new Set<string>();
   readonly #pendingDecisionMessages = new Map<
     string,
     Extract<WorkerToHostMessage, { type: "decision_requested" }>
@@ -50,6 +50,7 @@ export class SessionCoordinator {
   #view: WorldView | null = null;
   #failureSequence = 0;
   #terminalFailure: TechnicalFailure | null = null;
+  #failedCheckpointId: CheckpointId | null = null;
 
   constructor(options: SessionCoordinatorOptions) {
     this.#worker = options.worker;
@@ -137,6 +138,7 @@ export class SessionCoordinator {
           retryable: false,
           blockWorker: true,
           requestId: message.result.requestId,
+          persistWorldId: message.result.worldId,
         });
         return;
       case "decision_requested": {
@@ -155,12 +157,30 @@ export class SessionCoordinator {
         }
         return;
       }
+      case "checkpoint_ready":
+        try {
+          await this.#persistence.commitCheckpoint(message);
+        } catch (error) {
+          if (
+            this.#failedCheckpointId &&
+            this.#failedCheckpointId !== message.checkpointId
+          ) {
+            throw new Error(
+              `Persistence already retains failed checkpoint ${this.#failedCheckpointId}`,
+              { cause: error },
+            );
+          }
+          this.#failedCheckpointId = message.checkpointId;
+          throw error;
+        }
+        await this.#worker.send({
+          type: "checkpoint_committed",
+          checkpointId: message.checkpointId,
+        });
+        return;
       case "event_batch":
-        await this.#persistence.appendEvents(message.events);
-        return;
       case "snapshot_ready":
-        await this.#persistence.saveSnapshot(message.snapshot);
-        return;
+        throw new Error(`Legacy world-history message ${message.type} is not supported`);
       case "world_view":
         if (this.#terminalFailure) {
           if (
@@ -168,7 +188,6 @@ export class SessionCoordinator {
             message.view.technicalFailure?.id === this.#terminalFailure.id
           ) {
             this.#publishView(message.view);
-            await this.#requestFreezeSnapshot(message.view);
             return;
           }
           if (!this.#view) {
@@ -177,7 +196,6 @@ export class SessionCoordinator {
           return;
         }
         this.#publishView(message.view);
-        await this.#requestFreezeSnapshot(message.view);
         return;
       case "technical_failure":
         this.#decisions.cancelAll("Simulation worker reported a technical failure");
@@ -201,17 +219,6 @@ export class SessionCoordinator {
   #publishView(view: WorldView): void {
     this.#view = view;
     for (const listener of this.#viewListeners) listener(view);
-  }
-
-  async #requestFreezeSnapshot(view: WorldView): Promise<void> {
-    if (view.mode !== "THINKING" && view.mode !== "TECHNICALLY_BLOCKED") return;
-    const key = `${view.worldId}:${view.worldVersion}`;
-    if (this.#snapshotKeys.has(key)) return;
-    this.#snapshotKeys.add(key);
-    await this.#worker.send({
-      type: "request_snapshot",
-      requestId: RequestIdSchema.parse(`snapshot:${key}`),
-    });
   }
 
   async #retryTechnicalFailure(
@@ -243,8 +250,23 @@ export class SessionCoordinator {
       throw error;
     }
 
-    this.#terminalFailure = null;
     try {
+      if (this.#failedCheckpointId) {
+        const checkpointId = this.#failedCheckpointId;
+        try {
+          await this.#worker.send({ type: "checkpoint_committed", checkpointId });
+        } catch (error) {
+          await this.#publishHostFailure({
+            error,
+            category: "worker",
+            retryable: false,
+            blockWorker: false,
+          });
+          throw error;
+        }
+        this.#failedCheckpointId = null;
+      }
+      this.#terminalFailure = null;
       await this.#worker.send({ type: "world_command", command });
       for (const [requestId, outcome] of this.#pendingDecisionOutcomes) {
         await this.#sendDecisionOutcome(outcome);
@@ -272,8 +294,7 @@ export class SessionCoordinator {
   ): Promise<void> {
     const rootError = error instanceof DecisionPersistenceError ? error.cause : error;
     const persistenceMessage =
-      message.type === "event_batch" ||
-      message.type === "snapshot_ready" ||
+      message.type === "checkpoint_ready" ||
       message.type === "technical_failure" ||
       error instanceof DecisionPersistenceError;
     await this.#publishHostFailure({
@@ -293,6 +314,7 @@ export class SessionCoordinator {
     readonly retryable: boolean;
     readonly blockWorker: boolean;
     readonly requestId?: string;
+    readonly persistWorldId?: WorldView["worldId"];
   }): Promise<void> {
     try {
       this.#onError(options.error);
@@ -318,6 +340,19 @@ export class SessionCoordinator {
       retryable: options.retryable,
       occurredAtRealTime: this.#now(),
     });
+    if (options.persistWorldId) {
+      try {
+        await this.#persistence.recordFailure(options.persistWorldId, failure);
+      } catch (error) {
+        await this.#publishHostFailure({
+          error,
+          category: "persistence",
+          retryable: true,
+          blockWorker: true,
+        });
+        return;
+      }
+    }
     this.#terminalFailure = failure;
     if (options.blockWorker) {
       try {

@@ -32,6 +32,13 @@ function snapshotAgents(engine: SimulationEngine): readonly CausalSnapshotAgent[
     .agents;
 }
 
+function takeEvents(engine: SimulationEngine): readonly DomainEvent[] {
+  const checkpoint = engine.prepareCheckpoint();
+  const acknowledged = engine.acknowledgeCheckpoint(checkpoint.checkpointId);
+  if (!acknowledged.accepted) throw new Error(acknowledged.reason);
+  return checkpoint.events;
+}
+
 function lockedPassageEngine(): SimulationEngine {
   const worldDefinition = {
     ...starterHome,
@@ -56,7 +63,7 @@ function runUntilActionFailure(engine: SimulationEngine): {
   const events: DomainEvent[] = [];
   for (let count = 0; count < 500; count += 1) {
     engine.tick();
-    events.push(...engine.drainEvents());
+    events.push(...takeEvents(engine));
     const failure = events.find((event) => event.type === "action_failed");
     if (failure?.type === "action_failed") return { events, failure };
   }
@@ -66,7 +73,7 @@ function runUntilActionFailure(engine: SimulationEngine): {
 describe("causal memory", () => {
   it("uses real startup events for every initial memory and known entity", () => {
     const engine = starterEngine({ reviewRequired: true });
-    const eventIds = new Set(engine.drainEvents().map((event) => event.eventId));
+    const eventIds = new Set(takeEvents(engine).map((event) => event.eventId));
 
     for (const agent of snapshotAgents(engine)) {
       for (const memory of agent.memories) {
@@ -88,11 +95,11 @@ describe("causal memory", () => {
 
   it("remembers a failed automatic traversal from its action_failed event", () => {
     const engine = lockedPassageEngine();
-    engine.drainEvents();
+    takeEvents(engine);
     adoptGoal(engine, "alice" as never, selectUseObject("fridge-1"));
     adoptGoal(engine, "bob" as never, selectWait);
     engine.tick();
-    engine.drainEvents();
+    takeEvents(engine);
     engine.dispatch(releaseCommand(engine));
 
     const { failure } = runUntilActionFailure(engine);
@@ -111,15 +118,14 @@ describe("causal memory", () => {
       reviewRequired: true,
       aliceBladder: 74,
     });
-    engine.drainEvents();
+    takeEvents(engine);
     adoptGoal(engine, "alice" as never, selectWait);
     adoptGoal(engine, "bob" as never, selectWait);
     engine.tick();
-    engine.drainEvents();
+    takeEvents(engine);
     engine.dispatch(releaseCommand(engine));
     engine.tick();
-    const needEvent = engine
-      .drainEvents()
+    const needEvent = takeEvents(engine)
       .find(
         (event) =>
           event.type === "agent_need_changed" &&

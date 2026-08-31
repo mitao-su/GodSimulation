@@ -25,6 +25,125 @@ const pluginLock = PluginLockSchema.parse({
 });
 
 describe("WorldSession restoration", () => {
+  it("waits for the initial checkpoint before publishing model requests", () => {
+    const emitted: WorkerToHostMessage[] = [];
+    const session = new WorldSession({
+      worldDefinition: starterHome,
+      plugins: [spatialPlugin, homePlugin, agentsPlugin],
+      pluginLock,
+      reviewRequired: true,
+      deterministicSeed: 1,
+      emit: (message) => emitted.push(message),
+    });
+
+    session.start();
+
+    const checkpoint = emitted.find((message) => message.type === "checkpoint_ready");
+    expect(checkpoint).toBeDefined();
+    expect(emitted.filter((message) => message.type === "decision_requested")).toEqual([]);
+    session.tick();
+    expect(emitted.filter((message) => message.type === "decision_requested")).toEqual([]);
+
+    session.handle({
+      type: "checkpoint_committed",
+      checkpointId: checkpoint!.checkpointId,
+    });
+
+    expect(emitted.filter((message) => message.type === "decision_requested"))
+      .toHaveLength(2);
+  });
+
+  it("does not advance a released world before its checkpoint is acknowledged", () => {
+    const emitted: WorkerToHostMessage[] = [];
+    const session = new WorldSession({
+      worldDefinition: starterHome,
+      plugins: [spatialPlugin, homePlugin, agentsPlugin],
+      pluginLock,
+      reviewRequired: true,
+      deterministicSeed: 1,
+      emit: (message) => emitted.push(message),
+    });
+    session.start();
+    const initial = emitted.find((message) => message.type === "checkpoint_ready")!;
+    session.handle({ type: "checkpoint_committed", checkpointId: initial.checkpointId });
+    const requests = emitted.filter(
+      (message): message is Extract<WorkerToHostMessage, { type: "decision_requested" }> =>
+        message.type === "decision_requested",
+    );
+    for (const { request } of requests) {
+      const wait = request.goalOptions.find((option) => option.goal.kind === "wait")!;
+      session.handle({
+        type: "decision_result",
+        result: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          worldId: request.worldId,
+          worldVersion: request.worldVersion,
+          decisionCycleId: request.decisionCycleId,
+          schemaVersion: request.schemaVersion,
+          pluginLockHash: request.pluginLockHash,
+          proposal: {
+            schemaVersion: 1,
+            goalOptionId: wait.id,
+            reason: "Wait",
+          },
+        },
+      });
+    }
+    const ready = emitted.filter((message) => message.type === "world_view").at(-1)!.view;
+    session.handle({
+      type: "world_command",
+      command: {
+        schemaVersion: 1,
+        commandId: "command:release:checkpoint-test" as never,
+        worldId: ready.worldId,
+        expectedWorldVersion: ready.worldVersion,
+        issuedAtRealTime: "2026-08-31T00:00:00.000Z",
+        type: "release_execution",
+      },
+    });
+
+    const released = emitted.filter((message) => message.type === "checkpoint_ready").at(-1)!;
+    expect(released.snapshot.worldTick).toBe(0);
+    session.tick();
+    expect(emitted.filter((message) => message.type === "world_view").at(-1)!.view.worldTick)
+      .toBe(0);
+
+    session.handle({ type: "checkpoint_committed", checkpointId: released.checkpointId });
+    session.tick();
+    expect(emitted.filter((message) => message.type === "world_view").at(-1)!.view.worldTick)
+      .toBe(1);
+  });
+
+  it("does not replace a failed pending checkpoint with a technical-state checkpoint", () => {
+    const emitted: WorkerToHostMessage[] = [];
+    const session = new WorldSession({
+      worldDefinition: starterHome,
+      plugins: [spatialPlugin, homePlugin, agentsPlugin],
+      pluginLock,
+      reviewRequired: true,
+      deterministicSeed: 1,
+      emit: (message) => emitted.push(message),
+    });
+    session.start();
+
+    session.block({
+      id: "failure:persistence:checkpoint",
+      category: "persistence",
+      message: "disk unavailable",
+      retryable: true,
+      occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+    });
+
+    expect(emitted.filter((message) => message.type === "checkpoint_ready"))
+      .toHaveLength(1);
+    expect(emitted.filter((message) => message.type === "world_view").at(-1)!.view)
+      .toMatchObject({
+        mode: "TECHNICALLY_BLOCKED",
+        technicalFailure: { category: "persistence" },
+      });
+  });
+
   it("resumes model requests from a normally stopped thinking snapshot", () => {
     const plugins = [spatialPlugin, homePlugin, agentsPlugin];
     const engine = createSimulation({
@@ -105,6 +224,17 @@ describe("WorldSession restoration", () => {
         type: "retry_decision",
         requestId: alice.requestId,
       },
+    });
+
+    const checkpoint = emitted.findLast(
+      (message) => message.type === "checkpoint_ready",
+    );
+    if (!checkpoint || checkpoint.type !== "checkpoint_ready") {
+      throw new Error("Expected retry checkpoint");
+    }
+    session.handle({
+      type: "checkpoint_committed",
+      checkpointId: checkpoint.checkpointId,
     });
 
     const resumed = emitted.filter(

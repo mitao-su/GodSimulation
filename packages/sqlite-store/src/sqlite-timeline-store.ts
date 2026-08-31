@@ -11,7 +11,6 @@ import {
   type DomainEvent,
   type TechnicalFailure,
   type WorldId,
-  type WorldSnapshot,
 } from "@god-sim/protocol";
 import type {
   ModelCallRecord,
@@ -268,76 +267,6 @@ class SqliteTimelineStore implements TimelineStore {
         );
       }
       await assertCausalEventsExist(transaction, checkpoint);
-    });
-  }
-
-  async appendEvents(eventValues: readonly DomainEvent[]): Promise<void> {
-    if (eventValues.length === 0) return;
-    const events = eventValues.map((event) => DomainEventSchema.parse(event));
-    await this.#db.transaction().execute(async (transaction) => {
-      for (const event of events) {
-        await ensureWorld(transaction, event.worldId);
-        const payloadJson = JSON.stringify(event);
-        await transaction
-          .insertInto("events")
-          .values({
-            world_id: event.worldId,
-            sequence: event.sequence,
-            event_id: event.eventId,
-            world_version: event.worldVersion,
-            world_tick: event.worldTick,
-            event_type: event.type,
-            payload_json: payloadJson,
-          })
-          .onConflict((conflict) =>
-            conflict.columns(["world_id", "sequence"]).doNothing(),
-          )
-          .execute();
-        const stored = await transaction
-          .selectFrom("events")
-          .select(["event_id", "payload_json"])
-          .where("world_id", "=", event.worldId)
-          .where("sequence", "=", event.sequence)
-          .executeTakeFirstOrThrow();
-        if (stored.event_id !== event.eventId || stored.payload_json !== payloadJson) {
-          throw new Error(
-            `Event replay conflicts at ${event.worldId} sequence ${event.sequence}`,
-          );
-        }
-      }
-    });
-  }
-
-  async saveSnapshot(snapshotValue: WorldSnapshot): Promise<void> {
-    const snapshot = WorldSnapshotSchema.parse(snapshotValue);
-    await this.#db.transaction().execute(async (transaction) => {
-      await ensureWorld(transaction, snapshot.worldId);
-      const payloadJson = JSON.stringify(snapshot);
-      const stored = await transaction
-        .selectFrom("snapshots")
-        .select("payload_json")
-        .where("world_id", "=", snapshot.worldId)
-        .where("world_version", "=", snapshot.worldVersion)
-        .execute();
-      if (stored.length > 0) {
-        if (stored.some((row) => row.payload_json !== payloadJson)) {
-          throw new Error(
-            `Snapshot replay conflicts at ${snapshot.worldId} version ${snapshot.worldVersion}`,
-          );
-        }
-        return;
-      }
-      await transaction
-        .insertInto("snapshots")
-        .values({
-          world_id: snapshot.worldId,
-          world_version: snapshot.worldVersion,
-          world_tick: snapshot.worldTick,
-          last_event_sequence: snapshot.lastEventSequence,
-          checkpoint_id: null,
-          payload_json: payloadJson,
-        })
-        .executeTakeFirstOrThrow();
     });
   }
 

@@ -1,102 +1,103 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorldSnapshot } from "@god-sim/protocol";
-import type { TimelineStore } from "@god-sim/timeline";
+import type { TimelineStore, WorldCheckpoint } from "@god-sim/timeline";
 
 import { PersistenceWriter } from "./persistence-writer";
 
-function snapshot(worldVersion: number): WorldSnapshot {
+function checkpoint(worldVersion: number): WorldCheckpoint {
   return {
-    schemaVersion: 1,
-    worldId: "starter-world" as never,
-    worldVersion,
-    worldTick: worldVersion,
-    lastEventSequence: 0,
-    pluginLockHash: "a".repeat(64) as never,
-    state: {},
+    checkpointId: `checkpoint:starter-world:${worldVersion}:0` as never,
+    events: [],
+    snapshot: {
+      schemaVersion: 2,
+      worldId: "starter-world" as never,
+      worldVersion,
+      worldTick: worldVersion,
+      lastEventSequence: 0,
+      pluginLockHash: "a".repeat(64) as never,
+      history: { mode: "strict", causalFromSequence: 1 },
+      causalEventIds: [],
+      state: {},
+    },
+  };
+}
+
+function timelineStore(
+  commitCheckpoint: TimelineStore["commitCheckpoint"],
+  close: TimelineStore["close"] = async () => undefined,
+): TimelineStore {
+  return {
+    commitCheckpoint,
+    async savePluginLock() {},
+    async saveModelCall() {},
+    async recordFailure() {},
+    async loadLatest() {
+      return { snapshot: null, events: [] };
+    },
+    close,
   };
 }
 
 describe("PersistenceWriter", () => {
-  it("holds later writes behind a failure and replays them in order", async () => {
-    const attempts: number[] = [];
+  it("retries a failed checkpoint as one unchanged operation", async () => {
+    const attempts: WorldCheckpoint[] = [];
     let diskAvailable = false;
-    const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot(value) {
-        attempts.push(value.worldVersion);
-        if (!diskAvailable) throw new Error("disk unavailable");
-      },
-      async savePluginLock() {},
-      async saveModelCall() {},
-      async recordFailure() {},
-      async loadLatest() {
-        return { snapshot: null, events: [] };
-      },
-      async close() {},
-    };
+    const store = timelineStore(async (value) => {
+      attempts.push(value);
+      if (!diskAvailable) throw new Error("disk unavailable");
+    });
     const writer = new PersistenceWriter(store);
+    const first = checkpoint(1);
+    const second = checkpoint(2);
 
-    await expect(writer.saveSnapshot(snapshot(1))).rejects.toThrow("disk unavailable");
-    await expect(writer.saveSnapshot(snapshot(2))).rejects.toThrow(/retry/i);
-    expect(attempts).toEqual([1]);
+    await expect(writer.commitCheckpoint(first)).rejects.toThrow("disk unavailable");
+    await expect(writer.commitCheckpoint(second)).rejects.toThrow(/retry/i);
+    expect(attempts).toEqual([first]);
 
     diskAvailable = true;
     await writer.retryFailed();
 
-    expect(attempts).toEqual([1, 1, 2]);
+    expect(attempts).toEqual([first, first, second]);
+    expect(attempts[1]).toBe(first);
     await writer.close();
   });
 
   it("stays blocked when the store rejects with a non-Error value", async () => {
-    const attempts: number[] = [];
+    const attempts: WorldCheckpoint[] = [];
     let diskAvailable = false;
-    const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot(value) {
-        attempts.push(value.worldVersion);
-        if (!diskAvailable) throw null;
-      },
-      async savePluginLock() {},
-      async saveModelCall() {},
-      async recordFailure() {},
-      async loadLatest() {
-        return { snapshot: null, events: [] };
-      },
-      async close() {},
-    };
+    const store = timelineStore(async (value) => {
+      attempts.push(value);
+      if (!diskAvailable) throw null;
+    });
     const writer = new PersistenceWriter(store);
+    const first = checkpoint(1);
+    const second = checkpoint(2);
 
-    await expect(writer.saveSnapshot(snapshot(1))).rejects.toBeNull();
-    await expect(writer.saveSnapshot(snapshot(2))).rejects.toThrow(/retry/i);
-    expect(attempts).toEqual([1]);
+    await expect(writer.commitCheckpoint(first)).rejects.toBeNull();
+    await expect(writer.commitCheckpoint(second)).rejects.toThrow(/retry/i);
+    expect(attempts).toEqual([first]);
 
     diskAvailable = true;
     await writer.retryFailed();
 
-    expect(attempts).toEqual([1, 1, 2]);
+    expect(attempts).toEqual([first, first, second]);
     await writer.close();
   });
 
-  it("closes the store but reports writes that were never retried", async () => {
+  it("closes the store but reports checkpoints that were never retried", async () => {
     let closed = false;
-    const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+    const store = timelineStore(
+      async () => {
         throw new Error("disk unavailable");
       },
-      async savePluginLock() {},
-      async saveModelCall() {},
-      async recordFailure() {},
-      async loadLatest() {
-        return { snapshot: null, events: [] };
-      },
-      async close() {
+      async () => {
         closed = true;
       },
-    };
+    );
     const writer = new PersistenceWriter(store);
-    await expect(writer.saveSnapshot(snapshot(1))).rejects.toThrow("disk unavailable");
+    await expect(writer.commitCheckpoint(checkpoint(1))).rejects.toThrow(
+      "disk unavailable",
+    );
 
     await expect(writer.close()).rejects.toThrow(/1 unsaved persistence operation/i);
     expect(closed).toBe(true);

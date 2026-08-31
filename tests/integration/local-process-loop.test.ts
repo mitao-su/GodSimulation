@@ -17,17 +17,40 @@ function requests(messages: readonly WorkerToHostMessage[]): ModelDecisionReques
 }
 
 describe("local worker process", () => {
-  it("publishes a final snapshot before a normal shutdown", async () => {
-    const { worker, messages } = await startTestWorker();
+  it("publishes a final checkpoint before a normal shutdown", async () => {
+    const session = await startTestWorker();
+    const { worker, messages } = session;
+    const initialCheckpoint = await session.acknowledgeNextCheckpoint();
+    await vi.waitFor(() => expect(requests(messages)).toHaveLength(2));
 
-    await vi.waitFor(() => expect(latestView(messages)).toBeDefined());
+    const request = requests(messages)[0]!;
+    const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
+    await worker.send({
+      type: "decision_result",
+      result: {
+        requestId: request.requestId,
+        agentId: request.agentId,
+        worldId: request.worldId,
+        worldVersion: request.worldVersion,
+        decisionCycleId: request.decisionCycleId,
+        schemaVersion: request.schemaVersion,
+        pluginLockHash: request.pluginLockHash,
+        proposal: { schemaVersion: 1, goalOptionId: option.id, reason: "Wait" },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(latestView(messages)!.worldVersion).toBeGreaterThan(
+        initialCheckpoint.snapshot.worldVersion,
+      ),
+    );
     const beforeShutdown = latestView(messages)!;
-    await worker.stop();
+    await session.stop();
 
-    const snapshot = messages
-      .filter((message) => message.type === "snapshot_ready")
-      .at(-1)?.snapshot;
-    expect(snapshot).toMatchObject({
+    const finalCheckpoint = messages
+      .filter((message) => message.type === "checkpoint_ready")
+      .at(-1);
+    expect(finalCheckpoint?.checkpointId).not.toBe(initialCheckpoint.checkpointId);
+    expect(finalCheckpoint?.snapshot).toMatchObject({
       worldId: beforeShutdown.worldId,
       worldVersion: beforeShutdown.worldVersion,
       worldTick: beforeShutdown.worldTick,
@@ -35,8 +58,10 @@ describe("local worker process", () => {
   }, 20_000);
 
   it("keeps time frozen until every model result is accepted", async () => {
-    const { worker, messages } = await startTestWorker();
+    const session = await startTestWorker();
+    const { worker, messages } = session;
     try {
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() => expect(requests(messages)).toHaveLength(2));
       const before = latestView(messages)!;
       expect(before).toMatchObject({ mode: "THINKING", worldTick: 0 });
@@ -94,13 +119,15 @@ describe("local worker process", () => {
         }),
       );
     } finally {
-      await worker.stop();
+      await session.stop();
     }
   }, 20_000);
 
   it("freezes the authoritative world after a host technical failure", async () => {
-    const { worker, messages } = await startTestWorker();
+    const session = await startTestWorker();
+    const { worker, messages } = session;
     try {
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() => expect(requests(messages)).toHaveLength(2));
       for (const request of requests(messages)) {
         const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
@@ -137,6 +164,12 @@ describe("local worker process", () => {
           type: "release_execution",
         },
       });
+      await vi.waitFor(() =>
+        expect(latestView(messages)).toMatchObject({ mode: "RUNNING", worldTick: 0 }),
+      );
+      await delay(150);
+      expect(latestView(messages)?.worldTick).toBe(0);
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() => expect(latestView(messages)?.worldTick).toBeGreaterThan(0));
 
       await worker.send({
@@ -165,6 +198,7 @@ describe("local worker process", () => {
       });
 
       const blocked = latestView(messages)!;
+      await session.acknowledgeNextCheckpoint();
       await worker.send({
         type: "world_command",
         command: {
@@ -183,9 +217,10 @@ describe("local worker process", () => {
           technicalFailure: null,
         }),
       );
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() => expect(latestView(messages)!.worldTick).toBeGreaterThan(blockedTick));
     } finally {
-      await worker.stop();
+      await session.stop();
     }
   }, 20_000);
 });

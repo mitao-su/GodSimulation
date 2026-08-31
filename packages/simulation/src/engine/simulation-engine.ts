@@ -93,8 +93,6 @@ export interface SimulationEngine {
   getPendingDecisionInputs(): readonly DecisionPromptInput[];
   prepareCheckpoint(): SimulationCheckpoint;
   acknowledgeCheckpoint(checkpointId: CheckpointId): BufferResult;
-  /** @deprecated Use prepareCheckpoint and acknowledgeCheckpoint. */
-  drainEvents(): readonly DomainEvent[];
   createSnapshot(): WorldSnapshotV2;
 }
 
@@ -285,12 +283,13 @@ class DeterministicSimulationEngine implements SimulationEngine {
   tick(): WorldView {
     if (this.#stopped) return this.getView();
     const before = this.#world;
+    const wasRunning = before.mode === "RUNNING";
     const eventCount = this.#eventOutbox.length;
 
     this.#processCommands();
     this.#commitBufferedDecisions();
 
-    if (this.#world.mode === "RUNNING") {
+    if (wasRunning && this.#world.mode === "RUNNING" && !this.#stopped) {
       const result = runTickPipeline(this.#world, this.#registry);
       this.#world = result.world;
       this.#recordEvents(result.events);
@@ -363,13 +362,6 @@ class DeterministicSimulationEngine implements SimulationEngine {
     this.#eventOutbox = this.#eventOutbox.slice(prepared.eventCount);
     this.#preparedCheckpoint = null;
     return { accepted: true, reason: `Checkpoint ${checkpointId} acknowledged` };
-  }
-
-  drainEvents(): readonly DomainEvent[] {
-    const events = this.#eventOutbox;
-    this.#eventOutbox = [];
-    this.#preparedCheckpoint = null;
-    return events;
   }
 
   createSnapshot(): WorldSnapshotV2 {

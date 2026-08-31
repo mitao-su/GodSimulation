@@ -23,6 +23,37 @@ const pluginLock: PluginLock = {
 };
 
 describe("WorkerMessageHandler", () => {
+  it("defers initialized shutdown until the final checkpoint is acknowledged", () => {
+    const messages: WorkerToHostMessage[] = [];
+    let stopped = false;
+    const handler = new WorkerMessageHandler({
+      plugins: [spatialPlugin, homePlugin, agentsPlugin],
+      pluginLock,
+      emit: (message) => messages.push(message),
+      onShutdown: () => {
+        stopped = true;
+      },
+    });
+    handler.handle({
+      type: "initialize",
+      protocolVersion: 1,
+      worldDefinition: JsonValueSchema.parse(starterHome),
+      pluginLock,
+      reviewRequired: true,
+      deterministicSeed: 1,
+    });
+    const checkpoint = messages.find((message) => message.type === "checkpoint_ready")!;
+
+    handler.handle({ type: "shutdown" });
+
+    expect(stopped).toBe(false);
+    handler.handle({
+      type: "checkpoint_committed",
+      checkpointId: checkpoint.checkpointId,
+    });
+    expect(stopped).toBe(true);
+  });
+
   it("accepts shutdown even when world initialization failed", () => {
     const messages: WorkerToHostMessage[] = [];
     let stopped = false;
@@ -57,6 +88,16 @@ describe("WorkerMessageHandler", () => {
       pluginLock,
       reviewRequired: true,
       deterministicSeed: 1,
+    });
+    const initialCheckpoint = messages.find(
+      (message) => message.type === "checkpoint_ready",
+    );
+    if (!initialCheckpoint || initialCheckpoint.type !== "checkpoint_ready") {
+      throw new Error("Expected initial checkpoint");
+    }
+    handler.handle({
+      type: "checkpoint_committed",
+      checkpointId: initialCheckpoint.checkpointId,
     });
     const requests = messages.filter(
       (message): message is Extract<WorkerToHostMessage, { type: "decision_requested" }> =>
@@ -94,6 +135,19 @@ describe("WorkerMessageHandler", () => {
         type: "release_execution",
       },
     });
+    const runningCheckpoint = messages.findLast(
+      (message) => message.type === "checkpoint_ready",
+    );
+    if (!runningCheckpoint || runningCheckpoint.type !== "checkpoint_ready") {
+      throw new Error("Expected running checkpoint");
+    }
+    const released = messages.filter((message) => message.type === "world_view").at(-1)!.view;
+    expect(released).toMatchObject({ mode: "RUNNING", worldTick: 0 });
+    handler.handle({
+      type: "checkpoint_committed",
+      checkpointId: runningCheckpoint.checkpointId,
+    });
+    handler.tick();
     const running = messages.filter((message) => message.type === "world_view").at(-1)!.view;
     expect(running.mode).toBe("RUNNING");
     expect(running.worldTick).toBeGreaterThan(0);
@@ -160,6 +214,17 @@ describe("WorkerMessageHandler", () => {
         type: "retry_technical_failure",
         failureId: failure.id,
       },
+    });
+
+    const retryCheckpoint = messages.findLast(
+      (message) => message.type === "checkpoint_ready",
+    );
+    if (!retryCheckpoint || retryCheckpoint.type !== "checkpoint_ready") {
+      throw new Error("Expected retry checkpoint");
+    }
+    handler.handle({
+      type: "checkpoint_committed",
+      checkpointId: retryCheckpoint.checkpointId,
     });
 
     expect(messages.filter((message) => message.type === "decision_requested"))

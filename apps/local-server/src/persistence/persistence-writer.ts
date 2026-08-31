@@ -1,13 +1,12 @@
 import type {
-  DomainEvent,
   TechnicalFailure,
   WorldId,
-  WorldSnapshot,
 } from "@god-sim/protocol";
 import type {
   ModelCallRecord,
   PluginLockRecord,
   TimelineStore,
+  WorldCheckpoint,
 } from "@god-sim/timeline";
 
 export class PersistenceWriter {
@@ -25,12 +24,10 @@ export class PersistenceWriter {
     return new PersistenceWriter(null);
   }
 
-  appendEvents(events: readonly DomainEvent[]): Promise<void> {
-    return this.#enqueue(() => this.#store?.appendEvents(events) ?? Promise.resolve());
-  }
-
-  saveSnapshot(snapshot: WorldSnapshot): Promise<void> {
-    return this.#enqueue(() => this.#store?.saveSnapshot(snapshot) ?? Promise.resolve());
+  commitCheckpoint(checkpoint: WorldCheckpoint): Promise<void> {
+    return this.#enqueue(
+      () => this.#store?.commitCheckpoint(checkpoint) ?? Promise.resolve(),
+    );
   }
 
   savePluginLock(record: PluginLockRecord): Promise<void> {

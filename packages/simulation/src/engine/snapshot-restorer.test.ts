@@ -115,7 +115,9 @@ describe("simulation snapshot restoration", () => {
       seed: 1,
       pluginLockHash: "a".repeat(64),
     });
-    original.drainEvents();
+    const originalCheckpoint = original.prepareCheckpoint();
+    expect(original.acknowledgeCheckpoint(originalCheckpoint.checkpointId).accepted)
+      .toBe(true);
     const snapshot = original.createSnapshot();
 
     const restored = restoreSimulation({
@@ -128,7 +130,7 @@ describe("simulation snapshot restoration", () => {
     expect(restored.getPendingDecisionInputs()).toEqual(
       original.getPendingDecisionInputs(),
     );
-    expect(restored.drainEvents()).toEqual([]);
+    expect(restored.prepareCheckpoint().events).toEqual([]);
   });
 
   it("assigns a legacy world-level model failure back to its decision request", () => {

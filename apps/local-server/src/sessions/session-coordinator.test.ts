@@ -57,16 +57,20 @@ function worldView(): Extract<WorkerToHostMessage, { type: "world_view" }>["view
   };
 }
 
-function snapshotReady(): Extract<WorkerToHostMessage, { type: "snapshot_ready" }> {
+function checkpointReady(): Extract<WorkerToHostMessage, { type: "checkpoint_ready" }> {
   return {
-    type: "snapshot_ready",
+    type: "checkpoint_ready",
+    checkpointId: "checkpoint:starter-world:1:0" as never,
+    events: [],
     snapshot: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       worldId: "starter-world" as never,
       worldVersion: 1,
       worldTick: 0,
       lastEventSequence: 0,
       pluginLockHash: "a".repeat(64) as never,
+      history: { mode: "strict", causalFromSequence: 1 },
+      causalEventIds: [],
       state: {},
     },
   };
@@ -114,6 +118,125 @@ function deferredProvider() {
 }
 
 describe("SessionCoordinator", () => {
+  it("acknowledges a checkpoint only after its atomic commit resolves", async () => {
+    let markCommitStarted: (() => void) | undefined;
+    const commitStarted = new Promise<void>((resolve) => {
+      markCommitStarted = resolve;
+    });
+    let releaseCommit: (() => void) | undefined;
+    const commitReleased = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const store: TimelineStore = {
+      async commitCheckpoint() {
+        markCommitStarted?.();
+        await commitReleased;
+      },
+      async savePluginLock() {},
+      async saveModelCall() {},
+      async recordFailure() {},
+      async loadLatest() {
+        return { snapshot: null, events: [] };
+      },
+      async close() {},
+    };
+    const worker = new FakeWorker();
+    const coordinator = new SessionCoordinator({
+      worker,
+      decisionProvider: deferredProvider().provider,
+      persistence: new PersistenceWriter(store),
+      modelId: "fixed-test",
+    });
+    await coordinator.start();
+
+    worker.emit(checkpointReady());
+    await commitStarted;
+    expect(worker.sent.filter((message) => message.type === "checkpoint_committed"))
+      .toEqual([]);
+
+    releaseCommit?.();
+    await coordinator.waitForIdle();
+    expect(worker.sent).toContainEqual({
+      type: "checkpoint_committed",
+      checkpointId: checkpointReady().checkpointId,
+    });
+    await coordinator.stop();
+  });
+
+  it("keeps an accepted model row when the worker rejects world adoption", async () => {
+    const modelStatuses: string[] = [];
+    const failures: Array<{
+      requestId: string | undefined;
+      category: string;
+    }> = [];
+    const store: TimelineStore = {
+      async commitCheckpoint() {},
+      async savePluginLock() {},
+      async saveModelCall(record) {
+        modelStatuses.push(record.status);
+      },
+      async recordFailure(_worldId, failure) {
+        failures.push({
+          requestId: failure.requestId,
+          category: failure.category,
+        });
+      },
+      async loadLatest() {
+        return { snapshot: null, events: [] };
+      },
+      async close() {},
+    };
+    const worker = new FakeWorker();
+    const coordinator = new SessionCoordinator({
+      worker,
+      decisionProvider: {
+        async decide() {
+          return {
+            schemaVersion: 1,
+            goalOptionId: "alice-wait" as never,
+            reason: "Alice waits",
+          };
+        },
+      },
+      persistence: new PersistenceWriter(store),
+      modelId: "fixed-test",
+      now: () => "2026-08-31T00:00:00.000Z",
+    });
+    await coordinator.start();
+    worker.emit({ type: "decision_requested", request: request("alice") });
+    await vi.waitFor(() =>
+      expect(worker.sent.some((message) => message.type === "decision_result")).toBe(true),
+    );
+    const delivered = worker.sent.find((message) => message.type === "decision_result")!;
+    if (delivered.type !== "decision_result") throw new Error("Missing result");
+
+    worker.emit({
+      type: "decision_rejected",
+      result: {
+        requestId: delivered.result.requestId,
+        agentId: delivered.result.agentId,
+        worldId: delivered.result.worldId,
+        worldVersion: delivered.result.worldVersion,
+        decisionCycleId: delivered.result.decisionCycleId,
+        schemaVersion: delivered.result.schemaVersion,
+        pluginLockHash: delivered.result.pluginLockHash,
+      },
+      reason: "World rejected the stale result",
+    });
+    await coordinator.waitForIdle();
+
+    expect(modelStatuses).toEqual(["accepted"]);
+    expect(failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestId: request("alice").requestId,
+          category: "protocol",
+        }),
+      ]),
+    );
+    await coordinator.stop();
+  });
+
   it("cancels model requests during shutdown without reporting a gameplay failure", async () => {
     const worker = new FakeWorker();
     const calls: string[] = [];
@@ -145,8 +268,7 @@ describe("SessionCoordinator", () => {
     const errors: unknown[] = [];
     let storeClosed = false;
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -169,7 +291,7 @@ describe("SessionCoordinator", () => {
     });
     await coordinator.start();
     worker.emit({ type: "world_view", view: worldView() });
-    worker.emit(snapshotReady());
+    worker.emit(checkpointReady());
     await vi.waitFor(() => expect(errors).toHaveLength(1));
 
     await expect(coordinator.stop()).resolves.toBeUndefined();
@@ -181,7 +303,7 @@ describe("SessionCoordinator", () => {
     );
   });
 
-  it("requests one durable snapshot when a decision freeze is first published", async () => {
+  it("does not request a host-driven snapshot for a decision freeze", async () => {
     const worker = new FakeWorker();
     const coordinator = new SessionCoordinator({
       worker,
@@ -194,11 +316,11 @@ describe("SessionCoordinator", () => {
     worker.emit({ type: "world_view", view: worldView() });
     await coordinator.waitForIdle();
 
-    expect(worker.sent.filter((message) => message.type === "request_snapshot")).toHaveLength(1);
+    expect(worker.sent.filter((message) => message.type === "request_snapshot")).toHaveLength(0);
     await coordinator.stop();
   });
 
-  it("requests a durable snapshot for an authoritative technical block", async () => {
+  it("does not request a host-driven snapshot for an authoritative technical block", async () => {
     const worker = new FakeWorker();
     const coordinator = new SessionCoordinator({
       worker,
@@ -233,7 +355,7 @@ describe("SessionCoordinator", () => {
     await coordinator.waitForIdle();
 
     expect(worker.sent.filter((message) => message.type === "request_snapshot"))
-      .toHaveLength(1);
+      .toHaveLength(0);
     await coordinator.stop();
   });
 
@@ -301,7 +423,7 @@ describe("SessionCoordinator", () => {
       });
       await coordinator.waitForIdle();
       expect(worker.sent.filter((message) => message.type === "request_snapshot"))
-        .toHaveLength(2);
+        .toHaveLength(0);
     } finally {
       await coordinator.stop();
     }
@@ -309,8 +431,7 @@ describe("SessionCoordinator", () => {
 
   it("turns a persistence write failure into a visible technical block", async () => {
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -331,18 +452,7 @@ describe("SessionCoordinator", () => {
     });
     await coordinator.start();
     worker.emit({ type: "world_view", view: worldView() });
-    worker.emit({
-      type: "snapshot_ready",
-      snapshot: {
-        schemaVersion: 1,
-        worldId: "starter-world" as never,
-        worldVersion: 1,
-        worldTick: 0,
-        lastEventSequence: 0,
-        pluginLockHash: "a".repeat(64) as never,
-        state: {},
-      },
-    });
+    worker.emit(checkpointReady());
 
     await vi.waitFor(() =>
       expect(coordinator.getView()).toMatchObject({
@@ -370,8 +480,7 @@ describe("SessionCoordinator", () => {
   it("retains a persistence failure reported before the first world view", async () => {
     const errors: unknown[] = [];
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         throw new Error("disk unavailable before first view");
       },
       async savePluginLock() {},
@@ -394,7 +503,7 @@ describe("SessionCoordinator", () => {
     await coordinator.start();
 
     try {
-      worker.emit(snapshotReady());
+      worker.emit(checkpointReady());
       await vi.waitFor(() => expect(errors).toHaveLength(1));
       expect(coordinator.getView()).toBeNull();
 
@@ -429,8 +538,7 @@ describe("SessionCoordinator", () => {
 
     const errors: unknown[] = [];
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -454,8 +562,8 @@ describe("SessionCoordinator", () => {
 
     try {
       worker.emit({ type: "world_view", view: worldView() });
-      worker.emit(snapshotReady());
-      worker.emit(snapshotReady());
+      worker.emit(checkpointReady());
+      worker.emit(checkpointReady());
       await vi.waitFor(() => expect(errors).toHaveLength(2));
 
       for (const resolve of worker.freezeResolvers) resolve();
@@ -483,8 +591,7 @@ describe("SessionCoordinator", () => {
     }
 
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -507,7 +614,7 @@ describe("SessionCoordinator", () => {
 
     try {
       worker.emit({ type: "world_view", view: worldView() });
-      worker.emit(snapshotReady());
+      worker.emit(checkpointReady());
 
       await vi.waitFor(() =>
         expect(coordinator.getView()).toMatchObject({
@@ -526,8 +633,7 @@ describe("SessionCoordinator", () => {
 
   it("cancels an in-flight model request when persistence blocks the session", async () => {
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -569,18 +675,7 @@ describe("SessionCoordinator", () => {
       await vi.waitFor(() => expect(coordinator.getView()).not.toBeNull());
       worker.emit({ type: "decision_requested", request: request("alice") });
       await vi.waitFor(() => expect(providerStarted).toBe(true));
-      worker.emit({
-        type: "snapshot_ready",
-        snapshot: {
-          schemaVersion: 1,
-          worldId: "starter-world" as never,
-          worldVersion: 1,
-          worldTick: 0,
-          lastEventSequence: 0,
-          pluginLockHash: "a".repeat(64) as never,
-          state: {},
-        },
-      });
+      worker.emit(checkpointReady());
 
       await vi.waitFor(() => expect(providerAborted).toBe(true));
       await coordinator.waitForIdle();
@@ -597,11 +692,10 @@ describe("SessionCoordinator", () => {
 
   it("retries the failed write before recovering the authoritative world view", async () => {
     let diskAvailable = false;
-    let snapshotAttempts = 0;
+    let checkpointAttempts = 0;
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
-        snapshotAttempts += 1;
+      async commitCheckpoint() {
+        checkpointAttempts += 1;
         if (!diskAvailable) throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -624,7 +718,7 @@ describe("SessionCoordinator", () => {
 
     try {
       worker.emit({ type: "world_view", view: worldView() });
-      worker.emit(snapshotReady());
+      worker.emit(checkpointReady());
       await vi.waitFor(() =>
         expect(coordinator.getView()).toMatchObject({
           mode: "TECHNICALLY_BLOCKED",
@@ -645,7 +739,11 @@ describe("SessionCoordinator", () => {
         failureId,
       });
 
-      expect(snapshotAttempts).toBe(2);
+      expect(checkpointAttempts).toBe(2);
+      expect(worker.sent).toContainEqual({
+        type: "checkpoint_committed",
+        checkpointId: checkpointReady().checkpointId,
+      });
       expect(worker.sent).toContainEqual({
         type: "world_command",
         command: expect.objectContaining({
@@ -671,8 +769,7 @@ describe("SessionCoordinator", () => {
   it("reissues a decision request cancelled by a persistence failure", async () => {
     let diskAvailable = false;
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {
+      async commitCheckpoint() {
         if (!diskAvailable) throw new Error("disk unavailable");
       },
       async savePluginLock() {},
@@ -712,7 +809,7 @@ describe("SessionCoordinator", () => {
       worker.emit({ type: "world_view", view: worldView() });
       worker.emit({ type: "decision_requested", request: request("alice") });
       await vi.waitFor(() => expect(calls).toBe(1));
-      worker.emit(snapshotReady());
+      worker.emit(checkpointReady());
       await vi.waitFor(() => expect(coordinator.getView()?.mode).toBe("TECHNICALLY_BLOCKED"));
       const blocked = coordinator.getView()!;
       diskAvailable = true;
@@ -741,8 +838,7 @@ describe("SessionCoordinator", () => {
   it("reuses a completed model result when only its persistence write failed", async () => {
     let diskAvailable = false;
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {},
+      async commitCheckpoint() {},
       async savePluginLock() {},
       async saveModelCall() {
         if (!diskAvailable) throw new Error("disk unavailable");
@@ -839,8 +935,7 @@ describe("SessionCoordinator", () => {
   it("keeps a worker failure authoritative when recording it also fails", async () => {
     const errors: unknown[] = [];
     const store: TimelineStore = {
-      async appendEvents() {},
-      async saveSnapshot() {},
+      async commitCheckpoint() {},
       async savePluginLock() {},
       async saveModelCall() {},
       async recordFailure() {
@@ -1004,8 +1099,7 @@ describe("SessionCoordinator", () => {
 
       let diskAvailable = false;
       const store: TimelineStore = {
-        async appendEvents() {},
-        async saveSnapshot() {},
+        async commitCheckpoint() {},
         async savePluginLock() {},
         async saveModelCall() {
           if (!diskAvailable) throw new Error("disk unavailable");

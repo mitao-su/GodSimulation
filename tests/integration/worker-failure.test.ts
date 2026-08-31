@@ -78,8 +78,10 @@ describe("worker decision validation and retry", () => {
   }, 20_000);
 
   it("rejects a stale response without changing the frozen tick", async () => {
-    const { worker, messages } = await startTestWorker();
+    const session = await startTestWorker();
+    const { worker, messages } = session;
     try {
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() =>
         expect(messages.filter((message) => message.type === "decision_requested")).toHaveLength(2),
       );
@@ -105,13 +107,15 @@ describe("worker decision validation and retry", () => {
       const view = messages.filter((message) => message.type === "world_view").at(-1)?.view;
       expect(view).toMatchObject({ mode: "THINKING", worldTick: 0 });
     } finally {
-      await worker.stop();
+      await session.stop();
     }
   }, 20_000);
 
   it("publishes a new linked request after player retry", async () => {
-    const { worker, messages } = await startTestWorker();
+    const session = await startTestWorker();
+    const { worker, messages } = session;
     try {
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() =>
         expect(messages.filter((message) => message.type === "decision_requested")).toHaveLength(2),
       );
@@ -131,6 +135,7 @@ describe("worker decision validation and retry", () => {
         const view = messages.filter((message) => message.type === "world_view").at(-1)?.view;
         expect(view?.mode).toBe("TECHNICALLY_BLOCKED");
       });
+      await session.acknowledgeNextCheckpoint();
       const blockedView = messages.filter((message) => message.type === "world_view").at(-1)!.view;
       await worker.send({
         type: "world_command",
@@ -144,6 +149,7 @@ describe("worker decision validation and retry", () => {
           requestId: original.requestId,
         },
       });
+      await session.acknowledgeNextCheckpoint();
 
       await vi.waitFor(() => {
         const retried = messages
@@ -154,13 +160,15 @@ describe("worker decision validation and retry", () => {
         expect(retried?.request.requestId).not.toBe(original.requestId);
       });
     } finally {
-      await worker.stop();
+      await session.stop();
     }
   }, 20_000);
 
   it("keeps peer model failures visible while retrying one request", async () => {
-    const { worker, messages } = await startTestWorker();
+    const session = await startTestWorker();
+    const { worker, messages } = session;
     try {
+      await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() =>
         expect(messages.filter((message) => message.type === "decision_requested")).toHaveLength(2),
       );
@@ -190,6 +198,8 @@ describe("worker decision validation and retry", () => {
         expect(view?.pendingDecisions.filter((decision) => decision.status === "error"))
           .toHaveLength(2);
       });
+      await session.acknowledgeNextCheckpoint();
+      await session.acknowledgeNextCheckpoint();
       const blockedView = messages.filter((message) => message.type === "world_view").at(-1)!.view;
 
       await worker.send({
@@ -204,6 +214,7 @@ describe("worker decision validation and retry", () => {
           requestId: bob.requestId,
         },
       });
+      await session.acknowledgeNextCheckpoint();
 
       await vi.waitFor(() => {
         const retried = messages
@@ -222,7 +233,7 @@ describe("worker decision validation and retry", () => {
         ]),
       );
     } finally {
-      await worker.stop();
+      await session.stop();
     }
   }, 20_000);
 });

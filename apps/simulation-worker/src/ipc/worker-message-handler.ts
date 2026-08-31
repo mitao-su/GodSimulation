@@ -26,6 +26,7 @@ export class WorkerMessageHandler {
   readonly #now: () => string;
   #session: WorldSession | null = null;
   #failureSequence = 0;
+  #shutdownCompleted = false;
 
   constructor(options: WorkerMessageHandlerOptions) {
     this.#plugins = options.plugins;
@@ -47,13 +48,13 @@ export class WorkerMessageHandler {
         this.#initialize(message);
         return;
       }
-      if (message.type === "shutdown") {
-        this.#session?.handle(message);
-        this.#onShutdown();
+      if (message.type === "shutdown" && !this.#session) {
+        this.#completeShutdown();
         return;
       }
       if (!this.#session) throw new Error("Simulation worker is not initialized");
-      this.#session.handle(message);
+      const result = this.#session.handle(message);
+      if (result.shutdownReady) this.#completeShutdown();
     } catch (error) {
       this.#emitFailure(error, "worker");
     }
@@ -91,6 +92,12 @@ export class WorkerMessageHandler {
 
   #emit(message: WorkerToHostMessage): void {
     this.#emitRaw(WorkerToHostMessageSchema.parse(message));
+  }
+
+  #completeShutdown(): void {
+    if (this.#shutdownCompleted) return;
+    this.#shutdownCompleted = true;
+    this.#onShutdown();
   }
 
   #emitFailure(error: unknown, category: "protocol" | "worker"): void {

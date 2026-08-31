@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   DomainEventSchema,
-  WorldSnapshotV1Schema,
   WorldSnapshotV2Schema,
   type DomainEvent,
   type WorldSnapshotV2,
@@ -10,18 +9,6 @@ import {
 import type { ModelCallRecord, WorldCheckpoint } from "@god-sim/timeline";
 
 import { createSqliteTimelineStore } from "./sqlite-timeline-store";
-
-function legacySnapshotAt(sequence: number) {
-  return WorldSnapshotV1Schema.parse({
-    schemaVersion: 1,
-    worldId: "starter-world",
-    worldVersion: sequence,
-    worldTick: sequence,
-    lastEventSequence: sequence,
-    pluginLockHash: "a".repeat(64),
-    state: { marker: `legacy-snapshot-${sequence}` },
-  });
-}
 
 function snapshotAt(sequence: number, marker = `snapshot-${sequence}`): WorldSnapshotV2 {
   return WorldSnapshotV2Schema.parse({
@@ -189,18 +176,4 @@ describe("SQLite timeline store", () => {
     }
   });
 
-  it("keeps legacy split writes readable until application migration", async () => {
-    const store = await createSqliteTimelineStore({ filename: ":memory:" });
-    try {
-      await store.saveSnapshot(legacySnapshotAt(12));
-      await store.appendEvents([eventAt(13), eventAt(14)]);
-
-      await expect(store.loadLatest("starter-world" as never)).resolves.toEqual({
-        snapshot: legacySnapshotAt(12),
-        events: [eventAt(13), eventAt(14)],
-      });
-    } finally {
-      await store.close();
-    }
-  });
 });

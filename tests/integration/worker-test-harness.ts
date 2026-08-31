@@ -21,11 +21,18 @@ export const pluginDescriptors: readonly PluginDescriptor[] = [
   entryPath: resolve(root, "plugins", name, "dist", "index.js"),
 }));
 
-export async function startTestWorker(): Promise<{
+type CheckpointReady = Extract<WorkerToHostMessage, { type: "checkpoint_ready" }>;
+
+export interface TestWorkerHandle {
   readonly worker: ProcessWorkerSupervisor;
   readonly messages: WorkerToHostMessage[];
-}> {
+  acknowledgeNextCheckpoint(): Promise<CheckpointReady>;
+  stop(): Promise<void>;
+}
+
+export async function startTestWorker(): Promise<TestWorkerHandle> {
   const messages: WorkerToHostMessage[] = [];
+  const acknowledgedCheckpointIds = new Set<string>();
   const worker = new ProcessWorkerSupervisor({
     entryPath: resolve(root, "apps", "simulation-worker", "src", "index.ts"),
     pluginDescriptors,
@@ -42,5 +49,86 @@ export async function startTestWorker(): Promise<{
     reviewRequired: true,
     deterministicSeed: 1,
   });
-  return { worker, messages };
+
+  const nextCheckpoint = async (): Promise<CheckpointReady> => {
+    const available = messages.find(
+      (message): message is CheckpointReady =>
+        message.type === "checkpoint_ready" &&
+        !acknowledgedCheckpointIds.has(message.checkpointId),
+    );
+    if (available) return available;
+
+    return new Promise<CheckpointReady>((resolveCheckpoint, rejectCheckpoint) => {
+      const timeout = setTimeout(() => {
+        unsubscribe();
+        rejectCheckpoint(new Error("Timed out waiting for an unacknowledged checkpoint"));
+      }, 5_000);
+      const unsubscribe = worker.onMessage((message) => {
+        if (
+          message.type !== "checkpoint_ready" ||
+          acknowledgedCheckpointIds.has(message.checkpointId)
+        ) {
+          return;
+        }
+        clearTimeout(timeout);
+        unsubscribe();
+        resolveCheckpoint(message);
+      });
+    });
+  };
+
+  const acknowledge = async (checkpoint: CheckpointReady): Promise<void> => {
+    acknowledgedCheckpointIds.add(checkpoint.checkpointId);
+    try {
+      await worker.send({
+        type: "checkpoint_committed",
+        checkpointId: checkpoint.checkpointId,
+      });
+    } catch (error) {
+      acknowledgedCheckpointIds.delete(checkpoint.checkpointId);
+      throw error;
+    }
+  };
+
+  return {
+    worker,
+    messages,
+    async acknowledgeNextCheckpoint() {
+      const checkpoint = await nextCheckpoint();
+      await acknowledge(checkpoint);
+      return checkpoint;
+    },
+    async stop() {
+      let acknowledgementError: unknown;
+      let acknowledgementTail = Promise.resolve();
+      const queueAcknowledgement = (message: WorkerToHostMessage): void => {
+        if (
+          message.type !== "checkpoint_ready" ||
+          acknowledgedCheckpointIds.has(message.checkpointId)
+        ) {
+          return;
+        }
+        acknowledgedCheckpointIds.add(message.checkpointId);
+        acknowledgementTail = acknowledgementTail
+          .then(() =>
+            worker.send({
+              type: "checkpoint_committed",
+              checkpointId: message.checkpointId,
+            }),
+          )
+          .catch((error: unknown) => {
+            acknowledgementError ??= error;
+          });
+      };
+      const unsubscribe = worker.onMessage(queueAcknowledgement);
+      for (const message of messages) queueAcknowledgement(message);
+      try {
+        await worker.stop();
+        await acknowledgementTail;
+        if (acknowledgementError) throw acknowledgementError;
+      } finally {
+        unsubscribe();
+      }
+    },
+  };
 }
