@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { WorldCommandSchema } from "../commands/world-command";
 import { DomainEventSchema } from "../events/domain-event";
-import { PluginLockHashSchema, RequestIdSchema } from "../identity/ids";
+import {
+  CheckpointIdSchema,
+  PluginLockHashSchema,
+  RequestIdSchema,
+} from "../identity/ids";
 import { JsonValueSchema } from "../json/json-value";
 import {
   DecisionIdentitySchema,
@@ -11,7 +15,7 @@ import {
 } from "../model/decision-contract";
 import { WorldViewSchema } from "../view-models/world-view";
 import { TechnicalFailureSchema } from "../world/technical-failure";
-import { WorldSnapshotSchema } from "../world/world-snapshot";
+import { WorldSnapshotSchema, WorldSnapshotV2Schema } from "../world/world-snapshot";
 
 export const PluginLockEntrySchema = z
   .object({
@@ -76,6 +80,13 @@ const RequestSnapshotMessageSchema = z
   })
   .strict();
 
+const CheckpointCommittedMessageSchema = z
+  .object({
+    type: z.literal("checkpoint_committed"),
+    checkpointId: CheckpointIdSchema,
+  })
+  .strict();
+
 const ShutdownMessageSchema = z.object({ type: z.literal("shutdown") }).strict();
 
 export const HostToWorkerMessageSchema = z.discriminatedUnion("type", [
@@ -85,6 +96,7 @@ export const HostToWorkerMessageSchema = z.discriminatedUnion("type", [
   DecisionFailureMessageSchema,
   HostTechnicalFailureMessageSchema,
   RequestSnapshotMessageSchema,
+  CheckpointCommittedMessageSchema,
   ShutdownMessageSchema,
 ]);
 
@@ -126,6 +138,15 @@ const SnapshotReadyMessageSchema = z
   })
   .strict();
 
+const CheckpointReadyMessageSchema = z
+  .object({
+    type: z.literal("checkpoint_ready"),
+    checkpointId: CheckpointIdSchema,
+    events: z.array(DomainEventSchema),
+    snapshot: WorldSnapshotV2Schema,
+  })
+  .strict();
+
 const WorldViewMessageSchema = z
   .object({
     type: z.literal("world_view"),
@@ -146,6 +167,7 @@ export const WorkerToHostMessageSchema = z.discriminatedUnion("type", [
   DecisionRejectedMessageSchema,
   EventBatchMessageSchema,
   SnapshotReadyMessageSchema,
+  CheckpointReadyMessageSchema,
   WorldViewMessageSchema,
   TechnicalFailureMessageSchema,
 ]);

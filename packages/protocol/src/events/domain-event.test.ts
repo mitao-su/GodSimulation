@@ -41,5 +41,56 @@ describe("domain events", () => {
       }).success,
     ).toBe(false);
   });
-});
 
+  it("records a subjective perception as its own causal source", () => {
+    const event = DomainEventSchema.parse({
+      schemaVersion: 1,
+      eventId: "event:starter-world:7",
+      type: "perception_recorded",
+      worldId: "starter-world",
+      worldVersion: 3,
+      worldTick: 2,
+      sequence: 7,
+      parentSequence: 6,
+      causationId: "vision:alice:fridge-1",
+      correlationId: "tick:2",
+      agentId: "alice",
+      observationKind: "vision",
+      summary: "Bob is using the refrigerator",
+      relatedEntityId: "fridge-1",
+    });
+
+    expect(event).toMatchObject({
+      type: "perception_recorded",
+      agentId: "alice",
+      relatedEntityId: "fridge-1",
+    });
+  });
+
+  it("keeps the perceived reason and object on an action failure", () => {
+    const event = DomainEventSchema.parse({
+      schemaVersion: 1,
+      eventId: "event:starter-world:8",
+      type: "action_failed",
+      worldId: "starter-world",
+      worldVersion: 3,
+      worldTick: 2,
+      sequence: 8,
+      parentSequence: 7,
+      causationId: "action:alice:raise-passage",
+      correlationId: "goal:alice:refrigerator",
+      agentId: "alice",
+      actionId: "action:alice:raise-passage",
+      reasonCode: "sealed",
+      summary: "The passage cannot be raised",
+      entityId: "passage-1",
+      perceivedByAgent: true,
+    });
+
+    expect(event).toMatchObject({
+      reasonCode: "sealed",
+      summary: "The passage cannot be raised",
+      entityId: "passage-1",
+    });
+  });
+});

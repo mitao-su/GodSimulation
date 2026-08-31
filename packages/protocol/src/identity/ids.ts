@@ -21,6 +21,9 @@ export type RequestId = z.infer<typeof RequestIdSchema>;
 export const EventIdSchema = StableIdSchema.brand<"EventId">();
 export type EventId = z.infer<typeof EventIdSchema>;
 
+export const CheckpointIdSchema = StableIdSchema.brand<"CheckpointId">();
+export type CheckpointId = z.infer<typeof CheckpointIdSchema>;
+
 export const CommandIdSchema = StableIdSchema.brand<"CommandId">();
 export type CommandId = z.infer<typeof CommandIdSchema>;
 

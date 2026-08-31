@@ -15,6 +15,7 @@ export * from "./events/interaction-arbitrated.event";
 export * from "./events/object-state-changed.event";
 export * from "./events/observation-remembered.event";
 export * from "./events/perceptible-result-emitted.event";
+export * from "./events/perception-recorded.event";
 export * from "./events/world-released.event";
 export * from "./identity/ids";
 export * from "./ipc/host-worker-message";

@@ -103,4 +103,57 @@ describe("host-worker messages", () => {
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.type).toBe("technical_failure");
   });
+
+  it("carries events and their strict snapshot in one checkpoint message", () => {
+    const message = WorkerToHostMessageSchema.parse({
+      type: "checkpoint_ready",
+      checkpointId: "checkpoint:starter-world:8:17",
+      events: [
+        {
+          schemaVersion: 1,
+          eventId: "event:starter-world:17",
+          type: "decision_requested",
+          worldId: "starter-world",
+          worldVersion: 8,
+          worldTick: 42,
+          sequence: 17,
+          parentSequence: 16,
+          causationId: "request:alice:2",
+          correlationId: "cycle:2",
+          agentId: "alice",
+          requestId: "request:alice:2",
+          decisionCycleId: "cycle:2",
+          reasonCode: "goal_completed",
+        },
+      ],
+      snapshot: {
+        schemaVersion: 2,
+        worldId: "starter-world",
+        worldVersion: 8,
+        worldTick: 42,
+        lastEventSequence: 17,
+        pluginLockHash: "b".repeat(64),
+        history: { mode: "strict", causalFromSequence: 1 },
+        causalEventIds: ["event:starter-world:17"],
+        state: {},
+      },
+    });
+
+    expect(message).toMatchObject({
+      type: "checkpoint_ready",
+      checkpointId: "checkpoint:starter-world:8:17",
+    });
+  });
+
+  it("acknowledges only a named checkpoint", () => {
+    const message = HostToWorkerMessageSchema.parse({
+      type: "checkpoint_committed",
+      checkpointId: "checkpoint:starter-world:8:17",
+    });
+
+    expect(message.type).toBe("checkpoint_committed");
+    expect(
+      HostToWorkerMessageSchema.safeParse({ type: "checkpoint_committed" }).success,
+    ).toBe(false);
+  });
 });
