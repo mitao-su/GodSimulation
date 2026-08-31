@@ -27,7 +27,14 @@ import {
 } from "../decision/decision-gate";
 import { buildGoalOptions } from "../decision/goal-option-provider";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
-import { loadWorldDefinition } from "../map/map-loader";
+import {
+  loadWorldDefinition,
+  type InitialPerceptionSeed,
+} from "../map/map-loader";
+import {
+  recordPerceptionCandidates,
+  type PerceptionCandidate,
+} from "../perception/perception-recorder";
 import { createPluginRegistry, type PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
@@ -95,6 +102,47 @@ function goalsMatch(expected: Goal, actual: Goal): boolean {
   return JSON.stringify(expected) === JSON.stringify(actual);
 }
 
+function initialPerceptionCandidate(seed: InitialPerceptionSeed): PerceptionCandidate {
+  if (seed.kind === "memory") {
+    return {
+      agentId: seed.agentId,
+      observationKind: "memory",
+      summary: seed.summary,
+      relatedEntityId: null,
+      subject: { kind: "memory", memoryId: seed.memoryId },
+    };
+  }
+  return {
+    agentId: seed.agentId,
+    observationKind: "memory",
+    summary: seed.summary,
+    relatedEntityId: seed.entityId,
+    subject: {
+      kind: "object",
+      value: {
+        entityId: seed.entityId,
+        displayName: seed.displayName,
+        status: "remembered",
+        summary: seed.summary,
+        observable: {},
+        position: seed.position,
+        observedAtTick: 0,
+      },
+    },
+  };
+}
+
+function initialPerceptionMetadata(candidate: PerceptionCandidate) {
+  const subjectId =
+    candidate.subject.kind === "memory"
+      ? candidate.subject.memoryId
+      : candidate.subject.kind === "object"
+        ? candidate.subject.value.entityId
+        : candidate.subject.value.agentId;
+  const causationId = `initial-perception:${candidate.agentId}:${candidate.subject.kind}:${subjectId}`;
+  return { causationId, correlationId: causationId };
+}
+
 class DeterministicSimulationEngine implements SimulationEngine {
   #world: WorldState;
   readonly #registry: PluginRegistry;
@@ -105,14 +153,25 @@ class DeterministicSimulationEngine implements SimulationEngine {
   #revision = 0;
   #stopped = false;
 
-  constructor(world: WorldState, registry: PluginRegistry, initialize = true) {
+  constructor(
+    world: WorldState,
+    registry: PluginRegistry,
+    initialPerceptions: readonly InitialPerceptionSeed[] | null,
+  ) {
     this.#world = world;
     this.#registry = registry;
 
-    if (!initialize) {
+    if (initialPerceptions === null) {
       this.#revision = 1;
       return;
     }
+    const initialized = recordPerceptionCandidates(
+      this.#world,
+      initialPerceptions.map(initialPerceptionCandidate),
+      initialPerceptionMetadata,
+    );
+    this.#world = initialized.world;
+    this.#recordEvents(initialized.events);
     const perception = refreshAllPerceptions(this.#world, this.#registry);
     this.#world = perception.world;
     this.#recordEvents(perception.events);
@@ -460,7 +519,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
 export function createSimulation(options: SimulationOptions): SimulationEngine {
   const registry = createPluginRegistry(options.plugins);
-  const world = loadWorldDefinition(options.worldDefinition, registry, {
+  const loaded = loadWorldDefinition(options.worldDefinition, registry, {
     ...(options.reviewRequired === undefined
       ? {}
       : { reviewRequired: options.reviewRequired }),
@@ -469,11 +528,15 @@ export function createSimulation(options: SimulationOptions): SimulationEngine {
       ? {}
       : { pluginLockHash: options.pluginLockHash }),
   });
-  return new DeterministicSimulationEngine(world, registry);
+  return new DeterministicSimulationEngine(
+    loaded.world,
+    registry,
+    loaded.initialPerceptions,
+  );
 }
 
 export function restoreSimulation(options: SimulationRestoreOptions): SimulationEngine {
   const registry = createPluginRegistry(options.plugins);
   const world = restoreWorldSnapshot(options.snapshot, registry, options.worldDefinition);
-  return new DeterministicSimulationEngine(world, registry, false);
+  return new DeterministicSimulationEngine(world, registry, null);
 }

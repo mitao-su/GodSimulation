@@ -108,7 +108,7 @@ function validMap() {
 
 describe("loadWorldDefinition", () => {
   it("creates instance state owned by the world", () => {
-    const world = loadWorldDefinition(validMap(), registry);
+    const world = loadWorldDefinition(validMap(), registry).world;
 
     expect(world.objects.get("door-1" as never)).toMatchObject({
       definitionId: "test.door",
@@ -122,7 +122,7 @@ describe("loadWorldDefinition", () => {
     expect(world.mode).toBe("THINKING");
   });
 
-  it("seeds declared object knowledge without marking it currently visible", () => {
+  it("returns empty subjective state and deterministic initial perception seeds", () => {
     const base = validMap();
     const input = {
       ...base,
@@ -132,16 +132,27 @@ describe("loadWorldDefinition", () => {
       })),
     };
 
-    const world = loadWorldDefinition(input, registry);
-    const knowledge = world.agents.get("alice" as never)!.knowledge;
+    const loaded = loadWorldDefinition(input, registry);
+    const alice = loaded.world.agents.get("alice" as never)!;
 
-    expect(knowledge.objects.get("door-1" as never)).toMatchObject({
-      entityId: "door-1",
-      status: "remembered",
-      observable: {},
-      observationKind: "memory",
-    });
-    expect(knowledge.visibleEntityIds.has("door-1" as never)).toBe(false);
+    expect(alice.knowledge.objects.size).toBe(0);
+    expect(alice.memories).toEqual([]);
+    expect(loaded.initialPerceptions).toEqual([
+      {
+        kind: "known_object",
+        agentId: "alice",
+        entityId: "door-1",
+        displayName: "Door",
+        position: { x: 2, y: 1 },
+        summary: "Remembers where Door is",
+      },
+      {
+        kind: "memory",
+        agentId: "alice",
+        memoryId: "start",
+        summary: "Test memory",
+      },
+    ]);
   });
 
   it("rejects an object whose definition is not registered", () => {

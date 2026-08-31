@@ -10,7 +10,7 @@ import starterHome from "../../content/worlds/starter-home/world.json" with { ty
 describe("starter home", () => {
   it("loads one continuous four-zone home with the milestone entities", () => {
     const registry = createPluginRegistry([spatialPlugin, homePlugin, agentsPlugin]);
-    const world = loadWorldDefinition(starterHome, registry, { seed: 20260831 });
+    const world = loadWorldDefinition(starterHome, registry, { seed: 20260831 }).world;
 
     expect(world.map.zones.map((zone) => zone.id)).toEqual([
       "living-room",

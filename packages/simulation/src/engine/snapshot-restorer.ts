@@ -444,7 +444,7 @@ export function restoreWorldSnapshot(
     reviewRequired: state.reviewRequired,
     seed: state.randomState,
     pluginLockHash: snapshot.pluginLockHash,
-  });
+  }).world;
   const objects = restoreObjects(state.objects, baseline, registry);
   const agents = restoreAgents(state.agents, baseline, registry);
   const decisionCycle = restoreDecisionCycle(

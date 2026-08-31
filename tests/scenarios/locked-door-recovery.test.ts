@@ -181,11 +181,11 @@ const useFridge = {
 };
 
 function world() {
-  return loadWorldDefinition(anonymousPassageWorld, registry);
+  return loadWorldDefinition(anonymousPassageWorld, registry).world;
 }
 
 function inertWorld() {
-  return loadWorldDefinition(inertPassageWorld, inertRegistry);
+  return loadWorldDefinition(inertPassageWorld, inertRegistry).world;
 }
 
 function activateTraversal(

@@ -184,5 +184,5 @@ export function simulationTestWorld() {
     },
     testPluginRegistry,
     { seed: 1 },
-  );
+  ).world;
 }

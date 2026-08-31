@@ -1,4 +1,10 @@
-import { EventIdSchema, JsonValueSchema, PluginLockHashSchema } from "@god-sim/protocol";
+import {
+  JsonValueSchema,
+  PluginLockHashSchema,
+  type AgentId,
+  type Coordinate,
+  type EntityId,
+} from "@god-sim/protocol";
 
 import { MapDefinitionSchema, type MapDefinition } from "./map-definition";
 import { ZoneIndex } from "./zone-index";
@@ -10,11 +16,7 @@ import {
   type WorldState,
 } from "../world/world-state";
 import { createEmptyBodySlots } from "../execution/body-slots";
-import {
-  createEmptyKnowledge,
-  type AgentKnowledge,
-  type ImmediateMemory,
-} from "../perception/agent-knowledge";
+import { createEmptyKnowledge } from "../perception/agent-knowledge";
 
 const DEFAULT_PLUGIN_LOCK_HASH = "0".repeat(64);
 
@@ -22,6 +24,27 @@ export interface WorldLoadOptions {
   readonly reviewRequired?: boolean;
   readonly seed?: number;
   readonly pluginLockHash?: string;
+}
+
+export type InitialPerceptionSeed =
+  | {
+      readonly kind: "memory";
+      readonly agentId: AgentId;
+      readonly memoryId: string;
+      readonly summary: string;
+    }
+  | {
+      readonly kind: "known_object";
+      readonly agentId: AgentId;
+      readonly entityId: EntityId;
+      readonly displayName: string;
+      readonly position: Coordinate;
+      readonly summary: string;
+    };
+
+export interface LoadedWorldDefinition {
+  readonly world: WorldState;
+  readonly initialPerceptions: readonly InitialPerceptionSeed[];
 }
 
 function assertRegionInBounds(
@@ -71,56 +94,49 @@ function validatePluginReferences(map: MapDefinition, registry: PluginRegistry):
   return referenced;
 }
 
-function initialObjectKnowledge(
+function initialPerceptionSeeds(
   spawn: MapDefinition["spawns"][number],
   objects: ReadonlyMap<ObjectInstance["id"], ObjectInstance>,
   registry: PluginRegistry,
-  zoneId: string,
-): { readonly knowledge: AgentKnowledge; readonly memories: readonly ImmediateMemory[] } {
+  initialMemories: readonly { readonly id: string; readonly summary: string }[],
+): readonly InitialPerceptionSeed[] {
   assertUnique(`known object ID for ${spawn.agentId}`, spawn.knownObjectIds);
-  const knowledge = createEmptyKnowledge(zoneId);
-  const knownObjects = new Map(knowledge.objects);
-  const memories: ImmediateMemory[] = [];
+  assertUnique(
+    `initial memory ID for ${spawn.agentId}`,
+    initialMemories.map((memory) => memory.id),
+  );
+  const seeds: InitialPerceptionSeed[] = initialMemories.map((memory) => ({
+    kind: "memory",
+    agentId: spawn.agentId,
+    memoryId: memory.id,
+    summary: memory.summary,
+  }));
 
-  for (const [index, entityId] of spawn.knownObjectIds.entries()) {
+  for (const entityId of spawn.knownObjectIds) {
     const object = objects.get(entityId);
     if (!object) {
       throw new Error(`Agent ${spawn.agentId} knows missing object ${entityId}`);
     }
     const definition = registry.getObject(object.definitionId)?.definition;
     if (!definition) throw new Error(`Known object ${entityId} has no plugin definition`);
-    const sourceEventId = EventIdSchema.parse(
-      `event:initial-knowledge:${spawn.agentId}:${index}`,
-    );
-    knownObjects.set(entityId, {
+    seeds.push({
+      kind: "known_object",
+      agentId: spawn.agentId,
       entityId,
       displayName: definition.displayName,
-      status: "remembered",
       summary: `Remembers where ${definition.displayName} is`,
-      observable: {},
       position: object.position,
-      sourceEventId,
-      observedAtTick: 0,
-      observationKind: "memory",
-    });
-    memories.push({
-      id: `memory:${sourceEventId}`,
-      sourceEventId,
-      formedAtTick: 0,
-      observationKind: "memory",
-      summary: `Knows where ${definition.displayName} is`,
-      relatedEntityId: entityId,
     });
   }
 
-  return { knowledge: { ...knowledge, objects: knownObjects }, memories };
+  return seeds;
 }
 
 export function loadWorldDefinition(
   input: unknown,
   registry: PluginRegistry,
   options: WorldLoadOptions = {},
-): WorldState {
+): LoadedWorldDefinition {
   const map = MapDefinitionSchema.parse(input);
   const referencedPlugins = validatePluginReferences(map, registry);
 
@@ -184,6 +200,7 @@ export function loadWorldDefinition(
     map.spawns.map((spawn) => spawn.agentId),
   );
   const agents = new Map<AgentState["id"], AgentState>();
+  const initialPerceptions: InitialPerceptionSeed[] = [];
   for (const spawn of map.spawns) {
     const registered = registry.getAgent(spawn.definitionId);
     if (!registered) {
@@ -197,7 +214,14 @@ export function loadWorldDefinition(
     assertCoordinateInBounds(`Agent ${spawn.agentId}`, spawn.position, map);
     const zoneId = zoneIndex.at(spawn.position)?.id;
     if (!zoneId) throw new Error(`Agent ${spawn.agentId} does not spawn inside a named zone`);
-    const initialKnowledge = initialObjectKnowledge(spawn, objects, registry, zoneId);
+    initialPerceptions.push(
+      ...initialPerceptionSeeds(
+        spawn,
+        objects,
+        registry,
+        registered.definition.initialMemories,
+      ),
+    );
     agents.set(spawn.agentId, {
       id: spawn.agentId,
       definitionId: spawn.definitionId,
@@ -211,38 +235,38 @@ export function loadWorldDefinition(
       currentGoal: null,
       actionPlan: null,
       bodySlots: createEmptyBodySlots(),
-      knowledge: initialKnowledge.knowledge,
-      memories: [
-        ...registered.definition.initialMemories.map((memory, index) => ({
-          id: memory.id,
-          sourceEventId: EventIdSchema.parse(`event:initial:${spawn.agentId}:${index}`),
-          formedAtTick: 0,
-          observationKind: "memory" as const,
-          summary: memory.summary,
-          relatedEntityId: null,
-        })),
-        ...initialKnowledge.memories,
-      ],
+      knowledge: createEmptyKnowledge(zoneId),
+      memories: [],
     });
   }
 
   return {
-    id: map.id,
-    name: map.name,
-    version: 0,
-    tick: 0,
-    mode: "THINKING",
-    suspendedMode: null,
-    reviewRequired: options.reviewRequired ?? true,
-    randomState: (options.seed ?? 1) >>> 0,
-    lastEventSequence: 0,
-    pluginLockHash: PluginLockHashSchema.parse(
-      options.pluginLockHash ?? DEFAULT_PLUGIN_LOCK_HASH,
+    world: {
+      id: map.id,
+      name: map.name,
+      version: 0,
+      tick: 0,
+      mode: "THINKING",
+      suspendedMode: null,
+      reviewRequired: options.reviewRequired ?? true,
+      randomState: (options.seed ?? 1) >>> 0,
+      lastEventSequence: 0,
+      pluginLockHash: PluginLockHashSchema.parse(
+        options.pluginLockHash ?? DEFAULT_PLUGIN_LOCK_HASH,
+      ),
+      map,
+      agents,
+      objects,
+      decisionCycle: null,
+      technicalFailure: null,
+    },
+    initialPerceptions: initialPerceptions.sort(
+      (left, right) =>
+        left.agentId.localeCompare(right.agentId) ||
+        left.kind.localeCompare(right.kind) ||
+        (left.kind === "memory" ? left.memoryId : left.entityId).localeCompare(
+          right.kind === "memory" ? right.memoryId : right.entityId,
+        ),
     ),
-    map,
-    agents,
-    objects,
-    decisionCycle: null,
-    technicalFailure: null,
   };
 }

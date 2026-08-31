@@ -8,6 +8,7 @@ import {
   requestDecisions,
   retryDecisionRequest,
 } from "./decision-gate";
+import { recordPerceptionCandidates } from "../perception/perception-recorder";
 import { simulationTestWorld } from "../testing/simulation-test-fixtures";
 
 const aliceWaitRequest = {
@@ -25,10 +26,26 @@ const aliceWaitRequest = {
 describe("decision gate", () => {
   it("builds model input without hidden world facts", () => {
     const base = simulationTestWorld();
-    const fridge = base.objects.get("fridge-1" as never)!;
+    const withMemory = recordPerceptionCandidates(
+      base,
+      [
+        {
+          agentId: "alice" as never,
+          observationKind: "memory",
+          summary: "Test memory",
+          relatedEntityId: null,
+          subject: { kind: "memory", memoryId: "test-memory" },
+        },
+      ],
+      () => ({
+        causationId: "test-memory",
+        correlationId: "test-memory",
+      }),
+    ).world;
+    const fridge = withMemory.objects.get("fridge-1" as never)!;
     const world = {
-      ...base,
-      objects: new Map(base.objects).set("fridge-1" as never, {
+      ...withMemory,
+      objects: new Map(withMemory.objects).set("fridge-1" as never, {
         ...fridge,
         state: { occupiedBy: "bob" },
       }),

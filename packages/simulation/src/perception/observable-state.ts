@@ -1,7 +1,7 @@
-import { JsonValueSchema, type AgentId, type EventId } from "@god-sim/protocol";
+import { JsonValueSchema, type AgentId } from "@god-sim/protocol";
 import { ObservationContextSchema } from "@god-sim/plugin-sdk";
 
-import type { KnowledgeChange } from "./agent-knowledge";
+import type { ObservedObjectValue } from "./agent-knowledge";
 import type { PluginRegistry } from "../world/plugin-registry";
 import type { ObjectInstance, WorldState } from "../world/world-state";
 
@@ -10,8 +10,7 @@ export function observeObject(
   registry: PluginRegistry,
   observerAgentId: AgentId,
   object: ObjectInstance,
-  sourceEventId: EventId,
-): KnowledgeChange["current"] {
+): ObservedObjectValue {
   const registered = registry.getObject(object.definitionId);
   if (!registered) throw new Error(`Unknown object definition: ${object.definitionId}`);
   const state = registered.definition.stateSchema.parse(object.state);
@@ -26,8 +25,6 @@ export function observeObject(
     summary: observable.summary,
     observable: JsonValueSchema.parse(observable.details),
     position: object.position,
-    sourceEventId,
     observedAtTick: world.tick,
-    observationKind: "vision",
   };
 }

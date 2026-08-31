@@ -4,7 +4,7 @@ import homePlugin from "@god-sim/home-objects";
 import {
   createPluginRegistry,
   loadWorldDefinition,
-  refreshPerception,
+  refreshAllPerceptions,
 } from "@god-sim/simulation";
 import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
@@ -23,7 +23,7 @@ const fridgeGoal = {
 };
 
 function occupiedFridgeWorld() {
-  const base = loadWorldDefinition(starterHome, registry);
+  const base = loadWorldDefinition(starterHome, registry).world;
   const fridge = base.objects.get("fridge-1" as never)!;
   const alice = base.agents.get("alice" as never)!;
   return {
@@ -40,9 +40,22 @@ function occupiedFridgeWorld() {
   };
 }
 
+function refreshAlice(world: ReturnType<typeof occupiedFridgeWorld>) {
+  const result = refreshAllPerceptions(world, registry);
+  const agent = result.world.agents.get("alice" as never)!;
+  const conflict = result.conflicts.find((item) => item.agentId === agent.id)?.reason ?? null;
+  return {
+    agent,
+    knowledge: agent.knowledge,
+    memories: agent.memories,
+    conflict,
+    decisionRequested: conflict !== null,
+  };
+}
+
 describe("perceived refrigerator conflict", () => {
   it("does not reveal occupancy through the wall", () => {
-    const update = refreshPerception(occupiedFridgeWorld(), registry, "alice" as never);
+    const update = refreshAlice(occupiedFridgeWorld());
 
     expect(update.knowledge.objects.get("fridge-1" as never)?.observable).not.toMatchObject({
       occupiedBy: "bob",
@@ -51,7 +64,7 @@ describe("perceived refrigerator conflict", () => {
   });
 
   it("requests thought only after Alice sees Bob's occupancy", () => {
-    const hidden = refreshPerception(occupiedFridgeWorld(), registry, "alice" as never);
+    const hidden = refreshAlice(occupiedFridgeWorld());
     const alice = hidden.agent;
     const visibleWorld = {
       ...occupiedFridgeWorld(),
@@ -60,7 +73,7 @@ describe("perceived refrigerator conflict", () => {
         position: { x: 14, y: 3 },
       }),
     };
-    const visible = refreshPerception(visibleWorld, registry, "alice" as never);
+    const visible = refreshAlice(visibleWorld);
 
     expect(visible.knowledge.objects.get("fridge-1" as never)?.observable).toMatchObject({
       occupiedBy: "bob",

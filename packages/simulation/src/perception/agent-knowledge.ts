@@ -14,24 +14,30 @@ export type ObservationKind =
   | "body"
   | "memory";
 
-export interface KnownObjectState {
+export interface ObservedObjectValue {
   readonly entityId: EntityId;
   readonly displayName: string;
   readonly status: string;
   readonly summary: string;
   readonly observable: JsonValue;
   readonly position: Coordinate;
-  readonly sourceEventId: EventId;
   readonly observedAtTick: number;
+}
+
+export interface KnownObjectState extends ObservedObjectValue {
+  readonly sourceEventId: EventId;
   readonly observationKind: ObservationKind;
 }
 
-export interface KnownAgentState {
+export interface ObservedAgentValue {
   readonly agentId: AgentId;
   readonly displayName: string;
   readonly position: Coordinate;
-  readonly sourceEventId: EventId;
   readonly observedAtTick: number;
+}
+
+export interface KnownAgentState extends ObservedAgentValue {
+  readonly sourceEventId: EventId;
 }
 
 export interface KnownTraversalBlocker {

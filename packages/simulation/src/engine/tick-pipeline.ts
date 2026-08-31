@@ -15,14 +15,19 @@ import {
 import { createEmptyBodySlots } from "../execution/body-slots";
 import { planGoal } from "../execution/goal-planner";
 import { recoverBlockedPlan } from "../execution/local-recovery";
+import { detectPlanConflict } from "../decision/plan-conflict-detector";
 import { arbitrateInteractionBatch } from "../interaction/effect-arbiter";
 import { commitProposal } from "../interaction/effect-committer";
 import { proposeInteraction } from "../interaction/interaction-router";
 import { advanceBladderNeeds } from "../needs/bladder-system";
 import {
-  applyPerceptionUpdate,
-  refreshPerception,
+  applyPerceptionVisibility,
+  collectPerceptionCandidates,
 } from "../perception/visibility-system";
+import {
+  recordPerceptionCandidates,
+  type PerceptionCandidate,
+} from "../perception/perception-recorder";
 import { advanceWorldClock } from "../world/world-clock";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
@@ -53,6 +58,21 @@ interface RecordedActionFailure extends AgentActionFailure {
 
 function eventMetadata(causationId: string, correlationId = causationId) {
   return { causationId, correlationId };
+}
+
+function perceptionMetadata(
+  worldTick: number,
+  candidate: PerceptionCandidate,
+) {
+  const subjectId =
+    candidate.subject.kind === "memory"
+      ? candidate.subject.memoryId
+      : candidate.subject.kind === "object"
+        ? candidate.subject.value.entityId
+        : candidate.subject.value.agentId;
+  return eventMetadata(
+    `perception:${candidate.agentId}:${worldTick}:${candidate.subject.kind}:${subjectId}`,
+  );
 }
 
 function ensureActionPlans(
@@ -384,31 +404,100 @@ export function refreshAllPerceptions(
   for (const agentId of [...world.agents.keys()].sort((left, right) =>
     left.localeCompare(right),
   )) {
-    const update = refreshPerception(world, registry, agentId);
-    world = applyPerceptionUpdate(world, update);
-    for (const change of update.changes) {
-      const written = appendDomainEvent(
-        world,
-        {
-          type: "observation_remembered",
-          agentId,
-          sourceEventId: change.current.sourceEventId,
-          observationKind: change.current.observationKind,
-          summary: change.current.summary,
-        },
-        eventMetadata(change.current.sourceEventId),
-      );
-      world = written.world;
-      events.push(written.event);
-    }
-    if (update.conflict) {
+    const scan = collectPerceptionCandidates(world, registry, agentId);
+    world = applyPerceptionVisibility(world, scan);
+    const recorded = recordPerceptionCandidates(
+      world,
+      scan.candidates,
+      (candidate) => perceptionMetadata(world.tick, candidate),
+    );
+    world = recorded.world;
+    events.push(...recorded.events);
+    const agent = world.agents.get(agentId);
+    if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
+    const conflict = detectPlanConflict(agent, recorded.changes);
+    if (conflict) {
       conflicts.push({
         agentId,
-        reason: { code: update.conflict.code, summary: update.conflict.summary },
+        reason: { code: conflict.code, summary: conflict.summary },
       });
     }
   }
   return { world, events, conflicts };
+}
+
+function recordActionFailures(
+  worldInput: WorldState,
+  failures: readonly AgentActionFailure[],
+): {
+  readonly world: WorldState;
+  readonly events: readonly DomainEvent[];
+  readonly failures: readonly RecordedActionFailure[];
+} {
+  let world = worldInput;
+  const events: DomainEvent[] = [];
+  const recordedFailures: RecordedActionFailure[] = [];
+
+  for (const failure of failures) {
+    const written = appendDomainEvent(
+      world,
+      {
+        type: "action_failed",
+        agentId: failure.agentId,
+        actionId: failure.failure.actionId,
+        reasonCode: failure.failure.code,
+        summary: failure.failure.summary,
+        ...(failure.failure.entityId === undefined
+          ? {}
+          : { entityId: failure.failure.entityId }),
+        perceivedByAgent: true,
+      },
+      eventMetadata(failure.failure.actionId),
+    );
+    world = written.world;
+    events.push(written.event);
+    recordedFailures.push({ ...failure, sourceEventId: written.event.eventId });
+
+    const agent = world.agents.get(failure.agentId);
+    if (!agent) throw new Error(`Unknown agent instance: ${failure.agentId}`);
+    const knownTraversalBlockers = new Map(
+      agent.knowledge.knownTraversalBlockers,
+    );
+    if (
+      failure.failure.purpose === "automatic_traversal" &&
+      failure.failure.entityId
+    ) {
+      const object = world.objects.get(failure.failure.entityId);
+      if (object) {
+        knownTraversalBlockers.set(object.id, {
+          entityId: object.id,
+          observedObjectVersion: object.version,
+          reasonCode: failure.failure.code,
+          sourceEventId: written.event.eventId,
+        });
+      }
+    }
+    world = {
+      ...world,
+      agents: new Map(world.agents).set(agent.id, {
+        ...agent,
+        knowledge: { ...agent.knowledge, knownTraversalBlockers },
+        memories: [
+          ...agent.memories,
+          {
+            id: `memory:${written.event.eventId}`,
+            sourceEventId: written.event.eventId,
+            formedAtTick: world.tick,
+            observationKind: "interaction",
+            summary: failure.failure.summary,
+            relatedEntityId: failure.failure.entityId ?? null,
+          },
+        ],
+      }),
+    };
+  }
+
+  return { world, events, failures: recordedFailures };
 }
 
 function recoverFailures(
@@ -518,28 +607,9 @@ export function runTickPipeline(
   world = interactions.world;
   events.push(...interactions.events);
   const failures = [...actions.failures, ...interactions.failures];
-  const recordedFailures: RecordedActionFailure[] = [];
-
-  for (const failure of failures) {
-    const written = appendDomainEvent(
-      world,
-      {
-        type: "action_failed",
-        agentId: failure.agentId,
-        actionId: failure.failure.actionId,
-        reasonCode: failure.failure.code,
-        summary: failure.failure.summary,
-        ...(failure.failure.entityId === undefined
-          ? {}
-          : { entityId: failure.failure.entityId }),
-        perceivedByAgent: true,
-      },
-      eventMetadata(failure.failure.actionId),
-    );
-    world = written.world;
-    events.push(written.event);
-    recordedFailures.push({ ...failure, sourceEventId: written.event.eventId });
-  }
+  const recorded = recordActionFailures(world, failures);
+  world = recorded.world;
+  events.push(...recorded.events);
 
   const perception = refreshAllPerceptions(world, registry);
   world = perception.world;
@@ -548,7 +618,7 @@ export function runTickPipeline(
     addDecisionNeed(needs, conflict.agentId, conflict.reason, true);
   }
 
-  const recovery = recoverFailures(world, registry, recordedFailures);
+  const recovery = recoverFailures(world, registry, recorded.failures);
   world = recovery.world;
   for (const need of recovery.needs) addDecisionNeed(needs, need.agentId, need.reason);
 
