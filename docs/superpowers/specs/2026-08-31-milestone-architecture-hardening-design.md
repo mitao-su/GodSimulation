@@ -156,6 +156,26 @@ export interface KnownTraversalBlocker {
 
 失败恢复不再判断 `locked_door`。只要失败动作的 `purpose` 是 `automatic_traversal`，程序就记录该物件、排除它并重新规划；插件原因码和摘要原样进入 Event、记忆和开发界面。
 
+### 4.4 可观察的交互可用性
+
+插件可以在 `ObservableObjectState` 中按交互报告角色当前能观察到的可用性：
+
+```ts
+interactionAvailability?: readonly (
+  | { interactionId: string; available: true }
+  | {
+      interactionId: string;
+      available: false;
+      reasonCode: string;
+      summary: string;
+    }
+)[];
+```
+
+`details` 仍是插件自有的展示数据，模拟核心不得解析其中的 `occupiedBy`、`locked` 或其他私有字段。插件未报告某个交互表示角色不知道，程序仍允许角色尝试；只有角色实际观察到该交互不可用时，程序才从候选目标中移除它，或在它正是当前目标时形成 `perceived_goal_conflict` 并请求重新思考。
+
+可用性是面向观察者的投影。家具可以把交互对当前占用者报告为可用、对其他观察者报告为不可用，而不向核心暴露内部状态结构。
+
 ## 5. Event、知识与记忆的因果链
 
 ### 5.1 新的主观感知 Event

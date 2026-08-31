@@ -22,7 +22,7 @@ test("rethinks at the urgent threshold and completes toilet use", async ({ page 
     .locator("dd");
 
   await page.goto(app.url);
-  await expect(page.getByText("角色思考中")).toBeVisible();
+  await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
   await expect(release).toBeEnabled();
   await release.click();
 

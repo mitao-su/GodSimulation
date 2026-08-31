@@ -20,7 +20,10 @@ import {
   type EventId,
   type WorldSnapshot,
 } from "@god-sim/protocol";
-import { BodySlotSchema } from "@god-sim/plugin-sdk";
+import {
+  BodySlotSchema,
+  ObservedInteractionAvailabilitySchema,
+} from "@god-sim/plugin-sdk";
 
 import { MapDefinitionSchema } from "../map/map-definition";
 import { loadWorldDefinition } from "../map/map-loader";
@@ -161,6 +164,7 @@ const KnownObjectSchema = z
     status: z.string().min(1),
     summary: z.string().min(1),
     observable: JsonValueSchema,
+    interactionAvailability: z.array(ObservedInteractionAvailabilitySchema).default([]),
     position: CoordinateSchema,
     sourceEventId: EventIdSchema,
     observedAtTick: z.number().int().nonnegative(),

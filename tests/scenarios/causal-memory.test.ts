@@ -125,6 +125,7 @@ describe("causal memory", () => {
     takeEvents(engine);
     engine.dispatch(releaseCommand(engine));
     engine.tick();
+    engine.tick();
     const needEvent = takeEvents(engine)
       .find(
         (event) =>

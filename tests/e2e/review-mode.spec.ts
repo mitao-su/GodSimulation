@@ -19,7 +19,7 @@ test("runs automatically only while decision review is disabled", async ({ page 
   const worldTick = page.locator(".header-metric").filter({ hasText: "世界时间" }).locator("strong");
 
   await page.goto(app.url);
-  await expect(page.getByText("角色思考中")).toBeVisible();
+  await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
   await review.click();
   await expect(review).not.toBeChecked();
 

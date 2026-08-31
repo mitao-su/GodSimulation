@@ -5,6 +5,7 @@ import type {
   EventId,
   JsonValue,
 } from "@god-sim/protocol";
+import type { ObservedInteractionAvailability } from "@god-sim/plugin-sdk";
 
 export type ObservationKind =
   | "vision"
@@ -20,6 +21,7 @@ export interface ObservedObjectValue {
   readonly status: string;
   readonly summary: string;
   readonly observable: JsonValue;
+  readonly interactionAvailability: readonly ObservedInteractionAvailability[];
   readonly position: Coordinate;
   readonly observedAtTick: number;
 }

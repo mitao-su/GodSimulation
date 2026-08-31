@@ -8,11 +8,19 @@ import {
 import type { PluginRegistry } from "../world/plugin-registry";
 import type { AgentState, WorldState } from "../world/world-state";
 
-function occupiedByKnownOther(agent: AgentState, entityId: EntityId): boolean {
-  const known = agent.knowledge.objects.get(entityId)?.observable;
-  if (typeof known !== "object" || known === null || Array.isArray(known)) return false;
-  const occupant = "occupiedBy" in known ? known.occupiedBy : null;
-  return typeof occupant === "string" && occupant !== agent.id;
+function interactionIsKnownUnavailable(
+  agent: AgentState,
+  entityId: EntityId,
+  interactionId: string,
+): boolean {
+  return (
+    agent.knowledge.objects
+      .get(entityId)
+      ?.interactionAvailability.some(
+        (availability) =>
+          availability.interactionId === interactionId && !availability.available,
+      ) ?? false
+  );
 }
 
 export function buildGoalOptions(
@@ -45,9 +53,9 @@ export function buildGoalOptions(
         goal: { kind: "observe", targetEntityId: object.id },
       }),
     );
-    if (occupiedByKnownOther(agent, object.id)) continue;
     for (const interaction of definition.interactions) {
       if (interaction.trigger !== "active_command") continue;
+      if (interactionIsKnownUnavailable(agent, object.id, interaction.id)) continue;
       options.push(
         GoalOptionSchema.parse({
           id: `goal-option:${agentId}:${object.id}:${interaction.id}`,

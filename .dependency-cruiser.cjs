@@ -1,3 +1,115 @@
+const workspaceModules = [
+  { name: "@god-sim/protocol", root: "packages/protocol", allowed: [] },
+  {
+    name: "@god-sim/plugin-sdk",
+    root: "packages/plugin-sdk",
+    allowed: ["@god-sim/protocol"],
+  },
+  {
+    name: "@god-sim/simulation",
+    root: "packages/simulation",
+    allowed: ["@god-sim/plugin-sdk", "@god-sim/protocol"],
+  },
+  {
+    name: "@god-sim/cognition",
+    root: "packages/cognition",
+    allowed: ["@god-sim/plugin-sdk", "@god-sim/protocol"],
+  },
+  {
+    name: "@god-sim/timeline",
+    root: "packages/timeline",
+    allowed: ["@god-sim/protocol"],
+  },
+  {
+    name: "@god-sim/model-gateway",
+    root: "packages/model-gateway",
+    allowed: ["@god-sim/protocol"],
+  },
+  {
+    name: "@god-sim/sqlite-store",
+    root: "packages/sqlite-store",
+    allowed: ["@god-sim/protocol", "@god-sim/timeline"],
+  },
+  { name: "@god-sim/web", root: "apps/web", allowed: ["@god-sim/protocol"] },
+  {
+    name: "@god-sim/simulation-worker",
+    root: "apps/simulation-worker",
+    allowed: [
+      "@god-sim/cognition",
+      "@god-sim/plugin-sdk",
+      "@god-sim/protocol",
+      "@god-sim/simulation",
+    ],
+  },
+  {
+    name: "@god-sim/local-server",
+    root: "apps/local-server",
+    allowed: [
+      "@god-sim/model-gateway",
+      "@god-sim/protocol",
+      "@god-sim/sqlite-store",
+      "@god-sim/timeline",
+    ],
+  },
+  {
+    name: "@god-sim/spatial-objects",
+    root: "plugins/spatial-objects",
+    allowed: ["@god-sim/plugin-sdk", "@god-sim/protocol"],
+    plugin: true,
+  },
+  {
+    name: "@god-sim/home-objects",
+    root: "plugins/home-objects",
+    allowed: ["@god-sim/plugin-sdk", "@god-sim/protocol"],
+    plugin: true,
+  },
+  {
+    name: "@god-sim/starter-agents",
+    root: "plugins/starter-agents",
+    allowed: ["@god-sim/plugin-sdk", "@god-sim/protocol"],
+    plugin: true,
+  },
+];
+
+const nonPluginModules = workspaceModules.filter((module) => !module.plugin);
+const officialPlugins = workspaceModules.filter((module) => module.plugin);
+
+function escapeRegex(value) {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function targetPattern(modules) {
+  const roots = modules.map((module) => escapeRegex(module.root)).join("|");
+  const aliases = modules
+    .map((module) => escapeRegex(module.name.replace("@god-sim/", "")))
+    .join("|");
+  return "^(?:(?:" + roots + ")(?:/|$)|@god-sim/(?:" + aliases + ")(?:/|$))";
+}
+
+function workspaceAllowListRule(module) {
+  const allowed = new Set([module.name, ...module.allowed]);
+  const disallowed = nonPluginModules.filter((candidate) => !allowed.has(candidate.name));
+  return {
+    name: module.name.slice("@god-sim/".length) + "-workspace-allow-list",
+    severity: "error",
+    from: { path: "^" + escapeRegex(module.root) + "/src(?:/|$)" },
+    to: { path: targetPattern(disallowed) },
+  };
+}
+
+function officialPluginCompositionRule(module) {
+  const disallowed = officialPlugins.filter((candidate) => candidate.name !== module.name);
+  return {
+    name: module.name.slice("@god-sim/".length) + "-no-production-plugin-composition",
+    severity: "error",
+    from: {
+      path: "^" + escapeRegex(module.root) + "/src(?:/|$)",
+      pathNot: "\\.(?:test|spec)\\.[cm]?[jt]sx?$",
+    },
+    to: { path: targetPattern(disallowed) },
+  };
+}
+
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
@@ -13,26 +125,8 @@ module.exports = {
       from: { path: "^(packages|plugins)/" },
       to: { path: "^apps/" },
     },
-    {
-      name: "web-does-not-import-simulation",
-      severity: "error",
-      from: { path: "^apps/web/" },
-      to: { path: "^(packages/simulation|@god-sim/simulation)" },
-    },
-    {
-      name: "simulation-does-not-import-io-or-cognition",
-      severity: "error",
-      from: { path: "^packages/simulation/" },
-      to: {
-        path: "^(apps/|packages/(cognition|timeline|model-gateway|sqlite-store)/|@god-sim/(cognition|timeline|model-gateway|sqlite-store))",
-      },
-    },
-    {
-      name: "cognition-does-not-import-simulation",
-      severity: "error",
-      from: { path: "^packages/cognition/" },
-      to: { path: "^(packages/simulation/|@god-sim/simulation)" },
-    },
+    ...workspaceModules.map(workspaceAllowListRule),
+    ...workspaceModules.map(officialPluginCompositionRule),
     {
       name: "no-workspace-deep-imports",
       severity: "error",
@@ -46,4 +140,3 @@ module.exports = {
     tsConfig: { fileName: "tsconfig.json" },
   },
 };
-

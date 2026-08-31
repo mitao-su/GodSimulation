@@ -56,6 +56,6 @@ describe("queryObject", () => {
         ],
       },
     });
-    expect(world.objects.get("fridge-1" as never)?.state).toEqual({ occupiedBy: null });
+    expect(world.objects.get("fridge-1" as never)?.state).toEqual({ holder: null });
   });
 });

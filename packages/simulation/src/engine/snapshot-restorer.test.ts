@@ -133,6 +133,49 @@ describe("simulation snapshot restoration", () => {
     expect(restored.prepareCheckpoint().events).toEqual([]);
   });
 
+  it("restores older v2 knowledge with unknown interaction availability", () => {
+    const original = createSimulation({
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      reviewRequired: true,
+      seed: 1,
+      pluginLockHash: "a".repeat(64),
+    });
+    const snapshot = original.createSnapshot();
+    const state = structuredClone(snapshot.state) as {
+      agents: Array<{
+        knowledge: {
+          objects: Array<{ interactionAvailability?: unknown }>;
+        };
+      }>;
+    };
+    for (const agent of state.agents) {
+      for (const object of agent.knowledge.objects) {
+        delete object.interactionAvailability;
+      }
+    }
+
+    const restored = restoreSimulation({
+      snapshot: { ...snapshot, state: state as never },
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+    });
+    const restoredState = restored.createSnapshot().state as {
+      agents: Array<{
+        id: string;
+        knowledge: {
+          objects: Array<{ entityId: string; interactionAvailability: unknown[] }>;
+        };
+      }>;
+    };
+
+    const alice = restoredState.agents.find((agent) => agent.id === "alice");
+    expect(
+      alice?.knowledge.objects.find((object) => object.entityId === "fridge-1")
+        ?.interactionAvailability,
+    ).toEqual([]);
+  });
+
   it("assigns a legacy world-level model failure back to its decision request", () => {
     const original = createSimulation({
       worldDefinition: simulationTestWorld().map,

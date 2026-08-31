@@ -98,6 +98,6 @@ describe("advanceActions", () => {
         purpose: "goal",
       },
     ]);
-    expect(result.world.objects.get("fridge-1" as never)?.state).toEqual({ occupiedBy: null });
+    expect(result.world.objects.get("fridge-1" as never)?.state).toEqual({ holder: null });
   });
 });

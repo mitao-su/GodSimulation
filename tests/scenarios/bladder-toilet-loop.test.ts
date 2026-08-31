@@ -22,6 +22,7 @@ describe("bladder and toilet loop", () => {
     engine.tick();
     engine.dispatch(releaseCommand(engine));
     engine.tick();
+    engine.tick();
 
     expect(engine.getView().pauseReason?.code).toBe("urgent_bladder");
     expect(snapshotAgent(engine, "alice").bladder).toBe(75);

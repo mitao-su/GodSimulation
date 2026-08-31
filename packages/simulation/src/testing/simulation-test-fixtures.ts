@@ -30,7 +30,7 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
   observe: () => ({ status: "solid", summary: "Wall", details: {} }),
 };
 
-const fridgeState = z.object({ occupiedBy: z.string().nullable() }).strict();
+const fridgeState = z.object({ holder: z.string().nullable() }).strict();
 type FridgeState = z.infer<typeof fridgeState>;
 
 const fridgeDefinition: ObjectDefinition<FridgeState> = {
@@ -40,7 +40,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
   displayName: "Fridge",
   tags: ["occupiable"],
   stateSchema: fridgeState,
-  initialState: () => ({ occupiedBy: null }),
+  initialState: () => ({ holder: null }),
   resourceId: "test.fridge",
   placement: {
     kind: "cell",
@@ -50,8 +50,8 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
   movement: { blocksMovement: () => true },
   occupancy: {
     capacity: 1,
-    occupant: (state) => state.occupiedBy,
-    withOccupant: (state, occupant) => ({ ...state, occupiedBy: occupant }),
+    occupant: (state) => state.holder,
+    withOccupant: (state, occupant) => ({ ...state, holder: occupant }),
   },
   interactions: [
     {
@@ -61,7 +61,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       durationTicks: 10,
       slots: ["HANDS", "BODY"],
       canStart: (state, context) =>
-        state.occupiedBy === null || state.occupiedBy === context.actor.agentId
+        state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
           : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
       start: (_state, context) => ({
@@ -86,10 +86,21 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       }),
     },
   ],
-  observe: (state) => ({
-    status: state.occupiedBy === null ? "available" : "occupied",
-    summary: state.occupiedBy === null ? "Available" : `Used by ${state.occupiedBy}`,
-    details: { occupiedBy: state.occupiedBy },
+  observe: (state, context) => ({
+    status: state.holder === null ? "available" : "occupied",
+    summary: state.holder === null ? "Available" : `Used by ${state.holder}`,
+    details: { holder: state.holder },
+    interactionAvailability:
+      state.holder === null || state.holder === context.observerAgentId
+        ? [{ interactionId: "use", available: true }]
+        : [
+            {
+              interactionId: "use",
+              available: false,
+              reasonCode: "occupied",
+              summary: "Fridge occupied",
+            },
+          ],
   }),
 };
 
@@ -162,7 +173,7 @@ export function simulationTestWorld() {
           definitionId: "test.fridge",
           position: { x: 4, y: 1 },
           facing: "south",
-          state: { occupiedBy: null },
+          state: { holder: null },
         },
       ],
       spawns: [

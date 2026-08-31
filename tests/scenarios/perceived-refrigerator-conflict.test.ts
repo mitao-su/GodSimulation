@@ -57,9 +57,14 @@ describe("perceived refrigerator conflict", () => {
   it("does not reveal occupancy through the wall", () => {
     const update = refreshAlice(occupiedFridgeWorld());
 
-    expect(update.knowledge.objects.get("fridge-1" as never)?.observable).not.toMatchObject({
-      occupiedBy: "bob",
-    });
+    expect(
+      update.knowledge.objects
+        .get("fridge-1" as never)
+        ?.interactionAvailability.some(
+          (availability) =>
+            availability.interactionId === "use" && !availability.available,
+        ),
+    ).not.toBe(true);
     expect(update.decisionRequested).toBe(false);
   });
 
@@ -75,8 +80,13 @@ describe("perceived refrigerator conflict", () => {
     };
     const visible = refreshAlice(visibleWorld);
 
-    expect(visible.knowledge.objects.get("fridge-1" as never)?.observable).toMatchObject({
-      occupiedBy: "bob",
+    expect(
+      visible.knowledge.objects.get("fridge-1" as never)?.interactionAvailability,
+    ).toContainEqual({
+      interactionId: "use",
+      available: false,
+      reasonCode: "occupied",
+      summary: "Refrigerator used by bob",
     });
     expect(
       visible.memories.find(

@@ -42,12 +42,28 @@ describe("refrigerator definition", () => {
     ]);
   });
 
-  it("reveals occupancy only through its observable projection", () => {
+  it("reports use as unavailable when another agent is observed using it", () => {
     expect(
       refrigeratorDefinition.observe(
         { occupiedBy: "bob" },
         visionContext,
       ),
-    ).toMatchObject({ details: { occupiedBy: "bob" } });
+    ).toMatchObject({
+      interactionAvailability: [
+        {
+          interactionId: "use",
+          available: false,
+          reasonCode: "occupied",
+        },
+      ],
+    });
+  });
+
+  it("keeps use available to the agent already using it", () => {
+    expect(
+      refrigeratorDefinition.observe({ occupiedBy: "alice" }, visionContext),
+    ).toMatchObject({
+      interactionAvailability: [{ interactionId: "use", available: true }],
+    });
   });
 });

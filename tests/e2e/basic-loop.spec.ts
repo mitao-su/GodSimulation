@@ -22,7 +22,7 @@ test("runs the perception-conflict decision loop", async ({ page }, testInfo) =>
 
   await page.goto(app.url);
 
-  await expect(page.getByText("角色思考中")).toBeVisible();
+  await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
   await expect(page.getByText("Alice", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Bob", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "放行世界" })).toBeEnabled();

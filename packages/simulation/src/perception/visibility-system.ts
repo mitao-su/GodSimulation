@@ -55,6 +55,8 @@ function objectObservationChanged(
     previous === undefined ||
     previous.status !== current.status ||
     previous.summary !== current.summary ||
+    JSON.stringify(previous.interactionAvailability) !==
+      JSON.stringify(current.interactionAvailability) ||
     previous.position.x !== current.position.x ||
     previous.position.y !== current.position.y ||
     JSON.stringify(previous.observable) !== JSON.stringify(current.observable)

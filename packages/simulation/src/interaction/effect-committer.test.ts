@@ -54,7 +54,7 @@ describe("commitProposal", () => {
     expect(result.world.agents.get("alice" as never)?.bladder).toBe(5);
     expect(result.world.objects.get("fridge-1" as never)).toMatchObject({
       version: 1,
-      state: { occupiedBy: "alice" },
+      state: { holder: "alice" },
     });
     expect(result.events.map((event) => event.type)).toEqual([
       "agent_need_changed",

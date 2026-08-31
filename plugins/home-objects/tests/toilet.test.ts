@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { InteractionContextSchema } from "@god-sim/plugin-sdk";
+import {
+  InteractionContextSchema,
+  ObservationContextSchema,
+} from "@god-sim/plugin-sdk";
 
 import { toiletDefinition } from "../src/objects/toilet/definition";
 
@@ -17,6 +20,10 @@ const context = InteractionContextSchema.parse({
 });
 
 const useToilet = toiletDefinition.interactions[0];
+const visionContext = ObservationContextSchema.parse({
+  kind: "vision",
+  observerAgentId: "alice",
+});
 
 describe("toilet definition", () => {
   it("proposes a bladder change and occupancy release on completion", () => {
@@ -38,5 +45,17 @@ describe("toilet definition", () => {
       },
     ]);
     expect(state).toEqual({ occupiedBy: "alice" });
+  });
+
+  it("reports use as unavailable when another agent is observed using it", () => {
+    expect(toiletDefinition.observe({ occupiedBy: "bob" }, visionContext)).toMatchObject({
+      interactionAvailability: [
+        {
+          interactionId: "use",
+          available: false,
+          reasonCode: "occupied",
+        },
+      ],
+    });
   });
 });

@@ -47,7 +47,7 @@ describe("decision gate", () => {
       ...withMemory,
       objects: new Map(withMemory.objects).set("fridge-1" as never, {
         ...fridge,
-        state: { occupiedBy: "bob" },
+        state: { holder: "bob" },
       }),
     };
 
@@ -55,7 +55,7 @@ describe("decision gate", () => {
     const request = transition.world.decisionCycle?.requests.get("alice" as never);
 
     expect(request?.promptInput.perception.visibleEntities).toEqual([]);
-    expect(JSON.stringify(request?.promptInput)).not.toContain("occupiedBy");
+    expect(JSON.stringify(request?.promptInput)).not.toContain("holder");
     expect(request?.promptInput.memories).toHaveLength(1);
     expect(request?.promptInput.bodySensations).toEqual([
       {

@@ -136,6 +136,7 @@ function initialPerceptionCandidate(seed: InitialPerceptionSeed): PerceptionCand
         status: "remembered",
         summary: seed.summary,
         observable: {},
+        interactionAvailability: [],
         position: seed.position,
         observedAtTick: 0,
       },
