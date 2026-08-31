@@ -115,7 +115,10 @@ function required(values: Readonly<Record<string, string>>, key: string): string
 
 function completionEndpoint(baseUrl: string): string {
   const url = new URL(baseUrl);
-  const path = url.pathname.replace(/\/+$/u, "");
+  let path = url.pathname.replace(/\/+$/u, "");
+  if (url.hostname === "openrouter.ai" && path === "/api") {
+    path = "/api/v1";
+  }
   if (!path.endsWith("/chat/completions")) url.pathname = `${path}/chat/completions`;
   return url.toString().replace(/\/$/u, "");
 }

@@ -99,6 +99,33 @@ function deferredProvider() {
 }
 
 describe("SessionCoordinator", () => {
+  it("cancels model requests during shutdown without reporting a gameplay failure", async () => {
+    const worker = new FakeWorker();
+    const calls: string[] = [];
+    const coordinator = new SessionCoordinator({
+      worker,
+      decisionProvider: {
+        decide(requestValue, signal) {
+          calls.push(requestValue.requestId);
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        },
+      },
+      persistence: PersistenceWriter.inMemory(),
+      modelId: "fixed-test",
+    });
+    await coordinator.start();
+    worker.emit({ type: "decision_requested", request: request("alice") });
+    await vi.waitFor(() => expect(calls).toEqual(["request-alice"]));
+
+    await coordinator.stop();
+
+    expect(worker.sent).not.toContainEqual(
+      expect.objectContaining({ type: "decision_failure" }),
+    );
+  });
+
   it("requests one durable snapshot when a decision freeze is first published", async () => {
     const worker = new FakeWorker();
     const coordinator = new SessionCoordinator({
@@ -159,6 +186,13 @@ describe("SessionCoordinator", () => {
         technicalFailure: { category: "persistence" },
       }),
     );
+
+    worker.emit({ type: "world_view", view: { ...worldView(), revision: 2 } });
+    await coordinator.waitForIdle();
+    expect(coordinator.getView()).toMatchObject({
+      mode: "TECHNICALLY_BLOCKED",
+      technicalFailure: { category: "persistence" },
+    });
     await coordinator.stop();
   });
 

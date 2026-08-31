@@ -16,7 +16,7 @@
     "dev": "concurrently -k -n server,web \"pnpm --filter @god-sim/local-server dev\" \"pnpm --filter @god-sim/web dev\"",
     "lint": "eslint . && depcruise apps packages plugins --config .dependency-cruiser.cjs --output-type err",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "pnpm --filter @god-sim/web build && playwright test",
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {

@@ -42,12 +42,12 @@ export class WorkerMessageHandler {
         this.#initialize(message);
         return;
       }
-      if (!this.#session) throw new Error("Simulation worker is not initialized");
       if (message.type === "shutdown") {
-        this.#session.handle(message);
+        this.#session?.handle(message);
         this.#onShutdown();
         return;
       }
+      if (!this.#session) throw new Error("Simulation worker is not initialized");
       this.#session.handle(message);
     } catch (error) {
       this.#emitFailure(error);
@@ -75,6 +75,9 @@ export class WorkerMessageHandler {
       pluginLock: this.#pluginLock,
       reviewRequired: message.reviewRequired,
       deterministicSeed: message.deterministicSeed,
+      ...(message.restoredSnapshot === undefined
+        ? {}
+        : { restoredSnapshot: message.restoredSnapshot }),
       emit: (outgoing) => this.#emit(outgoing),
     });
     this.#emit({ type: "worker_ready", protocolVersion: 1 });

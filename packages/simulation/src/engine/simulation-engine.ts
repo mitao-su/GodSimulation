@@ -31,6 +31,7 @@ import { createPluginRegistry, type PluginRegistry } from "../world/plugin-regis
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
 import { projectWorldSnapshot } from "./snapshot-projector";
+import { restoreWorldSnapshot } from "./snapshot-restorer";
 import {
   refreshAllPerceptions,
   runTickPipeline,
@@ -44,6 +45,12 @@ export interface SimulationOptions {
   readonly reviewRequired?: boolean;
   readonly seed?: number;
   readonly pluginLockHash?: string;
+}
+
+export interface SimulationRestoreOptions {
+  readonly snapshot: WorldSnapshot;
+  readonly worldDefinition: unknown;
+  readonly plugins: readonly GamePlugin[];
 }
 
 export interface AdoptedDecision {
@@ -96,10 +103,14 @@ class DeterministicSimulationEngine implements SimulationEngine {
   #revision = 0;
   #stopped = false;
 
-  constructor(world: WorldState, registry: PluginRegistry) {
+  constructor(world: WorldState, registry: PluginRegistry, initialize = true) {
     this.#world = world;
     this.#registry = registry;
 
+    if (!initialize) {
+      this.#revision = 1;
+      return;
+    }
     const perception = refreshAllPerceptions(this.#world, this.#registry);
     this.#world = perception.world;
     this.#recordEvents(perception.events);
@@ -263,7 +274,10 @@ class DeterministicSimulationEngine implements SimulationEngine {
   #processCommands(): void {
     const commands = this.#commandQueue.splice(0);
     for (const command of commands) {
-      if (command.expectedWorldVersion !== this.#world.version) {
+      if (
+        command.type !== "set_review_mode" &&
+        command.expectedWorldVersion !== this.#world.version
+      ) {
         throw new Error(
           `Command ${command.commandId} expected world version ${command.expectedWorldVersion}, found ${this.#world.version}`,
         );
@@ -397,4 +411,10 @@ export function createSimulation(options: SimulationOptions): SimulationEngine {
       : { pluginLockHash: options.pluginLockHash }),
   });
   return new DeterministicSimulationEngine(world, registry);
+}
+
+export function restoreSimulation(options: SimulationRestoreOptions): SimulationEngine {
+  const registry = createPluginRegistry(options.plugins);
+  const world = restoreWorldSnapshot(options.snapshot, registry, options.worldDefinition);
+  return new DeterministicSimulationEngine(world, registry, false);
 }

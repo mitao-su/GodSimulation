@@ -37,6 +37,7 @@ const InitializeMessageSchema = z
     pluginLock: PluginLockSchema,
     reviewRequired: z.boolean(),
     deterministicSeed: z.number().int().nonnegative(),
+    restoredSnapshot: WorldSnapshotSchema.optional(),
   })
   .strict();
 

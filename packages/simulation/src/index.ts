@@ -13,6 +13,7 @@ export * from "./decision/plan-conflict-detector";
 export * from "./decision/release-policy";
 export * from "./engine/simulation-engine";
 export * from "./engine/snapshot-projector";
+export * from "./engine/snapshot-restorer";
 export * from "./engine/tick-pipeline";
 export * from "./engine/view-projector";
 export * from "./interaction/domain-event-factory";

@@ -83,10 +83,9 @@ export async function startLocalServer(
     filename: config.logFilename,
     knownSecrets: config.knownSecrets,
   });
-  const [worldText, pluginLock, store] = await Promise.all([
+  const [worldText, pluginLock] = await Promise.all([
     readFile(config.worldDefinitionPath, "utf8"),
     buildExpectedPluginLock(config.pluginDescriptors),
-    createSqliteTimelineStore({ filename: config.databaseFilename }),
   ]);
   const worldDefinition = JsonValueSchema.parse(JSON.parse(worldText) as unknown);
   const worldId = WorldIdSchema.parse(
@@ -97,12 +96,15 @@ export async function startLocalServer(
       ? worldDefinition.id
       : undefined,
   );
+  const store = await createSqliteTimelineStore({ filename: config.databaseFilename });
+  let restoredTimeline: Awaited<ReturnType<typeof store.loadLatest>>;
+  try {
+    restoredTimeline = await store.loadLatest(worldId);
+  } catch (error) {
+    await store.close();
+    throw error;
+  }
   const persistence = new PersistenceWriter(store);
-  await persistence.savePluginLock({
-    worldId,
-    pluginLock,
-    recordedAtRealTime: new Date().toISOString(),
-  });
   const worker = new ProcessWorkerSupervisor({
     entryPath: config.workerEntryPath,
     pluginDescriptors: config.pluginDescriptors,
@@ -121,6 +123,22 @@ export async function startLocalServer(
   });
   let app: FastifyInstance | null = null;
   try {
+    if (restoredTimeline.events.length > 0) {
+      throw new Error(
+        "Cannot restore the world because events exist after the latest durable snapshot",
+      );
+    }
+    if (
+      restoredTimeline.snapshot &&
+      restoredTimeline.snapshot.pluginLockHash !== pluginLock.hash
+    ) {
+      throw new Error("Cannot restore the world with a different plugin lock");
+    }
+    await persistence.savePluginLock({
+      worldId,
+      pluginLock,
+      recordedAtRealTime: new Date().toISOString(),
+    });
     await session.start({
       type: "initialize",
       protocolVersion: 1,
@@ -128,6 +146,9 @@ export async function startLocalServer(
       pluginLock,
       reviewRequired: config.reviewRequired,
       deterministicSeed: config.deterministicSeed,
+      ...(restoredTimeline.snapshot === null
+        ? {}
+        : { restoredSnapshot: restoredTimeline.snapshot }),
     });
     const configuredStaticRoot = await staticRoot(config, options.serveStaticWeb ?? true);
     app = await createLocalServerApp({

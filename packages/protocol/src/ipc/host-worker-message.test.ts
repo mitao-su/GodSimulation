@@ -3,6 +3,41 @@ import { describe, expect, it } from "vitest";
 import { HostToWorkerMessageSchema, WorkerToHostMessageSchema } from "./host-worker-message";
 
 describe("host-worker messages", () => {
+  it("accepts a versioned snapshot when initializing a restored world", () => {
+    const message = HostToWorkerMessageSchema.parse({
+      type: "initialize",
+      protocolVersion: 1,
+      worldDefinition: {},
+      pluginLock: {
+        hash: "a".repeat(64),
+        entries: [
+          {
+            pluginId: "test.plugin",
+            version: "0.1.0",
+            stateVersion: 1,
+            buildHash: "b".repeat(64),
+          },
+        ],
+      },
+      reviewRequired: true,
+      deterministicSeed: 1,
+      restoredSnapshot: {
+        schemaVersion: 1,
+        worldId: "test-world",
+        worldVersion: 12,
+        worldTick: 8,
+        lastEventSequence: 4,
+        pluginLockHash: "a".repeat(64),
+        state: {},
+      },
+    });
+
+    expect(message.type).toBe("initialize");
+    if (message.type === "initialize") {
+      expect(message.restoredSnapshot?.worldVersion).toBe(12);
+    }
+  });
+
   it("rejects a decision result without request identity", () => {
     expect(
       HostToWorkerMessageSchema.safeParse({

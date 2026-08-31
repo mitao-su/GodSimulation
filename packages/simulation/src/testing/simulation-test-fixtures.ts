@@ -109,7 +109,7 @@ const agentDefinition = (id: string, displayName: string): AgentDefinition => ({
   animationSetId: "test.humanoid",
 });
 
-const testPlugin = definePlugin(
+export const testPlugin = definePlugin(
   PluginManifestSchema.parse({
     schemaVersion: 1,
     id: "test.simulation",

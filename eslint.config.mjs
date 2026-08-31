@@ -18,6 +18,16 @@ export default tseslint.config(
     files: ["**/*.{js,mjs,cjs}"],
     ...js.configs.recommended,
   },
+  {
+    files: ["scripts/**/*.{js,mjs,cjs}"],
+    languageOptions: {
+      globals: {
+        clearTimeout: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+      },
+    },
+  },
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
     files: ["**/*.{ts,tsx}"],

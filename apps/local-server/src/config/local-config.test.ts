@@ -48,6 +48,28 @@ describe("local configuration", () => {
     expect(JSON.stringify(config.diagnostics)).not.toContain("test-secret-value");
   });
 
+  it("normalizes the OpenRouter API root to its versioned completion endpoint", async () => {
+    const projectRoot = await projectDirectory();
+    await writeFile(
+      join(projectRoot, "free_model.local"),
+      [
+        "BASE_URL=https://openrouter.ai/api",
+        "API_KEY=test-secret-value",
+        "MODEL=minimax/minimax-m3:free",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const config = await loadLocalConfig({ projectRoot, environment: {} });
+
+    expect(config.decisionProvider).toMatchObject({
+      kind: "openrouter",
+      model: {
+        endpoint: "https://openrouter.ai/api/v1/chat/completions",
+      },
+    });
+  });
+
   it("supports deterministic fixed mode without a model key file", async () => {
     const projectRoot = await projectDirectory();
     const config = await loadLocalConfig({

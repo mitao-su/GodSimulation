@@ -17,6 +17,23 @@ function requests(messages: readonly WorkerToHostMessage[]): ModelDecisionReques
 }
 
 describe("local worker process", () => {
+  it("publishes a final snapshot before a normal shutdown", async () => {
+    const { worker, messages } = await startTestWorker();
+
+    await vi.waitFor(() => expect(latestView(messages)).toBeDefined());
+    const beforeShutdown = latestView(messages)!;
+    await worker.stop();
+
+    const snapshot = messages
+      .filter((message) => message.type === "snapshot_ready")
+      .at(-1)?.snapshot;
+    expect(snapshot).toMatchObject({
+      worldId: beforeShutdown.worldId,
+      worldVersion: beforeShutdown.worldVersion,
+      worldTick: beforeShutdown.worldTick,
+    });
+  }, 20_000);
+
   it("keeps time frozen until every model result is accepted", async () => {
     const { worker, messages } = await startTestWorker();
     try {

@@ -12,7 +12,8 @@ import type { PersistenceWriter } from "../persistence/persistence-writer";
 
 export type CoordinatedDecision =
   | { readonly type: "result"; readonly result: ModelDecisionResult }
-  | { readonly type: "failure"; readonly failure: TechnicalFailure };
+  | { readonly type: "failure"; readonly failure: TechnicalFailure }
+  | { readonly type: "cancelled" };
 
 export interface DecisionRequestCoordinatorOptions {
   readonly provider: DecisionProvider;
@@ -80,6 +81,7 @@ export class DecisionRequestCoordinator {
       });
       return { type: "result", result };
     } catch (error) {
+      if (controller.signal.aborted) return { type: "cancelled" };
       const message = error instanceof Error ? error.message : String(error);
       const failure = TechnicalFailureSchema.parse({
         id: `failure:model:${request.requestId}`,

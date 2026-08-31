@@ -2,6 +2,7 @@ import {
   DecisionIdentitySchema,
   type HostToWorkerMessage,
   type PluginLock,
+  type WorldSnapshot,
   type WorkerToHostMessage,
 } from "@god-sim/protocol";
 import type { GamePlugin } from "@god-sim/plugin-sdk";
@@ -10,6 +11,7 @@ import {
   createPluginRegistry,
   createSimulation,
   MapDefinitionSchema,
+  restoreSimulation,
   type SimulationEngine,
 } from "@god-sim/simulation";
 
@@ -19,6 +21,7 @@ export interface WorldSessionOptions {
   readonly pluginLock: PluginLock;
   readonly reviewRequired: boolean;
   readonly deterministicSeed: number;
+  readonly restoredSnapshot?: WorldSnapshot;
   readonly emit: (message: WorkerToHostMessage) => void;
 }
 export class WorldSession {
@@ -35,13 +38,25 @@ export class WorldSession {
       if (!definition) throw new Error(`Missing agent definition ${spawn.definitionId}`);
       this.#agentDefinitions.set(spawn.agentId, definition);
     }
-    this.#engine = createSimulation({
-      worldDefinition: map,
-      plugins: options.plugins,
-      reviewRequired: options.reviewRequired,
-      seed: options.deterministicSeed,
-      pluginLockHash: options.pluginLock.hash,
-    });
+    if (
+      options.restoredSnapshot &&
+      options.restoredSnapshot.pluginLockHash !== options.pluginLock.hash
+    ) {
+      throw new Error("Restored snapshot does not match the loaded plugin lock");
+    }
+    this.#engine = options.restoredSnapshot
+      ? restoreSimulation({
+          snapshot: options.restoredSnapshot,
+          worldDefinition: map,
+          plugins: options.plugins,
+        })
+      : createSimulation({
+          worldDefinition: map,
+          plugins: options.plugins,
+          reviewRequired: options.reviewRequired,
+          seed: options.deterministicSeed,
+          pluginLockHash: options.pluginLock.hash,
+        });
     this.#emit = options.emit;
   }
 
@@ -126,6 +141,7 @@ export class WorldSession {
         this.#emit({ type: "snapshot_ready", snapshot: this.#engine.createSnapshot() });
         return;
       case "shutdown":
+        this.#emit({ type: "snapshot_ready", snapshot: this.#engine.createSnapshot() });
         return;
     }
   }

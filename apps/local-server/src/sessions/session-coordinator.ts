@@ -41,6 +41,7 @@ export class SessionCoordinator {
   #unsubscribeWorker: (() => void) | null = null;
   #view: WorldView | null = null;
   #failureSequence = 0;
+  #terminalFailurePublished = false;
 
   constructor(options: SessionCoordinatorOptions) {
     this.#worker = options.worker;
@@ -66,9 +67,10 @@ export class SessionCoordinator {
   async stop(): Promise<void> {
     this.#decisions.cancelAll();
     await this.waitForIdle();
+    await this.#worker.stop();
+    await this.waitForIdle();
     this.#unsubscribeWorker?.();
     this.#unsubscribeWorker = null;
-    await this.#worker.stop();
     await this.#persistence.close();
   }
 
@@ -116,6 +118,7 @@ export class SessionCoordinator {
         await this.#persistence.saveSnapshot(message.snapshot);
         return;
       case "world_view":
+        if (this.#terminalFailurePublished) return;
         this.#publishView(message.view);
         await this.#requestFreezeSnapshot(message.view);
         return;
@@ -129,6 +132,7 @@ export class SessionCoordinator {
   }
 
   async #sendDecisionOutcome(outcome: CoordinatedDecision): Promise<void> {
+    if (outcome.type === "cancelled") return;
     if (outcome.type === "result") {
       await this.#worker.send({ type: "decision_result", result: outcome.result });
     } else {
@@ -182,6 +186,7 @@ export class SessionCoordinator {
 
   #publishTechnicalFailure(failure: ReturnType<typeof TechnicalFailureSchema.parse>): void {
     if (!this.#view) return;
+    this.#terminalFailurePublished = true;
     this.#publishView(
       WorldViewSchema.parse({
         ...this.#view,
