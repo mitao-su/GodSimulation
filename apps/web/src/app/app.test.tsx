@@ -65,8 +65,8 @@ function view(
         actionLabel: null,
         bladderLevel: "comfortable",
         decisionStatus: decisionStatus === "error" ? "error" : decisionStatus === "ready" ? "ready" : "thinking",
-        perceivedSummaries: ["Bob 正在使用冰箱"],
-        memorySummaries: ["冰箱在厨房"],
+        perceivedSummaries: ["Wall", "Wall"],
+        memorySummaries: ["冰箱在厨房", "冰箱在厨房"],
       },
     ],
     pendingDecisions: [
@@ -148,6 +148,30 @@ describe("director workbench", () => {
     expect(client.sentCommands).toContainEqual(
       expect.objectContaining({ type: "set_review_mode", enabled: false }),
     );
+  });
+
+  it("renders repeated perception summaries without duplicate key errors", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(<App client={new FakeWorldClient(view("THINKING", "pending"))} />);
+
+    await userEvent.click(screen.getByRole("tab", { name: "感知" }));
+
+    expect(screen.getAllByText("Wall")).toHaveLength(2);
+    expect(
+      consoleError.mock.calls.filter(([message]) => String(message).includes("same key")),
+    ).toEqual([]);
+  });
+
+  it("renders repeated memory summaries without duplicate key errors", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(<App client={new FakeWorldClient(view("THINKING", "pending"))} />);
+
+    await userEvent.click(screen.getByRole("tab", { name: "记忆" }));
+
+    expect(screen.getAllByText("冰箱在厨房")).toHaveLength(2);
+    expect(
+      consoleError.mock.calls.filter(([message]) => String(message).includes("same key")),
+    ).toEqual([]);
   });
 
   it("retries only the failed decision request", async () => {

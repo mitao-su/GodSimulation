@@ -85,16 +85,16 @@ export function AgentInspector({ view, selectedId }: AgentInspectorProps) {
 
       {tab === "perception" ? (
         <ul className="inspector-list inspector-content">
-          {agent.perceivedSummaries.length > 0 ? agent.perceivedSummaries.map((summary) => (
-            <li key={summary}>{summary}</li>
+          {agent.perceivedSummaries.length > 0 ? agent.perceivedSummaries.map((summary, index) => (
+            <li key={`${index}:${summary}`}>{summary}</li>
           )) : <li className="muted">当前没有明确感知</li>}
         </ul>
       ) : null}
 
       {tab === "memory" ? (
         <ul className="inspector-list inspector-content">
-          {agent.memorySummaries.length > 0 ? agent.memorySummaries.map((summary) => (
-            <li key={summary}>{summary}</li>
+          {agent.memorySummaries.length > 0 ? agent.memorySummaries.map((summary, index) => (
+            <li key={`${index}:${summary}`}>{summary}</li>
           )) : <li className="muted">当前没有即时记忆</li>}
         </ul>
       ) : null}
