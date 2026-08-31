@@ -32,16 +32,27 @@ function parsePluginDescriptors(value: string | undefined): readonly PluginDescr
 export async function startSimulationWorker(): Promise<void> {
   if (!process.send) throw new Error("Simulation worker requires an IPC parent");
   const sendToParent = process.send.bind(process);
+  const disconnectFromParent = process.disconnect.bind(process);
   const descriptors = parsePluginDescriptors(process.env.GOD_SIM_PLUGIN_DESCRIPTORS);
   const loaded = await loadPluginSet(descriptors);
+  const pendingSends = new Set<Promise<void>>();
   let timer: NodeJS.Timeout | null = null;
   const emit = (message: WorkerToHostMessage): void => {
-    sendToParent(WorkerToHostMessageSchema.parse(message));
+    const pending = new Promise<void>((resolve, reject) => {
+      sendToParent(WorkerToHostMessageSchema.parse(message), (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    pendingSends.add(pending);
+    void pending
+      .finally(() => pendingSends.delete(pending))
+      .catch(() => undefined);
   };
   const shutdown = (): void => {
     if (timer) clearInterval(timer);
     timer = null;
-    process.disconnect();
+    void Promise.allSettled([...pendingSends]).then(() => disconnectFromParent());
   };
   const handler = new WorkerMessageHandler({
     plugins: loaded.plugins,
