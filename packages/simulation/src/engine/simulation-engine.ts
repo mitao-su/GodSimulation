@@ -1,4 +1,5 @@
 import {
+  CheckpointIdSchema,
   DecisionIdentitySchema,
   GoalOptionIdSchema,
   GoalProposalSchema,
@@ -8,12 +9,14 @@ import {
   type DecisionIdentity,
   type DecisionPromptInput,
   type DomainEvent,
+  type CheckpointId,
   type Goal,
   type GoalOptionId,
   type ModelDecisionResult,
   type TechnicalFailure,
   type WorldCommand,
   type WorldSnapshot,
+  type WorldSnapshotV2,
   type WorldView,
 } from "@god-sim/protocol";
 import type { GamePlugin } from "@god-sim/plugin-sdk";
@@ -38,6 +41,7 @@ import {
 import { createPluginRegistry, type PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
+import { assertSnapshotCausality } from "./snapshot-causality";
 import { projectWorldSnapshot } from "./snapshot-projector";
 import { restoreWorldSnapshot } from "./snapshot-restorer";
 import {
@@ -73,6 +77,12 @@ export interface BufferResult {
   readonly reason: string;
 }
 
+export interface SimulationCheckpoint {
+  readonly checkpointId: CheckpointId;
+  readonly events: readonly DomainEvent[];
+  readonly snapshot: WorldSnapshotV2;
+}
+
 export interface SimulationEngine {
   dispatch(command: WorldCommand): BufferResult;
   acceptDecision(decision: AdoptedDecision): BufferResult;
@@ -81,8 +91,11 @@ export interface SimulationEngine {
   tick(): WorldView;
   getView(): WorldView;
   getPendingDecisionInputs(): readonly DecisionPromptInput[];
+  prepareCheckpoint(): SimulationCheckpoint;
+  acknowledgeCheckpoint(checkpointId: CheckpointId): BufferResult;
+  /** @deprecated Use prepareCheckpoint and acknowledgeCheckpoint. */
   drainEvents(): readonly DomainEvent[];
-  createSnapshot(): WorldSnapshot;
+  createSnapshot(): WorldSnapshotV2;
 }
 
 function identitiesMatch(expected: DecisionIdentity, actual: DecisionIdentity): boolean {
@@ -149,6 +162,10 @@ class DeterministicSimulationEngine implements SimulationEngine {
   readonly #commandQueue: WorldCommand[] = [];
   readonly #decisionQueue = new Map<string, AdoptedDecision>();
   #eventOutbox: DomainEvent[] = [];
+  #preparedCheckpoint: {
+    readonly value: SimulationCheckpoint;
+    readonly eventCount: number;
+  } | null = null;
   #recentEvents: DomainEvent[] = [];
   #revision = 0;
   #stopped = false;
@@ -305,13 +322,57 @@ class DeterministicSimulationEngine implements SimulationEngine {
     });
   }
 
+  prepareCheckpoint(): SimulationCheckpoint {
+    if (this.#preparedCheckpoint) return this.#preparedCheckpoint.value;
+    const snapshot = projectWorldSnapshot(this.#world);
+    assertSnapshotCausality(snapshot);
+    const value: SimulationCheckpoint = {
+      checkpointId: CheckpointIdSchema.parse(
+        `checkpoint:${snapshot.worldId}:${snapshot.worldVersion}:${snapshot.lastEventSequence}`,
+      ),
+      events: [...this.#eventOutbox],
+      snapshot,
+    };
+    this.#preparedCheckpoint = {
+      value,
+      eventCount: value.events.length,
+    };
+    return value;
+  }
+
+  acknowledgeCheckpoint(checkpointId: CheckpointId): BufferResult {
+    const prepared = this.#preparedCheckpoint;
+    if (!prepared) {
+      return { accepted: false, reason: "No checkpoint is pending acknowledgement" };
+    }
+    if (prepared.value.checkpointId !== checkpointId) {
+      return {
+        accepted: false,
+        reason: `Checkpoint ${checkpointId} does not match the pending checkpoint`,
+      };
+    }
+    const prefixMatches = prepared.value.events.every(
+      (event, index) => this.#eventOutbox[index]?.eventId === event.eventId,
+    );
+    if (!prefixMatches) {
+      return {
+        accepted: false,
+        reason: `Checkpoint ${checkpointId} Event prefix no longer matches the buffer`,
+      };
+    }
+    this.#eventOutbox = this.#eventOutbox.slice(prepared.eventCount);
+    this.#preparedCheckpoint = null;
+    return { accepted: true, reason: `Checkpoint ${checkpointId} acknowledged` };
+  }
+
   drainEvents(): readonly DomainEvent[] {
     const events = this.#eventOutbox;
     this.#eventOutbox = [];
+    this.#preparedCheckpoint = null;
     return events;
   }
 
-  createSnapshot(): WorldSnapshot {
+  createSnapshot(): WorldSnapshotV2 {
     return projectWorldSnapshot(this.#world);
   }
 
