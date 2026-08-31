@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -56,5 +56,19 @@ describe("local configuration", () => {
     });
 
     expect(config.decisionProvider).toEqual({ kind: "fixed" });
+  });
+
+  it("finds the workspace root when launched from the local-server package", async () => {
+    const projectRoot = await projectDirectory();
+    const workingDirectory = join(projectRoot, "apps", "local-server");
+    await mkdir(workingDirectory, { recursive: true });
+    await writeFile(join(projectRoot, "pnpm-workspace.yaml"), "packages: []\n", "utf8");
+
+    const config = await loadLocalConfig({
+      workingDirectory,
+      environment: { GOD_SIM_DECISION_PROVIDER: "fixed" },
+    });
+
+    expect(config.projectRoot).toBe(projectRoot);
   });
 });

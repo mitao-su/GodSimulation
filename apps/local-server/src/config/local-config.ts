@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 import type { ModelConfig } from "@god-sim/model-gateway";
 
@@ -40,7 +40,24 @@ export interface LocalConfig {
 
 export interface LoadLocalConfigOptions {
   readonly projectRoot?: string;
+  readonly workingDirectory?: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
+}
+
+async function findProjectRoot(workingDirectory: string): Promise<string> {
+  let current = resolve(workingDirectory);
+  while (true) {
+    try {
+      await access(resolve(current, "pnpm-workspace.yaml"));
+      return current;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) {
+        throw new Error(`Unable to locate pnpm-workspace.yaml from ${workingDirectory}`);
+      }
+      current = parent;
+    }
+  }
 }
 
 function resolveFrom(projectRoot: string, value: string): string {
@@ -140,7 +157,9 @@ async function loadDecisionProvider(
 }
 
 export async function loadLocalConfig(options: LoadLocalConfigOptions = {}): Promise<LocalConfig> {
-  const projectRoot = resolve(options.projectRoot ?? process.cwd());
+  const projectRoot = options.projectRoot
+    ? resolve(options.projectRoot)
+    : await findProjectRoot(options.workingDirectory ?? process.cwd());
   const environment = options.environment ?? process.env;
   const decision = await loadDecisionProvider(projectRoot, environment);
   const host = environment.GOD_SIM_HOST ?? "127.0.0.1";

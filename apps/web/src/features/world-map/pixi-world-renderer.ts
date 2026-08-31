@@ -78,6 +78,7 @@ export class PixiWorldRenderer {
   readonly #baseTextures = new Map<string, Texture>();
   readonly #frameTextures = new Map<string, Texture>();
   #catalog: AssetCatalog | null = null;
+  #initialized = false;
   #destroyed = false;
 
   constructor(options: PixiWorldRendererOptions) {
@@ -94,8 +95,9 @@ export class PixiWorldRenderer {
       resolution: Math.min(globalThis.devicePixelRatio || 1, 2),
       resizeTo: this.#host,
     });
+    this.#initialized = true;
     if (this.#destroyed) {
-      this.#app.destroy(true);
+      this.#destroyApplication();
       return;
     }
     this.#host.appendChild(this.#app.canvas);
@@ -143,6 +145,11 @@ export class PixiWorldRenderer {
   destroy(): void {
     if (this.#destroyed) return;
     this.#destroyed = true;
+    if (!this.#initialized) return;
+    this.#destroyApplication();
+  }
+
+  #destroyApplication(): void {
     this.#app.destroy({ removeView: true }, { children: true });
     for (const texture of this.#frameTextures.values()) texture.destroy(false);
     this.#frameTextures.clear();
