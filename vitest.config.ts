@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
@@ -21,9 +21,9 @@ export default defineConfig({
   },
   test: {
     clearMocks: true,
+    exclude: [...configDefaults.exclude, "**/.worktrees/**"],
     include: ["**/*.test.{ts,tsx}"],
     passWithNoTests: false,
     restoreMocks: true,
   },
 });
-
