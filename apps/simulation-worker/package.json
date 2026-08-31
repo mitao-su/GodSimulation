@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
+    "build": "tsup --config tsup.config.ts",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run src",
     "typecheck": "tsc -b tsconfig.json --pretty false"
@@ -14,5 +14,10 @@
     "@god-sim/plugin-sdk": "workspace:*",
     "@god-sim/protocol": "workspace:*",
     "@god-sim/simulation": "workspace:*"
+  },
+  "devDependencies": {
+    "@god-sim/home-objects": "workspace:*",
+    "@god-sim/spatial-objects": "workspace:*",
+    "@god-sim/starter-agents": "workspace:*"
   }
 }

@@ -1,6 +1,7 @@
 export * from "./commands/command-envelope";
 export * from "./commands/release-execution.command";
 export * from "./commands/retry-decision.command";
+export * from "./commands/retry-technical-failure.command";
 export * from "./commands/set-review-mode.command";
 export * from "./commands/stop-session.command";
 export * from "./commands/world-command";

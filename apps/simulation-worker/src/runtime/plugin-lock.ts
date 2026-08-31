@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { PluginLockSchema, type PluginLock } from "@god-sim/protocol";
 import { PluginManifestSchema } from "@god-sim/plugin-sdk";
@@ -24,6 +25,12 @@ export async function buildPluginLock(
         readFile(descriptor.entryPath),
       ]);
       const manifest = PluginManifestSchema.parse(JSON.parse(manifestText));
+      const manifestEntryPath = resolve(dirname(descriptor.manifestPath), manifest.entry);
+      if (resolve(descriptor.entryPath) !== manifestEntryPath) {
+        throw new Error(
+          `Plugin manifest entry ${manifestEntryPath} does not match ${descriptor.entryPath}`,
+        );
+      }
       return {
         pluginId: manifest.id,
         version: manifest.version,

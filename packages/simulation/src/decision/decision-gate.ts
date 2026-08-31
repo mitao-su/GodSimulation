@@ -157,6 +157,7 @@ export function requestDecisions(
       identity,
       promptInput,
       acceptedProposal: null,
+      failure: null,
     });
     promptInputs.push(promptInput);
   }
@@ -209,6 +210,9 @@ export function acceptDecisionResult(
   if (request.acceptedProposal) {
     return { accepted: false, world, reason: `Request ${result.requestId} already has a result` };
   }
+  if (request.failure) {
+    return { accepted: false, world, reason: `Request ${result.requestId} has a recorded failure` };
+  }
   const offered = request.promptInput.goalOptions.some(
     (option) => option.id === result.proposal.goalOptionId,
   );
@@ -223,6 +227,7 @@ export function acceptDecisionResult(
   const requests = new Map(cycle.requests).set(result.agentId, {
     ...request,
     acceptedProposal: result.proposal,
+    failure: null,
   });
   return {
     accepted: true,
@@ -249,26 +254,35 @@ export function recordDecisionFailure(
   if (request.acceptedProposal !== null) {
     throw new Error(`Decision failure targets completed request ${requestId}`);
   }
+  const cycle = world.decisionCycle!;
+  const requests = new Map(cycle.requests).set(request.identity.agentId, {
+    ...request,
+    failure,
+  });
   return {
     ...world,
     version: world.version + 1,
     mode: "TECHNICALLY_BLOCKED",
-    technicalFailure: failure,
+    suspendedMode:
+      world.mode === "TECHNICALLY_BLOCKED" ? world.suspendedMode : world.mode,
+    decisionCycle: { ...cycle, requests },
+    technicalFailure: world.technicalFailure ?? failure,
   };
 }
 
 export function retryDecisionRequest(world: WorldState, requestId: RequestId): WorldState {
   const cycle = world.decisionCycle;
-  const failure = world.technicalFailure;
-  if (!cycle || !failure || failure.requestId !== requestId) {
+  if (!cycle) {
     throw new Error(`Request ${requestId} has no active technical failure`);
   }
-  if (!failure.retryable) throw new Error(`Failure for ${requestId} is not retryable`);
   const entry = [...cycle.requests.entries()].find(
     ([, request]) => request.identity.requestId === requestId,
   );
   if (!entry) throw new Error(`Decision request ${requestId} is no longer active`);
   const [agentId, request] = entry;
+  const failure = request.failure;
+  if (!failure) throw new Error(`Request ${requestId} has no active technical failure`);
+  if (!failure.retryable) throw new Error(`Failure for ${requestId} is not retryable`);
   const nextVersion = world.version + 1;
   const nextRequestId = RequestIdSchema.parse(`decision-request:${nextVersion}:retry`);
   const identity: DecisionIdentity = {
@@ -285,12 +299,23 @@ export function retryDecisionRequest(world: WorldState, requestId: RequestId): W
     identity,
     promptInput,
     acceptedProposal: null,
+    failure: null,
   });
+  const remainingDecisionFailure = cycle.requestedAgentIds
+    .map((requestedAgentId) => requests.get(requestedAgentId)?.failure ?? null)
+    .find((candidate) => candidate !== null) ?? null;
+  const blockingFailure =
+    world.technicalFailure?.category !== "model"
+      ? world.technicalFailure
+      : remainingDecisionFailure;
   return {
     ...world,
     version: nextVersion,
-    mode: "THINKING",
+    mode: blockingFailure ? "TECHNICALLY_BLOCKED" : "THINKING",
+    suspendedMode: blockingFailure
+      ? world.suspendedMode ?? (world.mode === "TECHNICALLY_BLOCKED" ? "THINKING" : world.mode)
+      : null,
     decisionCycle: { ...cycle, requests },
-    technicalFailure: null,
+    technicalFailure: blockingFailure,
   };
 }

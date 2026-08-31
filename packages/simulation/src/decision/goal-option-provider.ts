@@ -31,14 +31,23 @@ export function buildGoalOptions(
     }),
   ];
 
-  for (const object of [...world.objects.values()].sort((left, right) =>
-    left.id.localeCompare(right.id),
+  for (const knownObject of [...agent.knowledge.objects.values()].sort((left, right) =>
+    left.entityId.localeCompare(right.entityId),
   )) {
+    const object = world.objects.get(knownObject.entityId);
+    if (!object) continue;
     const definition = registry.getObject(object.definitionId)?.definition;
-    if (!definition || definition.tags.includes("door")) continue;
+    if (!definition || definition.interactions.length === 0) continue;
+    options.push(
+      GoalOptionSchema.parse({
+        id: `goal-option:${agentId}:${object.id}:observe`,
+        label: `Observe ${definition.displayName}`,
+        goal: { kind: "observe", targetEntityId: object.id },
+      }),
+    );
     if (occupiedByKnownOther(agent, object.id)) continue;
     for (const interaction of definition.interactions) {
-      if (interaction.trigger !== "active_command" || interaction.id !== "use") continue;
+      if (interaction.trigger !== "active_command") continue;
       options.push(
         GoalOptionSchema.parse({
           id: `goal-option:${agentId}:${object.id}:${interaction.id}`,

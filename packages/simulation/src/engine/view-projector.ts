@@ -79,7 +79,7 @@ function perceivedSummaries(agent: AgentState): string[] {
 function decisionStatus(world: WorldState, agentId: AgentId): "none" | "thinking" | "ready" | "error" {
   const request = world.decisionCycle?.requests.get(agentId);
   if (!request) return "none";
-  if (world.technicalFailure?.requestId === request.identity.requestId) return "error";
+  if (request.failure) return "error";
   return request.acceptedProposal === null ? "thinking" : "ready";
 }
 
@@ -160,10 +160,7 @@ export function projectWorldView(
       world.decisionCycle?.requestedAgentIds.map((agentId) => {
         const request = world.decisionCycle!.requests.get(agentId);
         if (!request) throw new Error(`Missing decision request for ${agentId}`);
-        const error =
-          world.technicalFailure?.requestId === request.identity.requestId
-            ? world.technicalFailure
-            : null;
+        const error = request.failure;
         return {
           requestId: request.identity.requestId,
           agentId,

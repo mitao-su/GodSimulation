@@ -62,6 +62,9 @@ importers:
       '@god-sim/timeline':
         specifier: workspace:*
         version: link:../../packages/timeline
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
       fastify:
         specifier: 5.12.1
         version: 5.12.1
@@ -83,6 +86,16 @@ importers:
       '@god-sim/simulation':
         specifier: workspace:*
         version: link:../../packages/simulation
+    devDependencies:
+      '@god-sim/home-objects':
+        specifier: workspace:*
+        version: link:../../plugins/home-objects
+      '@god-sim/spatial-objects':
+        specifier: workspace:*
+        version: link:../../plugins/spatial-objects
+      '@god-sim/starter-agents':
+        specifier: workspace:*
+        version: link:../../plugins/starter-agents
 
   apps/web:
     dependencies:

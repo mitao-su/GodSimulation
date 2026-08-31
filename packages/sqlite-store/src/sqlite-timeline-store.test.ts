@@ -74,4 +74,68 @@ describe("SQLite timeline store", () => {
       await store.close();
     }
   });
+
+  it("accepts exact replays of durable records without duplicating history", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const event = eventAt(1);
+    const modelCall = {
+      requestId: "request:1" as never,
+      worldId: "starter-world" as never,
+      worldVersion: 1,
+      agentId: "alice" as never,
+      modelId: "fixed-test",
+      status: "accepted" as const,
+      goalOptionId: "goal-option:alice:wait" as never,
+      responseReason: "Alice waits",
+      latencyMs: 10,
+      retryOfRequestId: null,
+      recordedAtRealTime: "2026-08-31T00:00:00.000Z",
+    };
+    const failure = {
+      id: "failure:persistence:1",
+      category: "persistence" as const,
+      message: "disk unavailable",
+      retryable: true,
+      occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+    };
+    try {
+      await store.appendEvents([event]);
+      await store.appendEvents([event]);
+      await store.saveModelCall(modelCall);
+      await store.saveModelCall(modelCall);
+      await store.recordFailure("starter-world" as never, failure);
+      await store.recordFailure("starter-world" as never, failure);
+
+      await expect(store.loadLatest("starter-world" as never)).resolves.toEqual({
+        snapshot: null,
+        events: [event],
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("accepts an exact snapshot replay and rejects different state at the same version", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const snapshot = snapshotAt(12);
+    try {
+      await store.saveSnapshot(snapshot);
+      await store.saveSnapshot(snapshot);
+
+      await expect(
+        store.saveSnapshot(
+          WorldSnapshotSchema.parse({
+            ...snapshot,
+            state: { marker: "conflicting-state" },
+          }),
+        ),
+      ).rejects.toThrow(/snapshot replay conflicts/i);
+      await expect(store.loadLatest("starter-world" as never)).resolves.toEqual({
+        snapshot,
+        events: [],
+      });
+    } finally {
+      await store.close();
+    }
+  });
 });

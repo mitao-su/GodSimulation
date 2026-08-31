@@ -115,4 +115,63 @@ describe("decision gate", () => {
     expect(retriedBob.identity.requestId).not.toBe(bobRequest.identity.requestId);
     expect(retriedBob.identity.retryOfRequestId).toBe(bobRequest.identity.requestId);
   });
+
+  it("keeps concurrent decision failures independently retryable", () => {
+    const initial = requestDecisions(simulationTestWorld(), [
+      aliceWaitRequest,
+      {
+        ...aliceWaitRequest,
+        agentId: "bob" as never,
+        goalOptions: [
+          {
+            id: "bob-wait" as never,
+            label: "Wait",
+            goal: { kind: "wait" as const, durationTicks: 10 },
+          },
+        ],
+      },
+    ]).world;
+    const aliceRequest = initial.decisionCycle!.requests.get("alice" as never)!;
+    const bobRequest = initial.decisionCycle!.requests.get("bob" as never)!;
+    const aliceFailure = {
+      id: "failure:model:alice",
+      category: "model" as const,
+      message: "Alice provider request failed",
+      requestId: aliceRequest.identity.requestId,
+      retryable: true,
+      occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+    };
+    const bobFailure = {
+      id: "failure:model:bob",
+      category: "model" as const,
+      message: "Bob provider request failed",
+      requestId: bobRequest.identity.requestId,
+      retryable: true,
+      occurredAtRealTime: "2026-08-31T00:00:01.000Z",
+    };
+
+    const blocked = recordDecisionFailure(
+      recordDecisionFailure(initial, aliceFailure),
+      bobFailure,
+    );
+
+    expect(blocked.decisionCycle!.requests.get("alice" as never)!.failure).toEqual(aliceFailure);
+    expect(blocked.decisionCycle!.requests.get("bob" as never)!.failure).toEqual(bobFailure);
+
+    const bobRetried = retryDecisionRequest(blocked, bobRequest.identity.requestId);
+    expect(bobRetried.mode).toBe("TECHNICALLY_BLOCKED");
+    expect(bobRetried.technicalFailure).toEqual(aliceFailure);
+    expect(bobRetried.decisionCycle!.requests.get("alice" as never)!.failure).toEqual(
+      aliceFailure,
+    );
+    expect(bobRetried.decisionCycle!.requests.get("bob" as never)!.failure).toBeNull();
+
+    const aliceRetried = retryDecisionRequest(
+      bobRetried,
+      aliceRequest.identity.requestId,
+    );
+    expect(aliceRetried.mode).toBe("THINKING");
+    expect(aliceRetried.technicalFailure).toBeNull();
+    expect(aliceRetried.decisionCycle!.requests.get("alice" as never)!.failure).toBeNull();
+  });
 });

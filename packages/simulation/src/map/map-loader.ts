@@ -10,7 +10,11 @@ import {
   type WorldState,
 } from "../world/world-state";
 import { createEmptyBodySlots } from "../execution/body-slots";
-import { createEmptyKnowledge } from "../perception/agent-knowledge";
+import {
+  createEmptyKnowledge,
+  type AgentKnowledge,
+  type ImmediateMemory,
+} from "../perception/agent-knowledge";
 
 const DEFAULT_PLUGIN_LOCK_HASH = "0".repeat(64);
 
@@ -65,6 +69,51 @@ function validatePluginReferences(map: MapDefinition, registry: PluginRegistry):
     referenced.add(pluginReference.id);
   }
   return referenced;
+}
+
+function initialObjectKnowledge(
+  spawn: MapDefinition["spawns"][number],
+  objects: ReadonlyMap<ObjectInstance["id"], ObjectInstance>,
+  registry: PluginRegistry,
+  zoneId: string,
+): { readonly knowledge: AgentKnowledge; readonly memories: readonly ImmediateMemory[] } {
+  assertUnique(`known object ID for ${spawn.agentId}`, spawn.knownObjectIds);
+  const knowledge = createEmptyKnowledge(zoneId);
+  const knownObjects = new Map(knowledge.objects);
+  const memories: ImmediateMemory[] = [];
+
+  for (const [index, entityId] of spawn.knownObjectIds.entries()) {
+    const object = objects.get(entityId);
+    if (!object) {
+      throw new Error(`Agent ${spawn.agentId} knows missing object ${entityId}`);
+    }
+    const definition = registry.getObject(object.definitionId)?.definition;
+    if (!definition) throw new Error(`Known object ${entityId} has no plugin definition`);
+    const sourceEventId = EventIdSchema.parse(
+      `event:initial-knowledge:${spawn.agentId}:${index}`,
+    );
+    knownObjects.set(entityId, {
+      entityId,
+      displayName: definition.displayName,
+      status: "remembered",
+      summary: `Remembers where ${definition.displayName} is`,
+      observable: {},
+      position: object.position,
+      sourceEventId,
+      observedAtTick: 0,
+      observationKind: "memory",
+    });
+    memories.push({
+      id: `memory:${sourceEventId}`,
+      sourceEventId,
+      formedAtTick: 0,
+      observationKind: "memory",
+      summary: `Knows where ${definition.displayName} is`,
+      relatedEntityId: entityId,
+    });
+  }
+
+  return { knowledge: { ...knowledge, objects: knownObjects }, memories };
 }
 
 export function loadWorldDefinition(
@@ -148,6 +197,7 @@ export function loadWorldDefinition(
     assertCoordinateInBounds(`Agent ${spawn.agentId}`, spawn.position, map);
     const zoneId = zoneIndex.at(spawn.position)?.id;
     if (!zoneId) throw new Error(`Agent ${spawn.agentId} does not spawn inside a named zone`);
+    const initialKnowledge = initialObjectKnowledge(spawn, objects, registry, zoneId);
     agents.set(spawn.agentId, {
       id: spawn.agentId,
       definitionId: spawn.definitionId,
@@ -161,15 +211,18 @@ export function loadWorldDefinition(
       currentGoal: null,
       actionPlan: null,
       bodySlots: createEmptyBodySlots(),
-      knowledge: createEmptyKnowledge(zoneId),
-      memories: registered.definition.initialMemories.map((memory, index) => ({
-        id: memory.id,
-        sourceEventId: EventIdSchema.parse(`event:initial:${spawn.agentId}:${index}`),
-        formedAtTick: 0,
-        observationKind: "interaction",
-        summary: memory.summary,
-        relatedEntityId: null,
-      })),
+      knowledge: initialKnowledge.knowledge,
+      memories: [
+        ...registered.definition.initialMemories.map((memory, index) => ({
+          id: memory.id,
+          sourceEventId: EventIdSchema.parse(`event:initial:${spawn.agentId}:${index}`),
+          formedAtTick: 0,
+          observationKind: "memory" as const,
+          summary: memory.summary,
+          relatedEntityId: null,
+        })),
+        ...initialKnowledge.memories,
+      ],
     });
   }
 
@@ -179,6 +232,7 @@ export function loadWorldDefinition(
     version: 0,
     tick: 0,
     mode: "THINKING",
+    suspendedMode: null,
     reviewRequired: options.reviewRequired ?? true,
     randomState: (options.seed ?? 1) >>> 0,
     lastEventSequence: 0,

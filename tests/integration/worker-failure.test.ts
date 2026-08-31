@@ -157,4 +157,72 @@ describe("worker decision validation and retry", () => {
       await worker.stop();
     }
   }, 20_000);
+
+  it("keeps peer model failures visible while retrying one request", async () => {
+    const { worker, messages } = await startTestWorker();
+    try {
+      await vi.waitFor(() =>
+        expect(messages.filter((message) => message.type === "decision_requested")).toHaveLength(2),
+      );
+      const originals = messages.filter(
+        (message): message is Extract<WorkerToHostMessage, { type: "decision_requested" }> =>
+          message.type === "decision_requested",
+      );
+      const alice = originals.find((message) => message.request.agentId === "alice")!.request;
+      const bob = originals.find((message) => message.request.agentId === "bob")!.request;
+
+      for (const request of [alice, bob]) {
+        await worker.send({
+          type: "decision_failure",
+          failure: {
+            id: `failure:model:${request.requestId}`,
+            category: "model",
+            message: `${request.agentId} provider unavailable`,
+            requestId: request.requestId,
+            retryable: true,
+            occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+          },
+        });
+      }
+
+      await vi.waitFor(() => {
+        const view = messages.filter((message) => message.type === "world_view").at(-1)?.view;
+        expect(view?.pendingDecisions.filter((decision) => decision.status === "error"))
+          .toHaveLength(2);
+      });
+      const blockedView = messages.filter((message) => message.type === "world_view").at(-1)!.view;
+
+      await worker.send({
+        type: "world_command",
+        command: {
+          schemaVersion: 1,
+          commandId: "command:retry:bob" as never,
+          worldId: blockedView.worldId,
+          expectedWorldVersion: blockedView.worldVersion,
+          issuedAtRealTime: "2026-08-31T00:00:01.000Z",
+          type: "retry_decision",
+          requestId: bob.requestId,
+        },
+      });
+
+      await vi.waitFor(() => {
+        const retried = messages
+          .filter((message): message is Extract<WorkerToHostMessage, { type: "decision_requested" }> =>
+            message.type === "decision_requested",
+          )
+          .find((message) => message.request.retryOfRequestId === bob.requestId);
+        expect(retried).toBeDefined();
+      });
+      const retriedView = messages.filter((message) => message.type === "world_view").at(-1)!.view;
+      expect(retriedView.mode).toBe("TECHNICALLY_BLOCKED");
+      expect(retriedView.pendingDecisions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ agentId: "alice", status: "error" }),
+          expect.objectContaining({ agentId: "bob", status: "pending", error: null }),
+        ]),
+      );
+    } finally {
+      await worker.stop();
+    }
+  }, 20_000);
 });

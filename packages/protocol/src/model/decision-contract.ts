@@ -110,7 +110,14 @@ export const DecisionMemorySchema = z
     sourceEventId: EventIdSchema,
     summary: z.string().min(1).max(500),
     formedAtTick: z.number().int().nonnegative(),
-    observationKind: z.enum(["vision", "hearing", "contact", "interaction", "body"]),
+    observationKind: z.enum([
+      "vision",
+      "hearing",
+      "contact",
+      "interaction",
+      "body",
+      "memory",
+    ]),
   })
   .strict();
 

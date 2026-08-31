@@ -170,7 +170,7 @@ export async function loadLocalConfig(options: LoadLocalConfigOptions = {}): Pro
   const pluginDescriptors = ["spatial-objects", "home-objects", "starter-agents"].map(
     (name): LocalPluginDescriptor => ({
       manifestPath: resolve(projectRoot, "plugins", name, "plugin.json"),
-      entryPath: resolve(projectRoot, "plugins", name, "src", "index.ts"),
+      entryPath: resolve(projectRoot, "plugins", name, "dist", "index.js"),
     }),
   );
   const workerEntryPath = resolveFrom(

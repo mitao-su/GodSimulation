@@ -80,6 +80,20 @@ describe("local configuration", () => {
     expect(config.decisionProvider).toEqual({ kind: "fixed" });
   });
 
+  it("loads the bundled entry declared by each runtime plugin", async () => {
+    const projectRoot = await projectDirectory();
+    const config = await loadLocalConfig({
+      projectRoot,
+      environment: { GOD_SIM_DECISION_PROVIDER: "fixed" },
+    });
+
+    expect(config.pluginDescriptors.map((descriptor) => descriptor.entryPath)).toEqual([
+      join(projectRoot, "plugins", "spatial-objects", "dist", "index.js"),
+      join(projectRoot, "plugins", "home-objects", "dist", "index.js"),
+      join(projectRoot, "plugins", "starter-agents", "dist", "index.js"),
+    ]);
+  });
+
   it("finds the workspace root when launched from the local-server package", async () => {
     const projectRoot = await projectDirectory();
     const workingDirectory = join(projectRoot, "apps", "local-server");

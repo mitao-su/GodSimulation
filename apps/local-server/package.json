@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --platform node --sourcemap --clean",
+    "build": "tsup --config tsup.config.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
     "test": "vitest run src",
@@ -17,6 +17,7 @@
     "@god-sim/protocol": "workspace:*",
     "@god-sim/sqlite-store": "workspace:*",
     "@god-sim/timeline": "workspace:*",
+    "better-sqlite3": "13.0.3",
     "fastify": "5.12.1",
     "pino": "10.3.1"
   }

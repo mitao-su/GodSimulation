@@ -84,6 +84,26 @@ function view(
   });
 }
 
+function persistenceFailureView(): WorldView {
+  return WorldViewSchema.parse({
+    ...view("THINKING", "pending"),
+    revision: 2,
+    mode: "TECHNICALLY_BLOCKED",
+    pauseReason: {
+      code: "technical_failure",
+      message: "disk unavailable",
+      agentIds: [],
+    },
+    technicalFailure: {
+      id: "failure:persistence:1",
+      category: "persistence",
+      message: "disk unavailable",
+      retryable: true,
+      occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+    },
+  });
+}
+
 class FakeWorldClient implements WorldClientPort {
   readonly sentCommands: WorldCommand[] = [];
   readonly #view: WorldView;
@@ -194,5 +214,23 @@ describe("director workbench", () => {
     expect(within(failure).getByText("模型")).toBeVisible();
     expect(within(failure).getByText("request-alice")).toBeVisible();
     expect(within(failure).getByText("模型暂时不可用")).toBeVisible();
+  });
+
+  it("offers an explicit retry command for a recoverable persistence failure", async () => {
+    const client = new FakeWorldClient(persistenceFailureView());
+    render(<App client={client} />);
+
+    const failure = screen.getByRole("group", { name: "存储错误" });
+    expect(within(failure).getByText("disk unavailable")).toBeVisible();
+    await userEvent.click(
+      within(failure).getByRole("button", { name: "重试存储故障" }),
+    );
+
+    expect(client.sentCommands).toContainEqual(
+      expect.objectContaining({
+        type: "retry_technical_failure",
+        failureId: "failure:persistence:1",
+      }),
+    );
   });
 });

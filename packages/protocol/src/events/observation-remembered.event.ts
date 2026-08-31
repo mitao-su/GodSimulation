@@ -7,7 +7,14 @@ export const ObservationRememberedEventSchema = EventEnvelopeSchema.extend({
   type: z.literal("observation_remembered"),
   agentId: AgentIdSchema,
   sourceEventId: EventIdSchema,
-  observationKind: z.enum(["vision", "hearing", "contact", "interaction", "body"]),
+  observationKind: z.enum([
+    "vision",
+    "hearing",
+    "contact",
+    "interaction",
+    "body",
+    "memory",
+  ]),
   summary: z.string().min(1).max(500),
 }).strict();
 

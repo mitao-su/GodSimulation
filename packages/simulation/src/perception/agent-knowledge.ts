@@ -6,7 +6,13 @@ import type {
   JsonValue,
 } from "@god-sim/protocol";
 
-export type ObservationKind = "vision" | "hearing" | "contact" | "interaction" | "body";
+export type ObservationKind =
+  | "vision"
+  | "hearing"
+  | "contact"
+  | "interaction"
+  | "body"
+  | "memory";
 
 export interface KnownObjectState {
   readonly entityId: EntityId;

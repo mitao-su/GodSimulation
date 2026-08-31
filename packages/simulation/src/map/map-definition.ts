@@ -68,6 +68,7 @@ export const AgentSpawnSchema = z
     position: CoordinateSchema,
     facing: FacingSchema,
     needs: z.object({ bladder: z.number().int().min(0).max(100) }).strict(),
+    knownObjectIds: z.array(EntityIdSchema).default([]),
   })
   .strict();
 

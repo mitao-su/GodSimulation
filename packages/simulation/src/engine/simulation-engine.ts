@@ -3,6 +3,7 @@ import {
   GoalOptionIdSchema,
   GoalProposalSchema,
   GoalSchema,
+  TechnicalFailureSchema,
   WorldCommandSchema,
   type DecisionIdentity,
   type DecisionPromptInput,
@@ -69,6 +70,7 @@ export interface SimulationEngine {
   dispatch(command: WorldCommand): BufferResult;
   acceptDecision(decision: AdoptedDecision): BufferResult;
   reportDecisionFailure(failure: TechnicalFailure): BufferResult;
+  reportTechnicalFailure(failure: TechnicalFailure): BufferResult;
   tick(): WorldView;
   getView(): WorldView;
   getPendingDecisionInputs(): readonly DecisionPromptInput[];
@@ -153,6 +155,9 @@ class DeterministicSimulationEngine implements SimulationEngine {
     if (request.acceptedProposal !== null) {
       return { accepted: false, reason: `Request ${identity.data.requestId} is already ready` };
     }
+    if (request.failure !== null) {
+      return { accepted: false, reason: `Request ${identity.data.requestId} has failed` };
+    }
     if (this.#decisionQueue.has(identity.data.requestId)) {
       return { accepted: false, reason: `Request ${identity.data.requestId} is already buffered` };
     }
@@ -180,6 +185,25 @@ class DeterministicSimulationEngine implements SimulationEngine {
     } catch (error) {
       return { accepted: false, reason: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  reportTechnicalFailure(failureInput: TechnicalFailure): BufferResult {
+    const failure = TechnicalFailureSchema.safeParse(failureInput);
+    if (!failure.success) {
+      return { accepted: false, reason: `Technical failure is invalid: ${failure.error.message}` };
+    }
+    this.#world = {
+      ...this.#world,
+      version: this.#world.version + 1,
+      mode: "TECHNICALLY_BLOCKED",
+      suspendedMode:
+        this.#world.mode === "TECHNICALLY_BLOCKED"
+          ? this.#world.suspendedMode
+          : this.#world.mode,
+      technicalFailure: failure.data,
+    };
+    this.#revision += 1;
+    return { accepted: true, reason: "Technical failure recorded" };
   }
 
   tick(): WorldView {
@@ -213,6 +237,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
       if (
         !request ||
         request.acceptedProposal !== null ||
+        request.failure !== null ||
         this.#decisionQueue.has(request.identity.requestId)
       ) {
         return [];
@@ -276,6 +301,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
     for (const command of commands) {
       if (
         command.type !== "set_review_mode" &&
+        command.type !== "retry_technical_failure" &&
         command.expectedWorldVersion !== this.#world.version
       ) {
         throw new Error(
@@ -298,6 +324,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
             version: this.#world.version + 1,
             reviewRequired: command.enabled,
           };
+          if (this.#world.mode === "TECHNICALLY_BLOCKED") break;
           const cycleId = this.#world.decisionCycle?.id;
           const released = applyReleasePolicy(this.#world);
           if (cycleId && released.mode === "RUNNING" && this.#world.mode !== "RUNNING") {
@@ -330,6 +357,38 @@ class DeterministicSimulationEngine implements SimulationEngine {
           );
           this.#world = written.world;
           this.#recordEvents([written.event]);
+          break;
+        }
+        case "retry_technical_failure": {
+          const failure = this.#world.technicalFailure;
+          if (
+            this.#world.mode !== "TECHNICALLY_BLOCKED" ||
+            !failure ||
+            failure.id !== command.failureId
+          ) {
+            throw new Error(`Technical failure ${command.failureId} is not active`);
+          }
+          if (!failure.retryable) {
+            throw new Error(`Technical failure ${command.failureId} is not retryable`);
+          }
+          if (!this.#world.suspendedMode) {
+            throw new Error(`Technical failure ${command.failureId} has no suspended mode`);
+          }
+          const recovered = {
+            ...this.#world,
+            version: this.#world.version + 1,
+            mode: this.#world.suspendedMode,
+            suspendedMode: null,
+            technicalFailure: null,
+          };
+          const cycleId = recovered.decisionCycle?.id;
+          const released = applyReleasePolicy(recovered);
+          if (cycleId && released.mode === "RUNNING" && recovered.mode !== "RUNNING") {
+            this.#world = released;
+            this.#recordWorldReleased(cycleId, true, command.commandId);
+          } else {
+            this.#world = released;
+          }
           break;
         }
         case "stop_session":

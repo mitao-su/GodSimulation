@@ -12,6 +12,7 @@ function world(mode: WorldMode, tick = 12): WorldState {
     version: 0,
     tick,
     mode,
+    suspendedMode: mode === "TECHNICALLY_BLOCKED" ? "THINKING" : null,
     reviewRequired: true,
     randomState: 123,
     lastEventSequence: 0,

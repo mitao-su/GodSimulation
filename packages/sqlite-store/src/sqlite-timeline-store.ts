@@ -49,6 +49,7 @@ class SqliteTimelineStore implements TimelineStore {
     await this.#db.transaction().execute(async (transaction) => {
       for (const event of events) {
         await ensureWorld(transaction, event.worldId);
+        const payloadJson = JSON.stringify(event);
         await transaction
           .insertInto("events")
           .values({
@@ -58,9 +59,23 @@ class SqliteTimelineStore implements TimelineStore {
             world_version: event.worldVersion,
             world_tick: event.worldTick,
             event_type: event.type,
-            payload_json: JSON.stringify(event),
+            payload_json: payloadJson,
           })
+          .onConflict((conflict) =>
+            conflict.columns(["world_id", "sequence"]).doNothing(),
+          )
+          .execute();
+        const stored = await transaction
+          .selectFrom("events")
+          .select(["event_id", "payload_json"])
+          .where("world_id", "=", event.worldId)
+          .where("sequence", "=", event.sequence)
           .executeTakeFirstOrThrow();
+        if (stored.event_id !== event.eventId || stored.payload_json !== payloadJson) {
+          throw new Error(
+            `Event replay conflicts at ${event.worldId} sequence ${event.sequence}`,
+          );
+        }
       }
     });
   }
@@ -69,6 +84,21 @@ class SqliteTimelineStore implements TimelineStore {
     const snapshot = WorldSnapshotSchema.parse(snapshotValue);
     await this.#db.transaction().execute(async (transaction) => {
       await ensureWorld(transaction, snapshot.worldId);
+      const payloadJson = JSON.stringify(snapshot);
+      const stored = await transaction
+        .selectFrom("snapshots")
+        .select("payload_json")
+        .where("world_id", "=", snapshot.worldId)
+        .where("world_version", "=", snapshot.worldVersion)
+        .execute();
+      if (stored.length > 0) {
+        if (stored.some((row) => row.payload_json !== payloadJson)) {
+          throw new Error(
+            `Snapshot replay conflicts at ${snapshot.worldId} version ${snapshot.worldVersion}`,
+          );
+        }
+        return;
+      }
       await transaction
         .insertInto("snapshots")
         .values({
@@ -76,7 +106,7 @@ class SqliteTimelineStore implements TimelineStore {
           world_version: snapshot.worldVersion,
           world_tick: snapshot.worldTick,
           last_event_sequence: snapshot.lastEventSequence,
-          payload_json: JSON.stringify(snapshot),
+          payload_json: payloadJson,
         })
         .executeTakeFirstOrThrow();
     });
@@ -108,22 +138,43 @@ class SqliteTimelineStore implements TimelineStore {
   async saveModelCall(record: ModelCallRecord): Promise<void> {
     await this.#db.transaction().execute(async (transaction) => {
       await ensureWorld(transaction, record.worldId);
+      const values = {
+        request_id: record.requestId,
+        world_id: record.worldId,
+        world_version: record.worldVersion,
+        agent_id: record.agentId,
+        model_id: record.modelId,
+        status: record.status,
+        goal_option_id: record.goalOptionId,
+        response_reason: record.responseReason,
+        latency_ms: record.latencyMs,
+        retry_of_request_id: record.retryOfRequestId,
+        recorded_at: record.recordedAtRealTime,
+      };
       await transaction
         .insertInto("model_calls")
-        .values({
-          request_id: record.requestId,
-          world_id: record.worldId,
-          world_version: record.worldVersion,
-          agent_id: record.agentId,
-          model_id: record.modelId,
-          status: record.status,
-          goal_option_id: record.goalOptionId,
-          response_reason: record.responseReason,
-          latency_ms: record.latencyMs,
-          retry_of_request_id: record.retryOfRequestId,
-          recorded_at: record.recordedAtRealTime,
-        })
+        .values(values)
+        .onConflict((conflict) => conflict.column("request_id").doNothing())
+        .execute();
+      const stored = await transaction
+        .selectFrom("model_calls")
+        .selectAll()
+        .where("request_id", "=", record.requestId)
         .executeTakeFirstOrThrow();
+      if (
+        stored.world_id !== values.world_id ||
+        stored.world_version !== values.world_version ||
+        stored.agent_id !== values.agent_id ||
+        stored.model_id !== values.model_id ||
+        stored.status !== values.status ||
+        stored.goal_option_id !== values.goal_option_id ||
+        stored.response_reason !== values.response_reason ||
+        stored.latency_ms !== values.latency_ms ||
+        stored.retry_of_request_id !== values.retry_of_request_id ||
+        stored.recorded_at !== values.recorded_at
+      ) {
+        throw new Error(`Model call replay conflicts for ${record.requestId}`);
+      }
     });
   }
 
@@ -131,18 +182,35 @@ class SqliteTimelineStore implements TimelineStore {
     const failure = TechnicalFailureSchema.parse(failureValue);
     await this.#db.transaction().execute(async (transaction) => {
       await ensureWorld(transaction, worldId);
+      const values = {
+        failure_id: failure.id,
+        world_id: worldId,
+        category: failure.category,
+        message: failure.message,
+        request_id: failure.requestId ?? null,
+        retryable: failure.retryable ? 1 : 0,
+        occurred_at: failure.occurredAtRealTime,
+      };
       await transaction
         .insertInto("technical_failures")
-        .values({
-          failure_id: failure.id,
-          world_id: worldId,
-          category: failure.category,
-          message: failure.message,
-          request_id: failure.requestId ?? null,
-          retryable: failure.retryable ? 1 : 0,
-          occurred_at: failure.occurredAtRealTime,
-        })
+        .values(values)
+        .onConflict((conflict) => conflict.column("failure_id").doNothing())
+        .execute();
+      const stored = await transaction
+        .selectFrom("technical_failures")
+        .selectAll()
+        .where("failure_id", "=", failure.id)
         .executeTakeFirstOrThrow();
+      if (
+        stored.world_id !== values.world_id ||
+        stored.category !== values.category ||
+        stored.message !== values.message ||
+        stored.request_id !== values.request_id ||
+        stored.retryable !== values.retryable ||
+        stored.occurred_at !== values.occurred_at
+      ) {
+        throw new Error(`Technical failure replay conflicts for ${failure.id}`);
+      }
     });
   }
 
@@ -190,4 +258,3 @@ export async function createSqliteTimelineStore(
   await migrateInitialSchema(db);
   return new SqliteTimelineStore(db);
 }
-

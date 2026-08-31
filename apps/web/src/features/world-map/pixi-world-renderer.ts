@@ -78,6 +78,8 @@ export class PixiWorldRenderer {
   readonly #baseTextures = new Map<string, Texture>();
   readonly #frameTextures = new Map<string, Texture>();
   #catalog: AssetCatalog | null = null;
+  #lastView: WorldView | null = null;
+  #resizeObserver: ResizeObserver | null = null;
   #initialized = false;
   #destroyed = false;
 
@@ -92,6 +94,7 @@ export class PixiWorldRenderer {
       autoDensity: true,
       background: "#20222b",
       preference: "webgl",
+      preserveDrawingBuffer: true,
       resolution: Math.min(globalThis.devicePixelRatio || 1, 2),
       resizeTo: this.#host,
     });
@@ -102,6 +105,11 @@ export class PixiWorldRenderer {
     }
     this.#host.appendChild(this.#app.canvas);
     this.#app.stage.addChild(this.#worldLayer);
+    this.#resizeObserver = new ResizeObserver(() => {
+      if (!this.#lastView || !this.#catalog || this.#destroyed) return;
+      this.#resizeAndLayout(this.#lastView);
+    });
+    this.#resizeObserver.observe(this.#host);
     this.#catalog = await loadCatalog();
     const allSheets = [
       ...this.#catalog.sheets.values(),
@@ -124,17 +132,29 @@ export class PixiWorldRenderer {
   render(view: WorldView): void {
     const catalog = this.#catalog;
     if (!catalog) throw new Error("World renderer is not initialized");
+    this.#lastView = view;
     for (const child of this.#worldLayer.removeChildren()) {
       child.destroy({ children: true } satisfies DestroyOptions);
     }
     const projected = projectWorldView(view);
     for (const entity of projected) this.#worldLayer.addChild(this.#createDisplay(entity, catalog));
 
+    this.#resizeAndLayout(view);
+  }
+
+  #resizeAndLayout(view: WorldView): void {
+    const hostWidth = Math.max(1, Math.round(this.#host.clientWidth));
+    const hostHeight = Math.max(1, Math.round(this.#host.clientHeight));
+    if (this.#app.screen.width !== hostWidth || this.#app.screen.height !== hostHeight) {
+      this.#app.renderer.resize(hostWidth, hostHeight);
+    }
+
     const mapWidth = view.map.width * view.map.tileSize;
     const mapHeight = view.map.height * view.map.tileSize;
     const availableWidth = Math.max(1, this.#app.screen.width - 24);
     const availableHeight = Math.max(1, this.#app.screen.height - 24);
-    const scale = Math.max(1, Math.floor(Math.min(availableWidth / mapWidth, availableHeight / mapHeight)));
+    const fitScale = Math.min(availableWidth / mapWidth, availableHeight / mapHeight);
+    const scale = fitScale < 1 ? fitScale : Math.max(1, Math.floor(fitScale));
     this.#worldLayer.scale.set(scale);
     this.#worldLayer.position.set(
       Math.round((this.#app.screen.width - mapWidth * scale) / 2),
@@ -145,6 +165,8 @@ export class PixiWorldRenderer {
   destroy(): void {
     if (this.#destroyed) return;
     this.#destroyed = true;
+    this.#resizeObserver?.disconnect();
+    this.#resizeObserver = null;
     if (!this.#initialized) return;
     this.#destroyApplication();
   }

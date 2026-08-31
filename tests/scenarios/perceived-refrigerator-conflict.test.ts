@@ -66,7 +66,11 @@ describe("perceived refrigerator conflict", () => {
       occupiedBy: "bob",
     });
     expect(
-      visible.memories.find((memory) => memory.relatedEntityId === ("fridge-1" as never)),
+      visible.memories.find(
+        (memory) =>
+          memory.relatedEntityId === ("fridge-1" as never) &&
+          memory.observationKind === "vision",
+      ),
     ).toMatchObject({
       observationKind: "vision",
       relatedEntityId: "fridge-1",

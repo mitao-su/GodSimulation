@@ -39,7 +39,7 @@ test("rethinks at the urgent threshold and completes toilet use", async ({ page 
         if (await release.isEnabled()) await release.click();
         return bladderValue.textContent();
       },
-      { timeout: 8_000 },
+      { timeout: 15_000 },
     )
     .toBe("comfortable");
   expect(runtimeErrors).toEqual([]);

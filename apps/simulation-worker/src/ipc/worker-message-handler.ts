@@ -36,8 +36,13 @@ export class WorkerMessageHandler {
   }
 
   handle(messageValue: unknown): void {
+    const parsed = HostToWorkerMessageSchema.safeParse(messageValue);
+    if (!parsed.success) {
+      this.#emitFailure(parsed.error, "protocol");
+      return;
+    }
     try {
-      const message = HostToWorkerMessageSchema.parse(messageValue);
+      const message = parsed.data;
       if (message.type === "initialize") {
         this.#initialize(message);
         return;
@@ -50,7 +55,7 @@ export class WorkerMessageHandler {
       if (!this.#session) throw new Error("Simulation worker is not initialized");
       this.#session.handle(message);
     } catch (error) {
-      this.#emitFailure(error);
+      this.#emitFailure(error, "worker");
     }
   }
 
@@ -58,7 +63,7 @@ export class WorkerMessageHandler {
     try {
       this.#session?.tick();
     } catch (error) {
-      this.#emitFailure(error);
+      this.#emitFailure(error, "worker");
     }
   }
 
@@ -88,18 +93,17 @@ export class WorkerMessageHandler {
     this.#emitRaw(WorkerToHostMessageSchema.parse(message));
   }
 
-  #emitFailure(error: unknown): void {
+  #emitFailure(error: unknown, category: "protocol" | "worker"): void {
     this.#failureSequence += 1;
     const message = error instanceof Error ? error.message : String(error);
-    this.#emit({
-      type: "technical_failure",
-      failure: TechnicalFailureSchema.parse({
-        id: `failure:worker:${this.#failureSequence}`,
-        category: "worker",
-        message: message.slice(0, 2_000),
-        retryable: false,
-        occurredAtRealTime: this.#now(),
-      }),
+    const failure = TechnicalFailureSchema.parse({
+      id: `failure:${category}:${this.#failureSequence}`,
+      category,
+      message: message.slice(0, 2_000),
+      retryable: false,
+      occurredAtRealTime: this.#now(),
     });
+    this.#session?.block(failure);
+    this.#emit({ type: "technical_failure", failure });
   }
 }

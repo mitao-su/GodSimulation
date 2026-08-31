@@ -11,7 +11,7 @@ const envelope = {
 } as const;
 
 describe("world commands", () => {
-  it("parses only the four host control commands", () => {
+  it("parses the supported host control commands", () => {
     expect(WorldCommandSchema.parse({ ...envelope, type: "release_execution" }).type).toBe(
       "release_execution",
     );
@@ -28,6 +28,13 @@ describe("world commands", () => {
     expect(WorldCommandSchema.parse({ ...envelope, type: "stop_session" }).type).toBe(
       "stop_session",
     );
+    expect(
+      WorldCommandSchema.parse({
+        ...envelope,
+        type: "retry_technical_failure",
+        failureId: "failure:persistence:1",
+      }).type,
+    ).toBe("retry_technical_failure");
   });
 
   it("rejects commands without optimistic world version", () => {

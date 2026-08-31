@@ -39,6 +39,7 @@ const ObservationKindSchema = z.enum([
   "contact",
   "interaction",
   "body",
+  "memory",
 ]);
 
 const ActionBaseShape = {
@@ -201,6 +202,7 @@ const SerializedDecisionRequestSchema = z
     identity: DecisionIdentitySchema,
     promptInput: DecisionPromptInputSchema,
     acceptedProposal: GoalProposalSchema.nullable(),
+    failure: TechnicalFailureSchema.nullable().default(null),
   })
   .strict();
 
@@ -217,6 +219,10 @@ const SerializedWorldStateSchema = z
   .object({
     name: z.string().min(1),
     mode: WorldModeSchema,
+    suspendedMode: z
+      .enum(["THINKING", "READY_FOR_RELEASE", "RUNNING"])
+      .nullable()
+      .optional(),
     reviewRequired: z.boolean(),
     randomState: z.number().int().min(0).max(0xffff_ffff),
     map: MapDefinitionSchema,
@@ -340,9 +346,11 @@ function restoreDecisionCycle(
   value: z.infer<typeof SerializedDecisionCycleSchema> | null,
   snapshot: WorldSnapshot,
   agents: ReadonlyMap<AgentId, AgentState>,
+  technicalFailure: z.infer<typeof TechnicalFailureSchema> | null,
 ): DecisionCycleState | null {
   if (value === null) return null;
   const requests = uniqueMap(value.requests, (request) => request.agentId, "decision agent ID");
+  const requestFailures = new Map<AgentId, z.infer<typeof TechnicalFailureSchema> | null>();
   if (
     requests.size !== value.requestedAgentIds.length ||
     value.requestedAgentIds.some((agentId) => !requests.has(agentId))
@@ -373,6 +381,21 @@ function restoreDecisionCycle(
     ) {
       throw new Error(`Snapshot decision for ${agentId} accepted an unoffered goal`);
     }
+    const requestFailure =
+      request.failure ??
+      (technicalFailure?.category === "model" &&
+      technicalFailure.requestId === request.identity.requestId
+        ? technicalFailure
+        : null);
+    if (
+      requestFailure !== null &&
+      (requestFailure.category !== "model" ||
+        requestFailure.requestId !== request.identity.requestId ||
+        request.acceptedProposal !== null)
+    ) {
+      throw new Error(`Snapshot decision failure is inconsistent for ${agentId}`);
+    }
+    requestFailures.set(agentId, requestFailure);
   }
   return {
     id: value.id,
@@ -385,6 +408,7 @@ function restoreDecisionCycle(
           identity: request.identity,
           promptInput: request.promptInput,
           acceptedProposal: request.acceptedProposal,
+          failure: requestFailures.get(agentId) ?? null,
         },
       ]),
     ),
@@ -415,24 +439,45 @@ export function restoreWorldSnapshot(
   });
   const objects = restoreObjects(state.objects, baseline, registry);
   const agents = restoreAgents(state.agents, baseline, registry);
-  const decisionCycle = restoreDecisionCycle(state.decisionCycle, snapshot, agents);
+  const decisionCycle = restoreDecisionCycle(
+    state.decisionCycle,
+    snapshot,
+    agents,
+    state.technicalFailure,
+  );
   const hasPendingDecision = decisionCycle
     ? [...decisionCycle.requests.values()].some((request) => request.acceptedProposal === null)
     : false;
-  if (state.mode === "RUNNING" && decisionCycle !== null) {
-    throw new Error("Running snapshot cannot retain a decision cycle");
-  }
-  if (state.mode !== "RUNNING" && decisionCycle === null) {
-    throw new Error("Frozen snapshot requires a decision cycle");
-  }
-  if (state.mode === "READY_FOR_RELEASE" && hasPendingDecision) {
-    throw new Error("Ready snapshot still has pending decisions");
-  }
-  if (state.mode === "THINKING" && !hasPendingDecision) {
-    throw new Error("Thinking snapshot has no pending decision");
-  }
+  const suspendedMode =
+    state.suspendedMode === undefined
+      ? state.mode === "TECHNICALLY_BLOCKED"
+        ? decisionCycle === null
+          ? "RUNNING"
+          : hasPendingDecision
+            ? "THINKING"
+            : "READY_FOR_RELEASE"
+        : null
+      : state.suspendedMode;
   if ((state.mode === "TECHNICALLY_BLOCKED") !== (state.technicalFailure !== null)) {
     throw new Error("Snapshot technical failure does not match its world mode");
+  }
+  if ((state.mode === "TECHNICALLY_BLOCKED") !== (suspendedMode !== null)) {
+    throw new Error("Snapshot suspended mode does not match its world mode");
+  }
+  const resumableMode =
+    state.mode === "TECHNICALLY_BLOCKED" ? suspendedMode : state.mode;
+  if (!resumableMode) throw new Error("Snapshot has no resumable world mode");
+  if (resumableMode === "RUNNING" && decisionCycle !== null) {
+    throw new Error("Running snapshot cannot retain a decision cycle");
+  }
+  if (resumableMode !== "RUNNING" && decisionCycle === null) {
+    throw new Error("Frozen snapshot requires a decision cycle");
+  }
+  if (resumableMode === "READY_FOR_RELEASE" && hasPendingDecision) {
+    throw new Error("Ready snapshot still has pending decisions");
+  }
+  if (resumableMode === "THINKING" && !hasPendingDecision) {
+    throw new Error("Thinking snapshot has no pending decision");
   }
   return {
     id: snapshot.worldId,
@@ -440,6 +485,7 @@ export function restoreWorldSnapshot(
     version: snapshot.worldVersion,
     tick: snapshot.worldTick,
     mode: state.mode,
+    suspendedMode,
     reviewRequired: state.reviewRequired,
     randomState: state.randomState,
     lastEventSequence: snapshot.lastEventSequence,

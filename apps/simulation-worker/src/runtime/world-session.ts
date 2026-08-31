@@ -1,5 +1,6 @@
 import {
   DecisionIdentitySchema,
+  type TechnicalFailure,
   type HostToWorkerMessage,
   type PluginLock,
   type WorldSnapshot,
@@ -29,6 +30,7 @@ export class WorldSession {
   readonly #emit: (message: WorkerToHostMessage) => void;
   readonly #agentDefinitions = new Map<string, GamePlugin["agents"][number]>();
   readonly #publishedRequestIds = new Set<string>();
+  readonly #restoredUnresolvedRequestIds = new Set<string>();
 
   constructor(options: WorldSessionOptions) {
     const map = MapDefinitionSchema.parse(options.worldDefinition);
@@ -58,6 +60,12 @@ export class WorldSession {
           pluginLockHash: options.pluginLock.hash,
         });
     this.#emit = options.emit;
+    if (options.restoredSnapshot && this.#engine.getView().mode === "TECHNICALLY_BLOCKED") {
+      for (const input of this.#engine.getPendingDecisionInputs()) {
+        this.#publishedRequestIds.add(input.requestId);
+        this.#restoredUnresolvedRequestIds.add(input.requestId);
+      }
+    }
   }
 
   start(): void {
@@ -74,12 +82,27 @@ export class WorldSession {
     this.#publishState();
   }
 
+  block(failure: TechnicalFailure): void {
+    const recorded = this.#engine.reportTechnicalFailure(failure);
+    if (!recorded.accepted) throw new Error(recorded.reason);
+    this.#publishState();
+  }
+
   handle(message: Exclude<HostToWorkerMessage, { type: "initialize" }>): void {
     switch (message.type) {
       case "world_command": {
+        const resumesRestoredRequests =
+          message.command.type === "retry_decision" ||
+          message.command.type === "retry_technical_failure";
         const queued = this.#engine.dispatch(message.command);
         if (!queued.accepted) throw new Error(queued.reason);
         this.#engine.tick();
+        if (resumesRestoredRequests) {
+          for (const requestId of this.#restoredUnresolvedRequestIds) {
+            this.#publishedRequestIds.delete(requestId);
+          }
+          this.#restoredUnresolvedRequestIds.clear();
+        }
         this.#publishState();
         return;
       }
@@ -137,6 +160,10 @@ export class WorldSession {
         this.#publishState();
         return;
       }
+      case "technical_failure": {
+        this.block(message.failure);
+        return;
+      }
       case "request_snapshot":
         this.#emit({ type: "snapshot_ready", snapshot: this.#engine.createSnapshot() });
         return;
@@ -155,16 +182,22 @@ export class WorldSession {
   #publishState(): void {
     const events = this.#engine.drainEvents();
     if (events.length > 0) this.#emit({ type: "event_batch", events: [...events] });
-    for (const input of this.#engine.getPendingDecisionInputs()) {
-      if (this.#publishedRequestIds.has(input.requestId)) continue;
-      const definition = this.#agentDefinitions.get(input.agentId);
-      if (!definition) throw new Error(`Missing definition for ${input.agentId}`);
-      this.#publishedRequestIds.add(input.requestId);
-      this.#emit({
-        type: "decision_requested",
-        request: assembleDecisionRequest(input, definition),
-      });
+    const view = this.#engine.getView();
+    if (
+      view.mode === "THINKING" ||
+      (view.mode === "TECHNICALLY_BLOCKED" && view.technicalFailure?.category === "model")
+    ) {
+      for (const input of this.#engine.getPendingDecisionInputs()) {
+        if (this.#publishedRequestIds.has(input.requestId)) continue;
+        const definition = this.#agentDefinitions.get(input.agentId);
+        if (!definition) throw new Error(`Missing definition for ${input.agentId}`);
+        this.#publishedRequestIds.add(input.requestId);
+        this.#emit({
+          type: "decision_requested",
+          request: assembleDecisionRequest(input, definition),
+        });
+      }
     }
-    this.#emit({ type: "world_view", view: this.#engine.getView() });
+    this.#emit({ type: "world_view", view });
   }
 }

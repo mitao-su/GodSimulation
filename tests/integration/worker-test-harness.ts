@@ -18,7 +18,7 @@ export const pluginDescriptors: readonly PluginDescriptor[] = [
   "starter-agents",
 ].map((name) => ({
   manifestPath: resolve(root, "plugins", name, "plugin.json"),
-  entryPath: resolve(root, "plugins", name, "src", "index.ts"),
+  entryPath: resolve(root, "plugins", name, "dist", "index.js"),
 }));
 
 export async function startTestWorker(): Promise<{

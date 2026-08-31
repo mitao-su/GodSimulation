@@ -11,6 +11,7 @@ function serializeWorldState(world: WorldState): JsonValue {
   return JsonValueSchema.parse({
     name: world.name,
     mode: world.mode,
+    suspendedMode: world.suspendedMode,
     reviewRequired: world.reviewRequired,
     randomState: world.randomState,
     map: world.map,
@@ -63,4 +64,3 @@ export function projectWorldSnapshot(world: WorldState): WorldSnapshot {
     state: serializeWorldState(world),
   });
 }
-

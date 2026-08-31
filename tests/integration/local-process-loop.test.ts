@@ -97,4 +97,95 @@ describe("local worker process", () => {
       await worker.stop();
     }
   }, 20_000);
+
+  it("freezes the authoritative world after a host technical failure", async () => {
+    const { worker, messages } = await startTestWorker();
+    try {
+      await vi.waitFor(() => expect(requests(messages)).toHaveLength(2));
+      for (const request of requests(messages)) {
+        const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
+        await worker.send({
+          type: "decision_result",
+          result: {
+            requestId: request.requestId,
+            agentId: request.agentId,
+            worldId: request.worldId,
+            worldVersion: request.worldVersion,
+            decisionCycleId: request.decisionCycleId,
+            schemaVersion: request.schemaVersion,
+            pluginLockHash: request.pluginLockHash,
+            proposal: {
+              schemaVersion: 1,
+              goalOptionId: option.id,
+              reason: "Wait",
+            },
+          },
+        });
+      }
+      await vi.waitFor(() =>
+        expect(latestView(messages)).toMatchObject({ mode: "READY_FOR_RELEASE", worldTick: 0 }),
+      );
+      const ready = latestView(messages)!;
+      await worker.send({
+        type: "world_command",
+        command: {
+          schemaVersion: 1,
+          commandId: "command:release:persistence-test" as never,
+          worldId: ready.worldId,
+          expectedWorldVersion: ready.worldVersion,
+          issuedAtRealTime: "2026-08-31T00:00:00.000Z",
+          type: "release_execution",
+        },
+      });
+      await vi.waitFor(() => expect(latestView(messages)?.worldTick).toBeGreaterThan(0));
+
+      await worker.send({
+        type: "technical_failure",
+        failure: {
+          id: "failure:persistence:1",
+          category: "persistence",
+          message: "Unable to save the event batch",
+          retryable: true,
+          occurredAtRealTime: "2026-08-31T00:00:01.000Z",
+        },
+      });
+      await vi.waitFor(() =>
+        expect(latestView(messages)).toMatchObject({
+          mode: "TECHNICALLY_BLOCKED",
+          technicalFailure: { id: "failure:persistence:1", category: "persistence" },
+        }),
+      );
+      const blockedTick = latestView(messages)!.worldTick;
+
+      await delay(150);
+
+      expect(latestView(messages)).toMatchObject({
+        mode: "TECHNICALLY_BLOCKED",
+        worldTick: blockedTick,
+      });
+
+      const blocked = latestView(messages)!;
+      await worker.send({
+        type: "world_command",
+        command: {
+          schemaVersion: 1,
+          commandId: "command:retry:persistence-test" as never,
+          worldId: blocked.worldId,
+          expectedWorldVersion: blocked.worldVersion,
+          issuedAtRealTime: "2026-08-31T00:00:02.000Z",
+          type: "retry_technical_failure",
+          failureId: "failure:persistence:1",
+        },
+      });
+      await vi.waitFor(() =>
+        expect(latestView(messages)).toMatchObject({
+          mode: "RUNNING",
+          technicalFailure: null,
+        }),
+      );
+      await vi.waitFor(() => expect(latestView(messages)!.worldTick).toBeGreaterThan(blockedTick));
+    } finally {
+      await worker.stop();
+    }
+  }, 20_000);
 });

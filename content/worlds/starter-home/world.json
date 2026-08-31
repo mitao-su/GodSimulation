@@ -117,7 +117,7 @@
     { "id": "toilet-1", "definitionId": "home.toilet", "position": { "x": 16, "y": 8 }, "facing": "south", "state": { "occupiedBy": null } }
   ],
   "spawns": [
-    { "agentId": "alice", "definitionId": "starter.alice", "position": { "x": 2, "y": 2 }, "facing": "east", "needs": { "bladder": 30 } },
-    { "agentId": "bob", "definitionId": "starter.bob", "position": { "x": 7, "y": 3 }, "facing": "east", "needs": { "bladder": 20 } }
+    { "agentId": "alice", "definitionId": "starter.alice", "position": { "x": 2, "y": 2 }, "facing": "east", "needs": { "bladder": 30 }, "knownObjectIds": ["fridge-1", "toilet-1"] },
+    { "agentId": "bob", "definitionId": "starter.bob", "position": { "x": 7, "y": 3 }, "facing": "east", "needs": { "bladder": 20 }, "knownObjectIds": ["fridge-1", "toilet-1"] }
   ]
 }

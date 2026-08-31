@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { PluginLockSchema, type PluginLock } from "@god-sim/protocol";
 
@@ -9,6 +10,7 @@ interface ManifestFingerprint {
   readonly id: string;
   readonly version: string;
   readonly stateVersion: number;
+  readonly entry: string;
 }
 
 function sha256(value: string | Uint8Array): string {
@@ -25,6 +27,8 @@ function parseManifestFingerprint(value: unknown, source: string): ManifestFinge
     manifest.id.length === 0 ||
     typeof manifest.version !== "string" ||
     manifest.version.length === 0 ||
+    typeof manifest.entry !== "string" ||
+    manifest.entry.length === 0 ||
     !Number.isInteger(manifest.stateVersion) ||
     Number(manifest.stateVersion) < 1
   ) {
@@ -34,6 +38,7 @@ function parseManifestFingerprint(value: unknown, source: string): ManifestFinge
     id: manifest.id,
     version: manifest.version,
     stateVersion: Number(manifest.stateVersion),
+    entry: manifest.entry,
   };
 }
 
@@ -51,6 +56,12 @@ export async function buildExpectedPluginLock(
         JSON.parse(manifestText) as unknown,
         descriptor.manifestPath,
       );
+      const manifestEntryPath = resolve(dirname(descriptor.manifestPath), manifest.entry);
+      if (resolve(descriptor.entryPath) !== manifestEntryPath) {
+        throw new Error(
+          `Plugin manifest entry ${manifestEntryPath} does not match ${descriptor.entryPath}`,
+        );
+      }
       return {
         pluginId: manifest.id,
         version: manifest.version,

@@ -7,6 +7,7 @@ export interface EventStripProps {
   readonly commandPending: boolean;
   readonly onRelease: () => void;
   readonly onRetry: (requestId: string) => void;
+  readonly onRetryTechnicalFailure: (failureId: string) => void;
 }
 
 const eventLabels: Readonly<Record<DomainEvent["type"], string>> = {
@@ -30,9 +31,22 @@ const failureCategoryLabels = {
   worker: "模拟进程",
 } as const;
 
-export function EventStrip({ view, commandPending, onRelease, onRetry }: EventStripProps) {
+export function EventStrip({
+  view,
+  commandPending,
+  onRelease,
+  onRetry,
+  onRetryTechnicalFailure,
+}: EventStripProps) {
   const recent = view.recentEvents.slice(-4).reverse();
   const failed = view.pendingDecisions.filter((decision) => decision.status === "error");
+  const decisionFailureIds = new Set(
+    failed.flatMap((decision) => decision.error?.id ?? []),
+  );
+  const technicalFailure =
+    view.technicalFailure && !decisionFailureIds.has(view.technicalFailure.id)
+      ? view.technicalFailure
+      : null;
   const canRelease = view.mode === "READY_FOR_RELEASE" && !commandPending;
 
   return (
@@ -48,6 +62,34 @@ export function EventStrip({ view, commandPending, onRelease, onRetry }: EventSt
       </div>
 
       <div className="event-strip__actions">
+        {technicalFailure ? (
+          <div
+            className="decision-error"
+            role="group"
+            aria-label={`${failureCategoryLabels[technicalFailure.category]}错误`}
+          >
+            <AlertCircle aria-hidden="true" size={17} />
+            <div className="decision-error__copy">
+              <div className="decision-error__identity">
+                <strong>{failureCategoryLabels[technicalFailure.category]}错误</strong>
+                <span>{failureCategoryLabels[technicalFailure.category]}</span>
+              </div>
+              <span className="decision-error__request">{technicalFailure.id}</span>
+              <span className="decision-error__message">{technicalFailure.message}</span>
+            </div>
+            {technicalFailure.retryable ? (
+              <button
+                type="button"
+                aria-label={`重试${failureCategoryLabels[technicalFailure.category]}故障`}
+                onClick={() => onRetryTechnicalFailure(technicalFailure.id)}
+                disabled={commandPending}
+              >
+                <RotateCcw aria-hidden="true" size={16} />
+                重试
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {failed.map((decision) => {
           const agent = view.agents.find((candidate) => candidate.agentId === decision.agentId);
           const agentName = agent?.displayName ?? decision.agentId;

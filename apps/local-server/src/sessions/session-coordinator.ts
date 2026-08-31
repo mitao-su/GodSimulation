@@ -1,5 +1,6 @@
 import type {
   HostToWorkerMessage,
+  TechnicalFailure,
   WorkerToHostMessage,
   WorldCommand,
   WorldView,
@@ -8,7 +9,9 @@ import { RequestIdSchema, TechnicalFailureSchema, WorldViewSchema } from "@god-s
 import type { DecisionProvider } from "@god-sim/model-gateway";
 
 import {
+  DecisionPersistenceError,
   DecisionRequestCoordinator,
+  type CompletedDecision,
   type CoordinatedDecision,
 } from "../decisions/decision-request-coordinator";
 import type { PersistenceWriter } from "../persistence/persistence-writer";
@@ -38,10 +41,15 @@ export class SessionCoordinator {
   readonly #tasks = new Set<Promise<void>>();
   readonly #viewListeners = new Set<(view: WorldView) => void>();
   readonly #snapshotKeys = new Set<string>();
+  readonly #pendingDecisionMessages = new Map<
+    string,
+    Extract<WorkerToHostMessage, { type: "decision_requested" }>
+  >();
+  readonly #pendingDecisionOutcomes = new Map<string, CompletedDecision>();
   #unsubscribeWorker: (() => void) | null = null;
   #view: WorldView | null = null;
   #failureSequence = 0;
-  #terminalFailurePublished = false;
+  #terminalFailure: TechnicalFailure | null = null;
 
   constructor(options: SessionCoordinatorOptions) {
     this.#worker = options.worker;
@@ -67,11 +75,21 @@ export class SessionCoordinator {
   async stop(): Promise<void> {
     this.#decisions.cancelAll();
     await this.waitForIdle();
+    this.#pendingDecisionMessages.clear();
+    this.#pendingDecisionOutcomes.clear();
     await this.#worker.stop();
     await this.waitForIdle();
     this.#unsubscribeWorker?.();
     this.#unsubscribeWorker = null;
-    await this.#persistence.close();
+    try {
+      await this.#persistence.close();
+    } catch (error) {
+      try {
+        this.#onError(error);
+      } catch {
+        // Shutdown must still finish when development logging fails.
+      }
+    }
   }
 
   getView(): WorldView | null {
@@ -85,6 +103,10 @@ export class SessionCoordinator {
   }
 
   async sendCommand(command: WorldCommand): Promise<void> {
+    if (command.type === "retry_technical_failure") {
+      await this.#retryTechnicalFailure(command);
+      return;
+    }
     await this.#worker.send({ type: "world_command", command });
   }
 
@@ -94,9 +116,12 @@ export class SessionCoordinator {
   }
 
   #dispatch(message: WorkerToHostMessage): void {
-    const task = this.#handleMessage(message).catch((error: unknown) => {
-      this.#handleApplicationFailure(message, error);
-    });
+    if (message.type === "decision_requested") {
+      this.#pendingDecisionMessages.set(message.request.requestId, message);
+    }
+    const task = this.#handleMessage(message).catch((error: unknown) =>
+      this.#handleApplicationFailure(message, error),
+    );
     this.#tasks.add(task);
     void task.then(() => this.#tasks.delete(task));
   }
@@ -104,11 +129,30 @@ export class SessionCoordinator {
   async #handleMessage(message: WorkerToHostMessage): Promise<void> {
     switch (message.type) {
       case "worker_ready":
+        return;
       case "decision_rejected":
+        await this.#publishHostFailure({
+          error: new Error(message.reason),
+          category: "protocol",
+          retryable: false,
+          blockWorker: true,
+          requestId: message.result.requestId,
+        });
         return;
       case "decision_requested": {
-        const outcome = await this.#decisions.decide(message.request);
+        let outcome: CoordinatedDecision;
+        try {
+          outcome = await this.#decisions.decide(message.request);
+        } catch (error) {
+          if (error instanceof DecisionPersistenceError) {
+            this.#pendingDecisionOutcomes.set(message.request.requestId, error.outcome);
+          }
+          throw error;
+        }
         await this.#sendDecisionOutcome(outcome);
+        if (outcome.type !== "cancelled") {
+          this.#pendingDecisionMessages.delete(message.request.requestId);
+        }
         return;
       }
       case "event_batch":
@@ -118,14 +162,28 @@ export class SessionCoordinator {
         await this.#persistence.saveSnapshot(message.snapshot);
         return;
       case "world_view":
-        if (this.#terminalFailurePublished) return;
+        if (this.#terminalFailure) {
+          if (
+            message.view.mode === "TECHNICALLY_BLOCKED" &&
+            message.view.technicalFailure?.id === this.#terminalFailure.id
+          ) {
+            this.#publishView(message.view);
+            await this.#requestFreezeSnapshot(message.view);
+            return;
+          }
+          if (!this.#view) {
+            this.#publishTechnicalFailure(this.#terminalFailure, message.view);
+          }
+          return;
+        }
         this.#publishView(message.view);
         await this.#requestFreezeSnapshot(message.view);
         return;
       case "technical_failure":
+        this.#decisions.cancelAll("Simulation worker reported a technical failure");
+        this.#publishTechnicalFailure(message.failure);
         if (this.#view) {
           await this.#persistence.recordFailure(this.#view.worldId, message.failure);
-          this.#publishTechnicalFailure(message.failure);
         }
         return;
     }
@@ -146,7 +204,7 @@ export class SessionCoordinator {
   }
 
   async #requestFreezeSnapshot(view: WorldView): Promise<void> {
-    if (view.mode !== "THINKING") return;
+    if (view.mode !== "THINKING" && view.mode !== "TECHNICALLY_BLOCKED") return;
     const key = `${view.worldId}:${view.worldVersion}`;
     if (this.#snapshotKeys.has(key)) return;
     this.#snapshotKeys.add(key);
@@ -156,41 +214,149 @@ export class SessionCoordinator {
     });
   }
 
-  #handleApplicationFailure(message: WorkerToHostMessage, error: unknown): void {
-    try {
-      this.#onError(error);
-    } catch {
-      // Logging must not create a second application failure.
+  async #retryTechnicalFailure(
+    command: Extract<WorldCommand, { type: "retry_technical_failure" }>,
+  ): Promise<void> {
+    const view = this.#view;
+    const failure = view?.technicalFailure;
+    if (
+      !view ||
+      view.worldId !== command.worldId ||
+      view.mode !== "TECHNICALLY_BLOCKED" ||
+      !failure ||
+      failure.id !== command.failureId ||
+      failure.category !== "persistence" ||
+      !failure.retryable
+    ) {
+      throw new Error(`Persistence failure ${command.failureId} is not retryable`);
     }
-    if (!this.#view) return;
-    this.#failureSequence += 1;
-    const detail = error instanceof Error ? error.message : String(error);
+
+    await this.waitForIdle();
+    try {
+      await this.#persistence.retryFailed();
+    } catch (error) {
+      try {
+        this.#onError(error);
+      } catch {
+        // Logging must not replace the retry error.
+      }
+      throw error;
+    }
+
+    this.#terminalFailure = null;
+    try {
+      await this.#worker.send({ type: "world_command", command });
+      for (const [requestId, outcome] of this.#pendingDecisionOutcomes) {
+        await this.#sendDecisionOutcome(outcome);
+        this.#pendingDecisionOutcomes.delete(requestId);
+        this.#pendingDecisionMessages.delete(requestId);
+      }
+      for (const [requestId, message] of this.#pendingDecisionMessages) {
+        if (this.#pendingDecisionOutcomes.has(requestId)) continue;
+        this.#dispatch(message);
+      }
+    } catch (error) {
+      await this.#publishHostFailure({
+        error,
+        category: "worker",
+        retryable: false,
+        blockWorker: false,
+      });
+      throw error;
+    }
+  }
+
+  async #handleApplicationFailure(
+    message: WorkerToHostMessage,
+    error: unknown,
+  ): Promise<void> {
+    const rootError = error instanceof DecisionPersistenceError ? error.cause : error;
     const persistenceMessage =
       message.type === "event_batch" ||
       message.type === "snapshot_ready" ||
       message.type === "technical_failure" ||
-      message.type === "decision_requested";
-    this.#publishTechnicalFailure(
-      TechnicalFailureSchema.parse({
-        id: `failure:host:${this.#failureSequence}`,
-        category: persistenceMessage ? "persistence" : "worker",
-        message: detail.slice(0, 2_000),
-        ...(message.type === "decision_requested"
-          ? { requestId: message.request.requestId }
-          : {}),
-        retryable: false,
-        occurredAtRealTime: this.#now(),
-      }),
-    );
+      error instanceof DecisionPersistenceError;
+    await this.#publishHostFailure({
+      error: rootError,
+      category: persistenceMessage ? "persistence" : "worker",
+      retryable: persistenceMessage,
+      blockWorker: persistenceMessage,
+      ...(message.type === "decision_requested"
+        ? { requestId: message.request.requestId }
+        : {}),
+    });
   }
 
-  #publishTechnicalFailure(failure: ReturnType<typeof TechnicalFailureSchema.parse>): void {
-    if (!this.#view) return;
-    this.#terminalFailurePublished = true;
+  async #publishHostFailure(options: {
+    readonly error: unknown;
+    readonly category: "persistence" | "protocol" | "worker";
+    readonly retryable: boolean;
+    readonly blockWorker: boolean;
+    readonly requestId?: string;
+  }): Promise<void> {
+    try {
+      this.#onError(options.error);
+    } catch {
+      // Logging must not create a second application failure.
+    }
+    this.#decisions.cancelAll("Session blocked by a technical failure");
+    if (
+      this.#terminalFailure &&
+      (options.category === "persistence" || this.#terminalFailure.category !== "persistence")
+    ) {
+      return;
+    }
+    this.#failureSequence += 1;
+    const detail = options.error instanceof Error
+      ? options.error.message
+      : String(options.error);
+    const failure = TechnicalFailureSchema.parse({
+      id: `failure:host:${this.#failureSequence}`,
+      category: options.category,
+      message: detail.slice(0, 2_000),
+      ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
+      retryable: options.retryable,
+      occurredAtRealTime: this.#now(),
+    });
+    this.#terminalFailure = failure;
+    if (options.blockWorker) {
+      try {
+        await this.#worker.send({ type: "technical_failure", failure });
+      } catch (sendError) {
+        try {
+          this.#onError(sendError);
+        } catch {
+          // Logging must not hide the original persistence failure.
+        }
+        this.#failureSequence += 1;
+        const sendDetail = sendError instanceof Error
+          ? sendError.message
+          : String(sendError);
+        this.#publishTechnicalFailure(
+          TechnicalFailureSchema.parse({
+            id: `failure:host:${this.#failureSequence}`,
+            category: "worker",
+            message: sendDetail.slice(0, 2_000),
+            retryable: false,
+            occurredAtRealTime: this.#now(),
+          }),
+        );
+        return;
+      }
+    }
+    this.#publishTechnicalFailure(failure);
+  }
+
+  #publishTechnicalFailure(
+    failure: ReturnType<typeof TechnicalFailureSchema.parse>,
+    baseView: WorldView | null = this.#view,
+  ): void {
+    this.#terminalFailure = failure;
+    if (!baseView) return;
     this.#publishView(
       WorldViewSchema.parse({
-        ...this.#view,
-        revision: this.#view.revision + 1,
+        ...baseView,
+        revision: baseView.revision + 1,
         mode: "TECHNICALLY_BLOCKED",
         pauseReason: {
           code: "technical_failure",

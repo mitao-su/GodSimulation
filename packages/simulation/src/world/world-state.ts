@@ -58,6 +58,7 @@ export interface DecisionRequestState {
   readonly identity: DecisionIdentity;
   readonly promptInput: DecisionPromptInput;
   readonly acceptedProposal: GoalProposal | null;
+  readonly failure: TechnicalFailure | null;
 }
 
 export interface WorldState {
@@ -66,6 +67,7 @@ export interface WorldState {
   readonly version: number;
   readonly tick: number;
   readonly mode: WorldMode;
+  readonly suspendedMode: Exclude<WorldMode, "TECHNICALLY_BLOCKED"> | null;
   readonly reviewRequired: boolean;
   readonly randomState: number;
   readonly lastEventSequence: number;

@@ -170,6 +170,13 @@ export function App({ client }: AppProps) {
               requestId: requestId as RequestId,
             }));
           }}
+          onRetryTechnicalFailure={(failureId) => {
+            void submit(WorldCommandSchema.parse({
+              ...commandEnvelope(view),
+              type: "retry_technical_failure",
+              failureId,
+            }));
+          }}
         />
       }
     />

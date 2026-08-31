@@ -7,7 +7,7 @@ import { WorkerMessageHandler } from "../ipc/worker-message-handler";
 import { loadPluginSet } from "../runtime/plugin-loader";
 import type { PluginDescriptor } from "../runtime/plugin-lock";
 
-const DEFAULT_TICK_INTERVAL_MS = 50;
+const FIXED_TICK_INTERVAL_MS = 100;
 
 function parsePluginDescriptors(value: string | undefined): readonly PluginDescriptor[] {
   if (!value) throw new Error("GOD_SIM_PLUGIN_DESCRIPTORS is required");
@@ -50,6 +50,6 @@ export async function startSimulationWorker(): Promise<void> {
     onShutdown: shutdown,
   });
   process.on("message", (message) => handler.handle(message));
-  timer = setInterval(() => handler.tick(), DEFAULT_TICK_INTERVAL_MS);
+  timer = setInterval(() => handler.tick(), FIXED_TICK_INTERVAL_MS);
   timer.unref();
 }

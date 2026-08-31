@@ -87,4 +87,20 @@ describe("host-worker messages", () => {
 
     expect(message.type).toBe("decision_failure");
   });
+
+  it("accepts a host technical failure that must block the authoritative world", () => {
+    const result = HostToWorkerMessageSchema.safeParse({
+      type: "technical_failure",
+      failure: {
+        id: "failure:persistence:1",
+        category: "persistence",
+        message: "Unable to save the event batch",
+        retryable: false,
+        occurredAtRealTime: "2026-08-31T00:00:00.000Z",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.type).toBe("technical_failure");
+  });
 });

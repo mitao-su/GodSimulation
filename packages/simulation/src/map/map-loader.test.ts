@@ -122,6 +122,28 @@ describe("loadWorldDefinition", () => {
     expect(world.mode).toBe("THINKING");
   });
 
+  it("seeds declared object knowledge without marking it currently visible", () => {
+    const base = validMap();
+    const input = {
+      ...base,
+      spawns: base.spawns.map((spawn) => ({
+        ...spawn,
+        knownObjectIds: ["door-1"],
+      })),
+    };
+
+    const world = loadWorldDefinition(input, registry);
+    const knowledge = world.agents.get("alice" as never)!.knowledge;
+
+    expect(knowledge.objects.get("door-1" as never)).toMatchObject({
+      entityId: "door-1",
+      status: "remembered",
+      observable: {},
+      observationKind: "memory",
+    });
+    expect(knowledge.visibleEntityIds.has("door-1" as never)).toBe(false);
+  });
+
   it("rejects an object whose definition is not registered", () => {
     const base = validMap();
     const input = {
