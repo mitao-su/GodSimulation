@@ -181,7 +181,7 @@ function worldWithStartedFridgeUse(): WorldState {
     testPluginRegistry,
     aliceId,
     option,
-    {},
+    { parameters: {} },
     "operation-call:test:fridge-use" as never,
   );
   if (prepared.kind !== "prepared") throw new Error(prepared.summary);
@@ -507,7 +507,7 @@ describe("decision release policy", () => {
         terminal: true,
         outcome: "cancelled",
         reasonCode: "task_replaced",
-        result: {},
+        result: { status: "cancelled" },
       }),
     ]);
   });

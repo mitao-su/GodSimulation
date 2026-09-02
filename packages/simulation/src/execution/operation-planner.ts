@@ -10,7 +10,7 @@ import {
 
 import type { ActiveOperation } from "./operation";
 import { createOperationRuntimeContext } from "./operation-runtime";
-import type { PluginRegistry } from "../world/plugin-registry";
+import type { SimulationRegistry } from "../engine/simulation-registry";
 import type { WorldState } from "../world/world-state";
 
 export type PrepareOperationResult =
@@ -30,7 +30,7 @@ function sameTracks(left: readonly string[], right: readonly string[]): boolean 
 
 export function prepareOperationCall(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
   optionValue: Extract<TaskOption, { kind: "operation" }>,
   argumentsInput: JsonObject,
@@ -97,6 +97,7 @@ export function prepareOperationCall(
       startedAtTick: world.tick,
       progressTicks: 0,
       accumulatedObservations: [],
+      observationDeliveryCursor: 0,
       plan: planned.plan,
     },
   };

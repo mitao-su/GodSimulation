@@ -9,7 +9,7 @@ import {
 } from "@god-sim/protocol";
 
 import { createOperationRuntimeContext } from "./operation-runtime";
-import type { PluginRegistry } from "../world/plugin-registry";
+import type { SimulationRegistry } from "../engine/simulation-registry";
 import type { WorldState } from "../world/world-state";
 
 function jsonSchema(schema: z.ZodType): JsonObject {
@@ -32,7 +32,7 @@ function emptyOption(
 
 export function buildTaskOptions(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
 ): readonly TaskOption[] {
   if (!world.agents.has(agentId)) {

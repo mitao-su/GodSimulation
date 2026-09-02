@@ -9,7 +9,7 @@ import {
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
 import {
-  createPluginRegistry,
+  createSimulationRegistry,
   loadWorldDefinition,
   prepareOperationCall,
   recoverBlockedOperation,
@@ -192,8 +192,8 @@ const inertPassageWorld = {
   ),
 };
 
-const registry = createPluginRegistry([passagePlugin, homePlugin, agentsPlugin]);
-const inertRegistry = createPluginRegistry([
+const registry = createSimulationRegistry([passagePlugin, homePlugin, agentsPlugin]);
+const inertRegistry = createSimulationRegistry([
   inertPassagePlugin,
   homePlugin,
   agentsPlugin,

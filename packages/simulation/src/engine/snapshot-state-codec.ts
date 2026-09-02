@@ -114,6 +114,7 @@ export const SerializedActiveOperationSchema = z
           .strict(),
       )
       .default([]),
+    observationDeliveryCursor: z.number().int().nonnegative().default(0),
     plan: OperationPlanSchema,
   })
   .strict();

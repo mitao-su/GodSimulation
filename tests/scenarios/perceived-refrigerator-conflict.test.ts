@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import homePlugin from "@god-sim/home-objects";
 import {
-  createPluginRegistry,
+  createSimulationRegistry,
   loadWorldDefinition,
   refreshAllPerceptions,
   type ActiveOperation,
@@ -13,7 +13,7 @@ import agentsPlugin from "@god-sim/starter-agents";
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
 import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 
-const registry = createPluginRegistry([spatialPlugin, homePlugin, agentsPlugin]);
+const registry = createSimulationRegistry([spatialPlugin, homePlugin, agentsPlugin]);
 const fridgeCall: ActiveOperation = {
   callId: "operation-call:alice:fridge" as never,
   operationId: "object.home.refrigerator.use" as never,
@@ -24,6 +24,8 @@ const fridgeCall: ActiveOperation = {
   duration: { kind: "fixed", totalTicks: 10 },
   startedAtTick: 0,
   progressTicks: 0,
+  accumulatedObservations: [],
+  observationDeliveryCursor: 0,
   plan: {
     currentActionIndex: 0,
     actions: [

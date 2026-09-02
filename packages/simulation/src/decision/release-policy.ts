@@ -3,6 +3,7 @@ import {
   resolveTaskDecision,
   type AgentId,
   type DomainEvent,
+  type JsonObject,
   type ResolvedTaskSelection,
   type TaskTrack,
 } from "@god-sim/protocol";
@@ -12,11 +13,12 @@ import {
   recordOperationTermination,
 } from "../execution/operation-lifecycle";
 import { prepareOperationCall } from "../execution/operation-planner";
+import { createOperationRuntimeContext } from "../execution/operation-runtime";
 import type { ActiveOperation } from "../execution/operation";
 import type { TaskTrackState, TaskTracks } from "../execution/task-tracks";
 import { appendDomainEvent } from "../engine/event-writer";
+import type { SimulationRegistry } from "../engine/simulation-registry";
 import { commitProposal } from "../interaction/effect-committer";
-import type { PluginRegistry } from "../world/plugin-registry";
 import type {
   AgentState,
   DecisionCycleState,
@@ -35,6 +37,12 @@ interface AgentDecisionPlan {
   readonly agentId: AgentId;
   readonly resolved: Readonly<Record<TaskTrack, ResolvedTaskSelection>>;
   readonly removedCallIds: ReadonlySet<ActiveOperation["callId"]>;
+}
+
+interface CancellationLifecycle {
+  readonly agentId: AgentId;
+  readonly operation: ActiveOperation;
+  readonly result: JsonObject | null;
 }
 
 export function allDecisionResultsAccepted(cycle: DecisionCycleState): boolean {
@@ -118,7 +126,7 @@ function analyzeTaskDecision(
 
 function applyAgentDecisionPlan(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   plan: AgentDecisionPlan,
 ): AgentState {
   const cycle = world.decisionCycle;
@@ -194,9 +202,55 @@ function applyAgentDecisionPlan(
   return next;
 }
 
+function acknowledgeFuseResults(
+  worldInput: WorldState,
+  registry: SimulationRegistry,
+  agentIds: readonly AgentId[],
+): WorldState {
+  let world = worldInput;
+  for (const agentId of [...agentIds].sort((left, right) =>
+    left.localeCompare(right),
+  )) {
+    const agent = world.agents.get(agentId);
+    if (!agent) throw new Error(`Cannot acknowledge results for unknown agent ${agentId}`);
+    let currentAgent = agent;
+    for (const receipt of agent.pendingOperationResults.filter(
+      (candidate) => !candidate.terminal,
+    )) {
+      const operation = currentAgent.activeOperations.get(receipt.callId);
+      if (!operation || operation.operationId !== receipt.operationId) {
+        throw new Error(
+          `Pending result ${receipt.callId} does not match an active operation`,
+        );
+      }
+      const runtime = registry.getOperation(operation.operationId);
+      if (!runtime) {
+        throw new Error(`Operation ${operation.operationId} is not registered`);
+      }
+      const acknowledged = runtime.acknowledgeFuseResult(
+        createOperationRuntimeContext(world, registry, agentId),
+        operation,
+        receipt,
+      );
+      currentAgent = {
+        ...currentAgent,
+        activeOperations: new Map(currentAgent.activeOperations).set(
+          acknowledged.callId,
+          acknowledged,
+        ),
+      };
+      world = {
+        ...world,
+        agents: new Map(world.agents).set(agentId, currentAgent),
+      };
+    }
+  }
+  return world;
+}
+
 export function preflightTaskDecision(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
   request: DecisionRequestState,
 ): AgentState {
@@ -209,7 +263,7 @@ export function preflightTaskDecision(
 
 export function releaseDecisionCycle(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
 ): DecisionReleaseTransition {
   const cycle = world.decisionCycle;
   if (!cycle) throw new Error("No decision cycle is active");
@@ -226,6 +280,7 @@ export function releaseDecisionCycle(
     plans.push(analyzeTaskDecision(world, agentId, request));
   }
 
+  const cancellationLifecycles: CancellationLifecycle[] = [];
   const cancellationEffects = plans.flatMap((plan) => {
     const agent = world.agents.get(plan.agentId)!;
     return [...plan.removedCallIds]
@@ -235,13 +290,19 @@ export function releaseDecisionCycle(
         if (!operation) {
           throw new Error(`Cannot cancel missing operation ${callId}`);
         }
-        return operationInteractionLifecycleProposal(
+        const lifecycle = operationInteractionLifecycleProposal(
           world,
           registry,
           agent.id,
           operation,
           "cancel",
-        ).effects;
+        );
+        cancellationLifecycles.push({
+          agentId: agent.id,
+          operation,
+          result: lifecycle.result,
+        });
+        return lifecycle.effects;
       });
   });
   const cancellation = commitProposal(
@@ -259,7 +320,11 @@ export function releaseDecisionCycle(
     );
   }
 
-  const candidateWorld = cancellation.world;
+  const candidateWorld = acknowledgeFuseResults(
+    cancellation.world,
+    registry,
+    plans.map((plan) => plan.agentId),
+  );
   const preparedAgents = new Map<AgentId, AgentState>();
   for (const plan of plans) {
     preparedAgents.set(
@@ -286,12 +351,17 @@ export function releaseDecisionCycle(
   for (const plan of [...plans].sort((left, right) =>
     left.agentId.localeCompare(right.agentId),
   )) {
-    const previousAgent = world.agents.get(plan.agentId)!;
+    const previousAgent = candidateWorld.agents.get(plan.agentId)!;
     for (const callId of [...plan.removedCallIds].sort((left, right) =>
       left.localeCompare(right),
     )) {
       const operation = previousAgent.activeOperations.get(callId);
       if (!operation) throw new Error(`Cannot terminate missing operation ${callId}`);
+      const lifecycle = cancellationLifecycles.find(
+        (candidate) =>
+          candidate.agentId === plan.agentId &&
+          candidate.operation.callId === callId,
+      );
       const written = recordOperationTermination(
         releasedWorld,
         registry,
@@ -300,6 +370,7 @@ export function releaseDecisionCycle(
         "cancelled",
         "task_replaced",
         lifecycleMetadata,
+        lifecycle?.result ?? undefined,
       );
       releasedWorld = written.world;
       events.push(...written.events);
@@ -340,7 +411,7 @@ export function releaseDecisionCycle(
 
 export function applyReleasePolicy(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
 ): DecisionReleaseTransition {
   const cycle = world.decisionCycle;
   if (!cycle || !allDecisionResultsAccepted(cycle)) {

@@ -5,6 +5,8 @@ import {
 } from "@god-sim/protocol";
 
 import type { MapDefinition } from "../map/map-definition";
+import { createOperationRuntimeContext } from "../execution/operation-runtime";
+import type { SimulationRegistry } from "./simulation-registry";
 import type { DecisionCycleState, WorldState } from "../world/world-state";
 import type { SerializedWorldState } from "./snapshot-state-codec";
 
@@ -97,4 +99,52 @@ export function validateAndResolveSnapshotMode(
     throw new Error("Thinking snapshot has no pending decision");
   }
   return suspendedMode;
+}
+
+export function validateRestoredOperations(
+  world: WorldState,
+  registry: SimulationRegistry,
+): void {
+  for (const [agentId, agent] of [...world.agents].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    for (const operation of [...agent.activeOperations.values()].sort(
+      (left, right) => left.callId.localeCompare(right.callId),
+    )) {
+      const runtime = registry.getOperation(operation.operationId);
+      if (!runtime) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} uses unregistered operation ${operation.operationId}`,
+        );
+      }
+      if (
+        operation.taskSlots.length !== runtime.taskSlots.length ||
+        operation.taskSlots.some(
+          (track, index) => track !== runtime.taskSlots[index],
+        )
+      ) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} task slots do not match ${operation.operationId}`,
+        );
+      }
+      const context = createOperationRuntimeContext(world, registry, agentId);
+      const parsedArguments = runtime
+        .argumentsSchema(context)
+        .safeParse(operation.arguments);
+      if (!parsedArguments.success) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} has incompatible arguments`,
+          { cause: parsedArguments.error },
+        );
+      }
+      try {
+        runtime.validateRestored(context, operation);
+      } catch (error) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} has an incompatible plan`,
+          { cause: error },
+        );
+      }
+    }
+  }
 }

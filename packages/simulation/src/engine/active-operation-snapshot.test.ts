@@ -15,6 +15,76 @@ import {
   testSimulationRulesLock,
 } from "../testing/simulation-test-fixtures";
 
+function snapshotWithActiveWait() {
+  const base = simulationTestWorld();
+  const aliceId = "alice" as never;
+  const alice = base.agents.get(aliceId)!;
+  const callId = OperationCallIdSchema.parse("operation-call:test:restored-wait");
+  const operation: ActiveOperation = {
+    callId,
+    operationId: OperationIdSchema.parse("core.wait"),
+    taskOptionId: TaskOptionIdSchema.parse("task-option:alice:restored-wait"),
+    label: "Wait",
+    taskSlots: ["BODY"],
+    arguments: { durationTicks: 9 },
+    duration: { kind: "fixed", totalTicks: 9 },
+    startedAtTick: 0,
+    progressTicks: 3,
+    accumulatedObservations: [],
+    observationDeliveryCursor: 0,
+    plan: {
+      currentActionIndex: 0,
+      actions: [
+        {
+          id: "operation-call:test:restored-wait:action:0",
+          kind: "wait",
+          durationTicks: 9,
+          progressTicks: 3,
+        },
+      ],
+    },
+  };
+  return {
+    base,
+    snapshot: projectWorldSnapshot({
+      ...base,
+      tick: 3,
+      mode: "RUNNING",
+      agents: new Map(base.agents).set(aliceId, {
+        ...alice,
+        taskTracks: {
+          HEAD: { kind: "empty" },
+          BODY: { kind: "operation", callId },
+        },
+        activeOperations: new Map([[callId, operation]]),
+      }),
+    }),
+  };
+}
+
+interface MutableOperationSnapshot {
+  operationId: string;
+  taskSlots: string[];
+  arguments: Record<string, unknown>;
+  plan: { actions: Array<Record<string, unknown>> };
+}
+
+function mutableFirstOperation(snapshotValue: unknown): MutableOperationSnapshot {
+  const snapshot = snapshotValue as {
+    state: {
+      agents: Array<{
+        id: string;
+        taskTracks: Record<string, unknown>;
+        activeOperations: MutableOperationSnapshot[];
+      }>;
+    };
+  };
+  const alice = snapshot.state.agents.find((agent) => agent.id === "alice");
+  const operation = alice?.activeOperations[0];
+  if (!alice || !operation) throw new Error("Missing active wait fixture");
+  return operation;
+}
+
 describe("active operation snapshot state", () => {
   it("creates agents with two empty tracks and no active calls", () => {
     const alice = simulationTestWorld().agents.get("alice" as never)!;
@@ -42,10 +112,11 @@ describe("active operation snapshot state", () => {
       label: "Observe",
       taskSlots: ["HEAD"],
       arguments: { targetEntityId: "fridge-1" },
-      duration: { kind: "fixed", totalTicks: 4 },
+      duration: { kind: "fixed", totalTicks: 1 },
       startedAtTick: 2,
-      progressTicks: 1,
+      progressTicks: 0,
       accumulatedObservations: [],
+      observationDeliveryCursor: 0,
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -53,8 +124,8 @@ describe("active operation snapshot state", () => {
             id: "operation-call:test:head:action:0",
             kind: "observe",
             targetEntityId: "fridge-1" as never,
-            durationTicks: 4,
-            progressTicks: 1,
+            durationTicks: 1,
+            progressTicks: 0,
           },
         ],
       },
@@ -70,6 +141,7 @@ describe("active operation snapshot state", () => {
       startedAtTick: 2,
       progressTicks: 3,
       accumulatedObservations: [],
+      observationDeliveryCursor: 0,
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -123,15 +195,16 @@ describe("active operation snapshot state", () => {
     const callId = OperationCallIdSchema.parse("operation-call:test:sleep");
     const operation: ActiveOperation = {
       callId,
-      operationId: OperationIdSchema.parse("test.sleep"),
+      operationId: OperationIdSchema.parse("test.synchronized_wait"),
       taskOptionId: TaskOptionIdSchema.parse("task-option:alice:sleep"),
       label: "Sleep",
       taskSlots: ["HEAD", "BODY"],
-      arguments: {},
+      arguments: { durationTicks: 100 },
       duration: { kind: "fixed", totalTicks: 100 },
       startedAtTick: 0,
       progressTicks: 7,
       accumulatedObservations: [],
+      observationDeliveryCursor: 0,
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -169,5 +242,82 @@ describe("active operation snapshot state", () => {
     expect(tracks.HEAD).toEqual({ kind: "operation", callId });
     expect(tracks.BODY).toEqual({ kind: "operation", callId });
     expect(restored.agents.get(aliceId)!.activeOperations.size).toBe(1);
+  });
+
+  it("rejects an active call whose operation is no longer registered", () => {
+    const { base, snapshot } = snapshotWithActiveWait();
+    const changed = structuredClone(snapshot);
+    mutableFirstOperation(changed).operationId = "core.not_registered";
+
+    expect(() =>
+      restoreWorldSnapshot(
+        changed,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/unregistered operation core\.not_registered/i);
+  });
+
+  it("rejects saved task slots that differ from the registered operation", () => {
+    const { base, snapshot } = snapshotWithActiveWait();
+    const changed = structuredClone(snapshot) as typeof snapshot & {
+      state: {
+        agents: Array<{
+          id: string;
+          taskTracks: Record<string, unknown>;
+          activeOperations: MutableOperationSnapshot[];
+        }>;
+      };
+    };
+    const alice = changed.state.agents.find((agent) => agent.id === "alice")!;
+    const operation = mutableFirstOperation(changed);
+    operation.taskSlots = ["HEAD"];
+    alice.taskTracks = {
+      HEAD: {
+        kind: "operation",
+        callId: "operation-call:test:restored-wait",
+      },
+      BODY: { kind: "empty" },
+    };
+
+    expect(() =>
+      restoreWorldSnapshot(
+        changed,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/task slots do not match core\.wait/i);
+  });
+
+  it("rejects arguments that no longer satisfy the operation runtime", () => {
+    const { base, snapshot } = snapshotWithActiveWait();
+    const changed = structuredClone(snapshot);
+    mutableFirstOperation(changed).arguments = { durationTicks: 0 };
+
+    expect(() =>
+      restoreWorldSnapshot(
+        changed,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/incompatible arguments/i);
+  });
+
+  it("rejects a plan that no longer matches the operation runtime", () => {
+    const { base, snapshot } = snapshotWithActiveWait();
+    const changed = structuredClone(snapshot);
+    mutableFirstOperation(changed).plan.actions[0]!["durationTicks"] = 8;
+
+    expect(() =>
+      restoreWorldSnapshot(
+        changed,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/incompatible plan/i);
   });
 });

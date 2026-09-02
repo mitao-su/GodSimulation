@@ -38,9 +38,12 @@ import {
   recordPerceptionCandidates,
   type PerceptionCandidate,
 } from "../perception/perception-recorder";
-import { createPluginRegistry, type PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
+import {
+  createSimulationRegistry,
+  type SimulationRegistry,
+} from "./simulation-registry";
 import { assertSnapshotCausality } from "./snapshot-causality";
 import { projectWorldSnapshot } from "./snapshot-projector";
 import { restoreWorldSnapshot } from "./snapshot-restorer";
@@ -153,7 +156,7 @@ function initialPerceptionMetadata(candidate: PerceptionCandidate) {
 
 class DeterministicSimulationEngine implements SimulationEngine {
   #world: WorldState;
-  readonly #registry: PluginRegistry;
+  readonly #registry: SimulationRegistry;
   readonly #commandQueue: WorldCommand[] = [];
   readonly #decisionQueue = new Map<string, AdoptedDecision>();
   #eventOutbox: DomainEvent[] = [];
@@ -167,7 +170,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   constructor(
     world: WorldState,
-    registry: PluginRegistry,
+    registry: SimulationRegistry,
     initialPerceptions: readonly InitialPerceptionSeed[] | null,
   ) {
     this.#world = world;
@@ -595,7 +598,7 @@ export function createSimulation(options: SimulationOptions): SimulationEngine {
   const simulationRulesLock = verifySimulationRulesLock(
     options.simulationRulesLock,
   );
-  const registry = createPluginRegistry(options.plugins);
+  const registry = createSimulationRegistry(options.plugins);
   const loaded = loadWorldDefinition(options.worldDefinition, registry, {
     simulationRulesLock,
     ...(options.reviewRequired === undefined
@@ -617,7 +620,7 @@ export function restoreSimulation(options: SimulationRestoreOptions): Simulation
   const simulationRulesLock = verifySimulationRulesLock(
     options.simulationRulesLock,
   );
-  const registry = createPluginRegistry(options.plugins);
+  const registry = createSimulationRegistry(options.plugins);
   const world = restoreWorldSnapshot(
     options.snapshot,
     registry,

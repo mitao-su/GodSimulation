@@ -22,6 +22,7 @@ import {
 } from "./snapshot-migrations/legacy-snapshot";
 import {
   validateAndResolveSnapshotMode,
+  validateRestoredOperations,
   validateSnapshotRulesLock,
   validateSnapshotWorldIdentity,
 } from "./snapshot-restore-validation";
@@ -29,6 +30,7 @@ import {
 import { MapDefinitionSchema } from "../map/map-definition";
 import { loadWorldDefinition } from "../map/map-loader";
 import type { AgentKnowledge } from "../perception/agent-knowledge";
+import type { SimulationRegistry } from "./simulation-registry";
 import type { PluginRegistry } from "../world/plugin-registry";
 import {
   bladderSensation,
@@ -272,7 +274,7 @@ function restoreDecisionCycle(
 
 export function restoreWorldSnapshot(
   snapshotValue: WorldSnapshot,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   worldDefinition: unknown,
   simulationRulesLock: SimulationRulesLock,
 ): WorldState {
@@ -299,7 +301,7 @@ export function restoreWorldSnapshot(
     state.technicalFailure,
   );
   const suspendedMode = validateAndResolveSnapshotMode(state, decisionCycle);
-  return {
+  const restored: WorldState = {
     id: snapshot.worldId,
     name: state.name,
     version: snapshot.worldVersion,
@@ -318,4 +320,6 @@ export function restoreWorldSnapshot(
     decisionCycle,
     technicalFailure: state.technicalFailure,
   };
+  validateRestoredOperations(restored, registry);
+  return restored;
 }

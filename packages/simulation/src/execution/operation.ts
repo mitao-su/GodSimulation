@@ -67,5 +67,6 @@ export interface ActiveOperation {
   readonly startedAtTick: number;
   readonly progressTicks: number;
   readonly accumulatedObservations: readonly OperationObservation[];
+  readonly observationDeliveryCursor: number;
   readonly plan: OperationPlan;
 }

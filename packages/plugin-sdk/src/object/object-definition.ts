@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { AgentIdSchema, CoordinateSchema } from "@god-sim/protocol";
+import {
+  AgentIdSchema,
+  CoordinateSchema,
+  type JsonObject,
+} from "@god-sim/protocol";
 
 import type { InteractionDefinition } from "./object-interaction";
 import type { ObservableObjectState, ObservationContext } from "./observable-state";
@@ -58,6 +62,6 @@ export interface ObjectDefinition<State = unknown> {
   readonly vision?: VisionCapability<State>;
   readonly traversal?: AutomaticTraversalCapability;
   readonly occupancy?: OccupancyCapability<State>;
-  readonly interactions: readonly InteractionDefinition<State>[];
+  readonly interactions: readonly InteractionDefinition<State, JsonObject>[];
   observe(state: Readonly<State>, context: ObservationContext): ObservableObjectState;
 }

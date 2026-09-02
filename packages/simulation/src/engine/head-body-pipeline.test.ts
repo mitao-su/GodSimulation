@@ -28,6 +28,7 @@ function parallelOperationWorld() {
       startedAtTick: 0,
       progressTicks: 0,
       accumulatedObservations: [],
+      observationDeliveryCursor: 0,
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -52,6 +53,7 @@ function parallelOperationWorld() {
       startedAtTick: 0,
       progressTicks: 0,
       accumulatedObservations: [],
+      observationDeliveryCursor: 0,
       plan: {
         currentActionIndex: 0,
         actions: [

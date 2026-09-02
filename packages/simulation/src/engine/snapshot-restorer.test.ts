@@ -172,10 +172,10 @@ function legacySnapshot(): WorldSnapshotV1 {
       {
         id: "goal:legacy:action:0",
         goalId: "goal:legacy",
-        kind: "open_object",
-        targetEntityId: "wall-1",
-        interactionId: "open",
-        durationTicks: 2,
+        kind: "use_object",
+        targetEntityId: "fridge-1",
+        interactionId: "use",
+        durationTicks: 10,
         progressTicks: 1,
         slots: ["HANDS"],
         started: true,
@@ -622,8 +622,8 @@ describe("simulation snapshot restoration", () => {
     const alice = state.agents.find((agent) => agent.id === "alice")!;
     expect(alice.activeOperations[0]?.plan.actions[0]).toMatchObject({
       kind: "interact_object",
-      purpose: "automatic_traversal",
-      targetEntityId: "wall-1",
+      purpose: "direct",
+      targetEntityId: "fridge-1",
     });
     expect(alice.knowledge.knownTraversalBlockers).toEqual([
       {

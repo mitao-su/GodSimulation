@@ -26,7 +26,7 @@ import {
 } from "@god-sim/protocol";
 
 import type { WorldHistory } from "../../world/world-state";
-import { objectInteractionOperationId } from "../../execution/operation-runtime";
+import { objectInteractionOperationId } from "../../execution/object-interaction-adapter";
 import { assertSnapshotCausality } from "../snapshot-causality";
 import {
   SerializedActiveOperationSchema as ActiveOperationSchema,
@@ -364,24 +364,6 @@ function legacyOperationBinding(
   }
 }
 
-function legacyTaskSlots(
-  goal: z.infer<typeof LegacyGoalSchema>,
-  actions: readonly z.infer<typeof RunningActionSchema>[],
-  currentActionIndex: number,
-): readonly ("HEAD" | "BODY")[] {
-  const slots = new Set<"HEAD" | "BODY">();
-  for (const action of actions.slice(currentActionIndex)) {
-    for (const slot of action.slots) {
-      slots.add(slot === "HEAD" ? "HEAD" : "BODY");
-    }
-  }
-  if (slots.size === 0) {
-    if (goal.kind === "observe") slots.add("HEAD");
-    slots.add("BODY");
-  }
-  return slots.has("HEAD") ? ["HEAD", "BODY"] : ["BODY"];
-}
-
 function migrateLegacyAction(
   action: z.infer<typeof RunningActionSchema>,
 ): z.infer<typeof OperationActionSchema> {
@@ -437,16 +419,9 @@ function migrateSingleGoalAgent(
   const actions = actionPlan?.actions ?? [];
   const currentActionIndex = actionPlan?.currentActionIndex ?? 0;
   const binding = legacyOperationBinding(currentGoal.goal, objects);
-  const taskSlots = legacyTaskSlots(
-    currentGoal.goal,
-    actions,
-    currentActionIndex,
-  );
-  const progressTicks =
-    actions
-      .slice(0, currentActionIndex)
-      .reduce((sum, action) => sum + action.durationTicks, 0) +
-    (actions[currentActionIndex]?.progressTicks ?? 0);
+  const taskSlots: readonly ("HEAD" | "BODY")[] = binding.taskSlots;
+  const currentAction = actions[currentActionIndex];
+  const progressTicks = currentAction?.progressTicks ?? 0;
   const callId = OperationCallIdSchema.parse(
     `operation-call:legacy:${agent.id}`,
   );
@@ -457,12 +432,14 @@ function migrateSingleGoalAgent(
     label: currentGoal.label,
     taskSlots,
     arguments: binding.arguments,
-    duration: { kind: "indeterminate" },
+    duration: currentAction
+      ? { kind: "fixed", totalTicks: currentAction.durationTicks }
+      : { kind: "indeterminate" },
     startedAtTick: Math.max(0, worldTick - progressTicks),
     progressTicks,
     plan: {
-      actions: actions.map(migrateLegacyAction),
-      currentActionIndex,
+      actions: currentAction ? [migrateLegacyAction(currentAction)] : [],
+      currentActionIndex: 0,
     },
   });
   return SerializedAgentSchema.parse({

@@ -28,6 +28,7 @@ describe("detectPlanConflict", () => {
             startedAtTick: 0,
             progressTicks: 2,
             accumulatedObservations: [],
+            observationDeliveryCursor: 0,
             plan: {
               currentActionIndex: 0,
               actions: [

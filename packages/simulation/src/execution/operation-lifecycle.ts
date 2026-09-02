@@ -10,8 +10,8 @@ import type { EffectProposal } from "@god-sim/plugin-sdk";
 import type { ActiveOperation, OperationObservation } from "./operation";
 import { createOperationRuntimeContext } from "./operation-runtime";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
+import type { SimulationRegistry } from "../engine/simulation-registry";
 import { proposeInteraction } from "../interaction/interaction-router";
-import type { PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 
 function operationParameters(operation: ActiveOperation): JsonObject {
@@ -25,19 +25,19 @@ function operationParameters(operation: ActiveOperation): JsonObject {
 
 export function operationInteractionLifecycleProposal(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
   operation: ActiveOperation,
   phase: "cancel" | "fail",
   failureCode?: string,
-): EffectProposal {
+): EffectProposal & { readonly result: JsonObject | null } {
   const action = operation.plan.actions[operation.plan.currentActionIndex];
   if (
     !action ||
     action.kind !== "interact_object" ||
     (phase === "cancel" && !action.started)
   ) {
-    return { effects: [] };
+    return { effects: [], result: null };
   }
   const proposed = proposeInteraction(world, registry, {
     agentId,
@@ -53,7 +53,7 @@ export function operationInteractionLifecycleProposal(
       `Operation ${phase} lifecycle ${operation.callId} was rejected: ${proposed.reasonCode}: ${proposed.summary}`,
     );
   }
-  return proposed.proposal;
+  return { effects: proposed.proposal.effects, result: proposed.result };
 }
 
 function appendResult(
@@ -105,7 +105,7 @@ function appendResult(
 
 export function recordOperationTermination(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
   operation: ActiveOperation,
   outcome: "completed" | "failed" | "cancelled",
@@ -156,7 +156,7 @@ export function recordOperationTermination(
 
 export function recordFuseResults(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentIds: readonly AgentId[],
   metadata: EventMetadata,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
@@ -197,7 +197,7 @@ export function recordFuseResults(
 
 export function accumulateOperationObservations(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
   observations: readonly OperationObservation[],
 ): WorldState {

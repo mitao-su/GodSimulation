@@ -5,6 +5,7 @@ import {
   type DomainEvent,
   type EntityId,
   type EventId,
+  type JsonObject,
 } from "@god-sim/protocol";
 
 import {
@@ -39,10 +40,10 @@ import {
   type PerceptionCandidate,
 } from "../perception/perception-recorder";
 import { advanceWorldClock } from "../world/world-clock";
-import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
+import type { SimulationRegistry } from "./simulation-registry";
 
 export interface DecisionNeed {
   readonly agentId: AgentId;
@@ -70,6 +71,7 @@ interface FailedOperationTermination {
   readonly agentId: AgentId;
   readonly operation: ActiveOperation;
   readonly reasonCode: string;
+  readonly result: JsonObject | null;
 }
 
 function eventMetadata(causationId: string, correlationId = causationId) {
@@ -115,7 +117,7 @@ function interactionFailure(
 
 function automaticTraversalIsClear(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   agentId: AgentId,
   entityId: EntityId,
 ): boolean {
@@ -139,7 +141,7 @@ function interactionParameters(
 
 function completeInteraction(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   request: InteractionCompletionRequest,
 ): InteractionProcessingResult {
   let world = worldInput;
@@ -265,7 +267,7 @@ function completeInteraction(
 
 function processInteractions(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   operationResult: OperationAdvanceResult,
 ): InteractionProcessingResult {
   let world = worldInput;
@@ -505,7 +507,7 @@ function recordNeedCrossings(
 
 export function refreshAllPerceptions(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
 ): {
   readonly world: WorldState;
   readonly events: readonly DomainEvent[];
@@ -622,11 +624,16 @@ function recordOperationFailures(
 
 function applyOperationFailureLifecycles(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   failures: readonly RecordedOperationFailure[],
-): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
+): {
+  readonly world: WorldState;
+  readonly events: readonly DomainEvent[];
+  readonly results: ReadonlyMap<string, JsonObject | null>;
+} {
   let world = worldInput;
   const events: DomainEvent[] = [];
+  const results = new Map<string, JsonObject | null>();
   const handled = new Set<string>();
 
   for (const item of failures) {
@@ -650,7 +657,7 @@ function applyOperationFailureLifecycles(
     const committed = commitProposal(
       world,
       registry,
-      proposal,
+      { effects: proposal.effects },
       eventMetadata(`${item.failure.actionId}:fail`, item.failure.callId),
     );
     if (!committed.accepted) {
@@ -660,15 +667,17 @@ function applyOperationFailureLifecycles(
     }
     world = committed.world;
     events.push(...committed.events);
+    results.set(key, proposal.result);
   }
 
-  return { world, events };
+  return { world, events, results };
 }
 
 function recoverFailedOperations(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   failures: readonly RecordedOperationFailure[],
+  lifecycleResults: ReadonlyMap<string, JsonObject | null>,
 ): {
   readonly world: WorldState;
   readonly needs: readonly DecisionNeed[];
@@ -734,6 +743,7 @@ function recoverFailedOperations(
           agentId: item.agentId,
           operation,
           reasonCode: recovered.reasonCode,
+          result: lifecycleResults.get(key) ?? null,
         });
         needs.push({
           agentId: item.agentId,
@@ -755,6 +765,7 @@ function recoverFailedOperations(
       agentId: item.agentId,
       operation,
       reasonCode: item.failure.code,
+      result: lifecycleResults.get(key) ?? null,
     });
     needs.push({
       agentId: item.agentId,
@@ -779,7 +790,7 @@ function activeOperationsAtTickStart(world: WorldState): Map<string, ActiveOpera
 
 export function runTickPipeline(
   worldInput: WorldState,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
 ): TickPipelineResult {
   if (worldInput.mode !== "RUNNING") {
     return { world: worldInput, events: [], decisionNeeds: [] };
@@ -827,7 +838,12 @@ export function runTickPipeline(
     addDecisionNeed(needs, conflict.agentId, conflict.reason, true);
   }
 
-  const failed = recoverFailedOperations(world, registry, recorded.failures);
+  const failed = recoverFailedOperations(
+    world,
+    registry,
+    recorded.failures,
+    failureLifecycles.results,
+  );
   world = failed.world;
   for (const need of failed.needs) {
     addDecisionNeed(needs, need.agentId, need.reason);
@@ -846,6 +862,7 @@ export function runTickPipeline(
       "failed",
       termination.reasonCode,
       eventMetadata(termination.operation.callId),
+      termination.result ?? undefined,
     );
     world = written.world;
     events.push(...written.events);

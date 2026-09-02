@@ -1,10 +1,5 @@
 import type { AgentDefinition, GamePlugin, ObjectDefinition } from "@god-sim/plugin-sdk";
-import type { JsonValue, OperationId } from "@god-sim/protocol";
-
-import {
-  createRegisteredOperations,
-  type RegisteredOperation,
-} from "../execution/operation-runtime";
+import type { JsonValue } from "@god-sim/protocol";
 
 export interface RegisteredObjectDefinition {
   readonly ownerPluginId: string;
@@ -20,17 +15,14 @@ export interface PluginRegistry {
   readonly plugins: ReadonlyMap<string, GamePlugin>;
   readonly objects: ReadonlyMap<string, RegisteredObjectDefinition>;
   readonly agents: ReadonlyMap<string, RegisteredAgentDefinition>;
-  readonly operations: ReadonlyMap<OperationId, RegisteredOperation>;
   getObject(definitionId: string): RegisteredObjectDefinition | undefined;
   getAgent(definitionId: string): RegisteredAgentDefinition | undefined;
-  getOperation(operationId: OperationId | string): RegisteredOperation | undefined;
 }
 
 export function createPluginRegistry(plugins: readonly GamePlugin[]): PluginRegistry {
   const pluginMap = new Map<string, GamePlugin>();
   const objects = new Map<string, RegisteredObjectDefinition>();
   const agents = new Map<string, RegisteredAgentDefinition>();
-  const operations = new Map<OperationId, RegisteredOperation>();
 
   for (const plugin of plugins) {
     if (pluginMap.has(plugin.manifest.id)) {
@@ -56,17 +48,11 @@ export function createPluginRegistry(plugins: readonly GamePlugin[]): PluginRegi
     }
   }
 
-  const registry: PluginRegistry = {
+  return {
     plugins: pluginMap,
     objects,
     agents,
-    operations,
     getObject: (definitionId) => objects.get(definitionId),
     getAgent: (definitionId) => agents.get(definitionId),
-    getOperation: (operationId) => operations.get(operationId as OperationId),
   };
-  for (const [operationId, operation] of createRegisteredOperations(registry)) {
-    operations.set(operationId, operation);
-  }
-  return registry;
 }

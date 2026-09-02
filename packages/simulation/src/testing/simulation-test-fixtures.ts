@@ -10,7 +10,7 @@ import { createSimulationRulesLock } from "@god-sim/protocol";
 
 import { loadWorldDefinition } from "../map/map-loader";
 import type { RegisteredOperation } from "../execution/operation-runtime";
-import { createPluginRegistry } from "../world/plugin-registry";
+import { createSimulationRegistry } from "../engine/simulation-registry";
 
 const wallDefinition: ObjectDefinition<Record<string, never>> = {
   id: "test.wall",
@@ -66,7 +66,9 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "using the fridge" },
       domainFailures: [{ code: "occupied", summary: "Fridge occupied" }],
-      resultSchema: z.object({ status: z.literal("completed") }).strict(),
+      resultSchema: z
+        .object({ status: z.enum(["completed", "cancelled", "failed"]) })
+        .strict(),
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
@@ -92,32 +94,34 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         ],
         result: { status: "completed" },
       }),
-      fail: (state, context) =>
-        state.holder === context.actor.agentId
-          ? {
-              effects: [
+      fail: (state, context) => ({
+        effects:
+          state.holder === context.actor.agentId
+            ? [
                 {
-                  type: "release_occupancy",
+                  type: "release_occupancy" as const,
                   entityId: context.object.entityId,
                   agentId: context.actor.agentId,
                   expectedObjectVersion: context.object.version,
                 },
-              ],
-            }
-          : { effects: [] },
-      cancel: (state, context) =>
-        state.holder === context.actor.agentId
-          ? {
-              effects: [
+              ]
+            : [],
+        result: { status: "failed" },
+      }),
+      cancel: (state, context) => ({
+        effects:
+          state.holder === context.actor.agentId
+            ? [
                 {
-                  type: "release_occupancy",
+                  type: "release_occupancy" as const,
                   entityId: context.object.entityId,
                   agentId: context.actor.agentId,
                   expectedObjectVersion: context.object.version,
                 },
-              ],
-            }
-          : { effects: [] },
+              ]
+            : [],
+        result: { status: "cancelled" },
+      }),
       fuse: () => null,
     },
   ],
@@ -172,7 +176,7 @@ export const testPlugin = definePlugin(
   },
 );
 
-export const testPluginRegistry = createPluginRegistry([testPlugin]);
+export const testPluginRegistry = createSimulationRegistry([testPlugin]);
 
 const synchronizedWaitOperation: RegisteredOperation = {
   id: "test.synchronized_wait" as never,
@@ -208,7 +212,9 @@ const synchronizedWaitOperation: RegisteredOperation = {
     };
   },
   fuse: () => null,
+  acknowledgeFuseResult: (_context, operation) => operation,
   terminalResult: () => ({}),
+  validateRestored: () => undefined,
 };
 (testPluginRegistry.operations as Map<unknown, RegisteredOperation>).set(
   synchronizedWaitOperation.id,

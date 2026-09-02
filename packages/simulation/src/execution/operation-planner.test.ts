@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
-import type { EntityId, TaskOption } from "@god-sim/protocol";
+import type { InteractionDefinition } from "@god-sim/plugin-sdk";
+import {
+  resolveTaskDecision,
+  type EntityId,
+  type JsonValue,
+  type TaskOption,
+} from "@god-sim/protocol";
 
 import { buildTaskOptions } from "./operation-catalog";
+import { createObjectInteractionOperation } from "./object-interaction-adapter";
 import { prepareOperationCall } from "./operation-planner";
 import {
   simulationTestWorld,
@@ -58,6 +66,42 @@ function operationOption(
   return option;
 }
 
+function requiredParameterOperation() {
+  const registered = testPluginRegistry.getObject("test.fridge");
+  if (!registered) throw new Error("Missing fridge definition");
+  const interaction: InteractionDefinition<
+    JsonValue,
+    { readonly mode: "cold" | "eco" }
+  > = {
+    id: "set_mode",
+    displayName: "Set fridge mode",
+    trigger: "active_command",
+    taskSlots: ["BODY"],
+    parametersSchema: z
+      .object({ mode: z.enum(["cold", "eco"]) })
+      .strict(),
+    resolveDuration: (_state, _context, value) => ({
+      kind: "fixed",
+      totalTicks: value.mode === "cold" ? 4 : 2,
+    }),
+    eventIgnore: [],
+    publicBehavior: { kind: "visible", label: "setting the fridge mode" },
+    domainFailures: [],
+    resultSchema: z.object({}).strict(),
+    canStart: () => ({ available: true }),
+    start: () => ({ effects: [] }),
+    complete: () => ({ effects: [] }),
+    fail: () => ({ effects: [] }),
+    cancel: () => ({ effects: [] }),
+    fuse: () => null,
+  };
+  return createObjectInteractionOperation(
+    registered.ownerPluginId,
+    registered.definition,
+    interaction,
+  );
+}
+
 describe("operation planner", () => {
   it("prepares move as one indeterminate BODY operation", () => {
     const world = knownFridgeWorld(false);
@@ -106,6 +150,70 @@ describe("operation planner", () => {
     expect(prepared.operation.plan.actions.map((action) => action.kind)).toEqual([
       "interact_object",
     ]);
+  });
+
+  it("carries required furniture parameters through catalog, decision, and planning", () => {
+    const registered = requiredParameterOperation();
+    const operations = testPluginRegistry.operations as Map<
+      unknown,
+      typeof registered
+    >;
+    operations.set(registered.id, registered);
+    try {
+      const world = knownFridgeWorld(true);
+      const options = buildTaskOptions(
+        world,
+        testPluginRegistry,
+        "alice" as never,
+      );
+      const option = operationOption(options, registered.id);
+      expect(option.fixedArguments).toEqual({ targetEntityId: "fridge-1" });
+
+      const resolved = resolveTaskDecision(
+        {
+          schemaVersion: 2,
+          head: { kind: "continue" },
+          body: {
+            kind: "replace",
+            taskOptionId: option.id,
+            arguments: { parameters: { mode: "cold" } },
+          },
+          reason: "Keep food cold",
+        },
+        options,
+      );
+      const selected = resolved.tracks.BODY;
+      if (selected.kind !== "operation") {
+        throw new Error("Furniture decision did not resolve to an operation");
+      }
+      expect(selected.arguments).toEqual({
+        targetEntityId: "fridge-1",
+        parameters: { mode: "cold" },
+      });
+
+      const prepared = prepareOperationCall(
+        world,
+        testPluginRegistry,
+        "alice" as never,
+        selected.option,
+        selected.arguments,
+        "operation-call:test:set-fridge-mode" as never,
+      );
+
+      expect(prepared).toMatchObject({
+        kind: "prepared",
+        operation: {
+          operationId: registered.id,
+          arguments: {
+            targetEntityId: "fridge-1",
+            parameters: { mode: "cold" },
+          },
+          duration: { kind: "fixed", totalTicks: 4 },
+        },
+      });
+    } finally {
+      operations.delete(registered.id);
+    }
   });
 
   it("uses world-locked timing for wait and observe", () => {
