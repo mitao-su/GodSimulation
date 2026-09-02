@@ -10,6 +10,11 @@ import {
   RequestIdSchema,
   WorldIdSchema,
 } from "../identity/ids";
+import {
+  ActiveTasksContextSchema,
+  TaskDecisionSchema,
+  TaskOptionSchema,
+} from "../execution/task-contract";
 import { JsonValueSchema } from "../json/json-value";
 
 export const UseObjectGoalSchema = z
@@ -149,7 +154,7 @@ export const SubjectiveDecisionContextSchema = z
   .object({
     decisionReason: DecisionReasonSchema,
     bodySensations: z.array(BodySensationSchema),
-    currentGoal: CurrentGoalContextSchema.nullable(),
+    activeTasks: ActiveTasksContextSchema,
     memories: z.array(DecisionMemorySchema),
     perception: PerceptionSnapshotSchema,
   })
@@ -159,7 +164,7 @@ export type SubjectiveDecisionContext = z.infer<typeof SubjectiveDecisionContext
 
 export const DecisionPromptInputSchema = DecisionIdentitySchema.extend({
   ...SubjectiveDecisionContextSchema.shape,
-  goalOptions: z.array(GoalOptionSchema).min(1),
+  taskOptions: z.array(TaskOptionSchema).min(1),
 }).strict();
 
 export type DecisionPromptInput = z.infer<typeof DecisionPromptInputSchema>;
@@ -174,13 +179,13 @@ export const ModelMessageSchema = z
 export const ModelDecisionRequestSchema = DecisionIdentitySchema.extend({
   decisionReason: DecisionReasonSchema,
   messages: z.array(ModelMessageSchema).min(1),
-  goalOptions: z.array(GoalOptionSchema).min(1),
+  taskOptions: z.array(TaskOptionSchema).min(1),
 }).strict();
 
 export type ModelDecisionRequest = z.infer<typeof ModelDecisionRequestSchema>;
 
 export const ModelDecisionResultSchema = DecisionIdentitySchema.extend({
-  proposal: GoalProposalSchema,
+  proposal: TaskDecisionSchema,
 }).strict();
 
 export type ModelDecisionResult = z.infer<typeof ModelDecisionResultSchema>;

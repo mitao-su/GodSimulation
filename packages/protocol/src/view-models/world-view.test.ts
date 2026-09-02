@@ -9,6 +9,7 @@ const view = {
   worldName: "Starter Home",
   worldVersion: 2,
   worldTick: 0,
+  gameTime: { day: 1, hour: 8, minute: 0 },
   mode: "THINKING",
   reviewRequired: true,
   pauseReason: {
@@ -35,7 +36,25 @@ const view = {
       status: "available",
     },
   ],
-  agents: [],
+  agents: [
+    {
+      agentId: "alice",
+      displayName: "Alice",
+      headTask: { kind: "empty", label: null },
+      bodyTask: {
+        kind: "operation",
+        callId: "operation-call:alice:body",
+        operationId: "core.wait",
+        label: "Wait",
+        duration: { kind: "fixed", totalTicks: 10 },
+        progressTicks: 3,
+      },
+      bladderLevel: "comfortable",
+      decisionStatus: "thinking",
+      perceivedSummaries: [],
+      memorySummaries: [],
+    },
+  ],
   pendingDecisions: [],
   recentEvents: [],
   technicalFailure: null,
@@ -43,7 +62,17 @@ const view = {
 
 describe("world view", () => {
   it("accepts a read-only projection", () => {
-    expect(WorldViewSchema.parse(view).worldTick).toBe(0);
+    expect(WorldViewSchema.parse(view)).toMatchObject({
+      worldTick: 0,
+      gameTime: { day: 1, hour: 8, minute: 0 },
+    });
+  });
+
+  it("requires a Tick-derived game time projection", () => {
+    const withoutGameTime = { ...view };
+    Reflect.deleteProperty(withoutGameTime, "gameTime");
+
+    expect(WorldViewSchema.safeParse(withoutGameTime).success).toBe(false);
   });
 
   it("rejects hidden plugin state in render entities", () => {

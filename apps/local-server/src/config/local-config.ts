@@ -25,6 +25,7 @@ export interface LocalConfig {
   readonly host: string;
   readonly port: number;
   readonly worldDefinitionPath: string;
+  readonly rulesDirectory: string;
   readonly databaseFilename: string;
   readonly logFilename: string;
   readonly webRoot: string;
@@ -185,6 +186,7 @@ export async function loadLocalConfig(options: LoadLocalConfigOptions = {}): Pro
       projectRoot,
       environment.GOD_SIM_WORLD ?? "content/worlds/starter-home/world.json",
     ),
+    rulesDirectory: resolve(projectRoot, "content", "rules"),
     databaseFilename: resolveFrom(
       projectRoot,
       environment.GOD_SIM_DATABASE ?? "data/god-simulation.sqlite",

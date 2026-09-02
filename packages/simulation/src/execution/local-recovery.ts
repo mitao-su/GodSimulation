@@ -1,13 +1,22 @@
-import type { AgentId, EntityId, EventId, Goal } from "@god-sim/protocol";
+import type {
+  AgentId,
+  EntityId,
+  EventId,
+  OperationCallId,
+} from "@god-sim/protocol";
 
-import { planGoal } from "./goal-planner";
+import {
+  replanMoveOperation,
+  type ReplanMoveOperationResult,
+} from "./operation-planner";
+import type { ActiveOperation } from "./operation";
 import type { AgentNavigationKnowledge } from "./path-planner";
 import type { PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 
 export interface TraversalFailure {
+  readonly callId: OperationCallId;
   readonly entityId: EntityId;
-  readonly goal: Goal;
   readonly observedObjectVersion: number;
   readonly reasonCode: string;
   readonly sourceEventId: EventId;
@@ -16,7 +25,7 @@ export interface TraversalFailure {
 export type RecoveryResult =
   | {
       readonly kind: "replanned";
-      readonly plan: Extract<ReturnType<typeof planGoal>, { kind: "planned" }>["plan"];
+      readonly operation: ActiveOperation;
       readonly knowledge: AgentNavigationKnowledge;
     }
   | {
@@ -25,13 +34,19 @@ export type RecoveryResult =
       readonly knowledge: AgentNavigationKnowledge;
     };
 
-export function recoverBlockedPlan(
+export function recoverBlockedOperation(
   world: WorldState,
   registry: PluginRegistry,
   agentId: AgentId,
   failure: TraversalFailure,
   knowledge: AgentNavigationKnowledge,
 ): RecoveryResult {
+  const operation = world.agents
+    .get(agentId)
+    ?.activeOperations.get(failure.callId);
+  if (!operation) {
+    throw new Error(`Operation ${failure.callId} is not active for ${agentId}`);
+  }
   const knownTraversalBlockers = new Map(knowledge.knownTraversalBlockers);
   knownTraversalBlockers.set(failure.entityId, {
     entityId: failure.entityId,
@@ -40,15 +55,29 @@ export function recoverBlockedPlan(
     sourceEventId: failure.sourceEventId,
   });
   const updatedKnowledge = { knownTraversalBlockers };
-  const replanned = planGoal(
+  if (operation.operationId !== "core.move") {
+    return {
+      kind: "needs_decision",
+      reasonCode: failure.reasonCode,
+      knowledge: updatedKnowledge,
+    };
+  }
+  const replanned: ReplanMoveOperationResult = replanMoveOperation(
     world,
     registry,
     agentId,
-    failure.goal,
+    operation,
     updatedKnowledge,
-    `goal:${agentId}:${world.version}:recovery`,
   );
-  return replanned.kind === "planned"
-    ? { kind: "replanned", plan: replanned.plan, knowledge: updatedKnowledge }
-    : { kind: "needs_decision", reasonCode: replanned.reasonCode, knowledge: updatedKnowledge };
+  return replanned.kind === "replanned"
+    ? {
+        kind: "replanned",
+        operation: replanned.operation,
+        knowledge: updatedKnowledge,
+      }
+    : {
+        kind: "needs_decision",
+        reasonCode: replanned.reasonCode,
+        knowledge: updatedKnowledge,
+      };
 }

@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { DecisionPromptInput } from "@god-sim/protocol";
 
-import { simulationTestWorld, testPlugin } from "../testing/simulation-test-fixtures";
+import {
+  simulationTestWorld,
+  testPlugin,
+  testSimulationRulesLock,
+} from "../testing/simulation-test-fixtures";
 import { createSimulation, type SimulationEngine } from "./simulation-engine";
 
 function testEngine(): SimulationEngine {
@@ -12,6 +16,7 @@ function testEngine(): SimulationEngine {
     reviewRequired: true,
     seed: 1,
     pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
   });
 }
 
@@ -19,7 +24,10 @@ function bufferWaitDecision(
   engine: SimulationEngine,
   request: DecisionPromptInput,
 ): void {
-  const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait");
+  const option = request.taskOptions.find(
+    (candidate) =>
+      candidate.kind === "operation" && candidate.operationId === "core.wait",
+  );
   if (!option) throw new Error(`No wait option for ${request.agentId}`);
   const result = engine.acceptDecision({
     identity: {
@@ -34,14 +42,28 @@ function bufferWaitDecision(
         ? {}
         : { retryOfRequestId: request.retryOfRequestId }),
     },
-    goalOptionId: option.id,
-    goal: option.goal,
-    modelReason: "Wait in checkpoint test",
+    proposal: {
+      schemaVersion: 2,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        taskOptionId: option.id,
+        arguments: { durationTicks: 10 },
+      },
+      reason: "Wait in checkpoint test",
+    },
   });
   if (!result.accepted) throw new Error(result.reason);
 }
 
 describe("simulation checkpoints", () => {
+  it("prepares a version-three checkpoint with the authoritative rule lock", () => {
+    expect(testEngine().prepareCheckpoint().snapshot).toMatchObject({
+      schemaVersion: 3,
+      simulationRulesLock: testSimulationRulesLock,
+    });
+  });
+
   it("keeps events until the matching stable checkpoint is acknowledged", () => {
     const engine = testEngine();
     const first = engine.prepareCheckpoint();

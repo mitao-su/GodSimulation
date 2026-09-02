@@ -28,7 +28,7 @@ const visionContext = ObservationContextSchema.parse({
 describe("toilet definition", () => {
   it("proposes a bladder change and occupancy release on completion", () => {
     const state = Object.freeze({ occupiedBy: "alice" as const });
-    const result = useToilet?.complete(state, context);
+    const result = useToilet?.complete(state, context, {});
 
     expect(result?.effects).toEqual([
       {

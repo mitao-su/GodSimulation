@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { definePlugin, PluginManifestSchema, type ObjectDefinition } from "@god-sim/plugin-sdk";
 
+import { SimulationRulesLockSchema } from "@god-sim/protocol";
+
 import { loadWorldDefinition } from "./map-loader";
 import { createPluginRegistry } from "../world/plugin-registry";
 
@@ -63,11 +65,58 @@ const registry = createPluginRegistry([
   ),
 ]);
 
+const simulationRulesLock = SimulationRulesLockSchema.parse({
+  hash: "c".repeat(64),
+  rules: {
+    schemaVersion: 1,
+    id: "default",
+    version: 1,
+    time: { secondsPerGameTick: 6, epoch: { day: 1, hour: 8, minute: 0 } },
+    context: { attentionBudgetTokens: 200_000, technicalHardLimitTokens: 200_000 },
+    fatigue: {
+      timeWeight: 0.6,
+      tokenWeight: 0.4,
+      forcedSleepThreshold: 0.6,
+      timePressureFullAtTicks: 43_200,
+    },
+    inventory: { capacityUnits: 9 },
+    operations: {
+      move: { ticksPerCell: 2 },
+      wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
+      observe: { durationTicks: 1 },
+    },
+    memory: {
+      importance: {
+        critical: { initialStrength: 1, halfLifeDays: 90 },
+        high: { initialStrength: 1, halfLifeDays: 30 },
+        normal: { initialStrength: 1, halfLifeDays: 7 },
+        low: { initialStrength: 1, halfLifeDays: 2 },
+      },
+      deletionThreshold: 0.1,
+      recall: {
+        maxReturnTokensPerOperation: 8_000,
+        rankingWeights: {
+          semanticSimilarity: 0.55,
+          keywordMatch: 0.25,
+          currentStrength: 0.2,
+        },
+      },
+    },
+    sound: {
+      speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
+      attenuationPerTile: 0.25,
+      fullContentThreshold: 1,
+      unclearContentThreshold: 0.25,
+    },
+  },
+});
+
 function validMap() {
   return {
     schemaVersion: 1,
     id: "test-world",
     name: "Test World",
+    rules: { id: "default", version: 1 },
     tileSize: 16,
     width: 4,
     height: 4,
@@ -106,9 +155,20 @@ function validMap() {
   };
 }
 
+function loadTestWorld(input: unknown) {
+  return loadWorldDefinition(input, registry, { simulationRulesLock });
+}
+
 describe("loadWorldDefinition", () => {
+  it("rejects a world without an explicit simulation rule reference", () => {
+    const withoutRules: Partial<ReturnType<typeof validMap>> = { ...validMap() };
+    delete withoutRules.rules;
+
+    expect(() => loadTestWorld(withoutRules)).toThrow(/rules/iu);
+  });
+
   it("creates instance state owned by the world", () => {
-    const world = loadWorldDefinition(validMap(), registry).world;
+    const world = loadTestWorld(validMap()).world;
 
     expect(world.objects.get("door-1" as never)).toMatchObject({
       definitionId: "test.door",
@@ -120,6 +180,20 @@ describe("loadWorldDefinition", () => {
       bladder: 20,
     });
     expect(world.mode).toBe("THINKING");
+    expect(world.simulationRulesLock).toEqual(simulationRulesLock);
+  });
+
+  it("rejects a rule lock that does not match the world's rule reference", () => {
+    const mismatchedLock = SimulationRulesLockSchema.parse({
+      ...simulationRulesLock,
+      rules: { ...simulationRulesLock.rules, version: 2 },
+    });
+
+    expect(() =>
+      loadWorldDefinition(validMap(), registry, {
+        simulationRulesLock: mismatchedLock,
+      }),
+    ).toThrow(/simulation rules.*reference/i);
   });
 
   it("returns empty subjective state and deterministic initial perception seeds", () => {
@@ -132,7 +206,7 @@ describe("loadWorldDefinition", () => {
       })),
     };
 
-    const loaded = loadWorldDefinition(input, registry);
+    const loaded = loadTestWorld(input);
     const alice = loaded.world.agents.get("alice" as never)!;
 
     expect(alice.knowledge.objects.size).toBe(0);
@@ -162,7 +236,7 @@ describe("loadWorldDefinition", () => {
       objects: [{ ...base.objects[0]!, definitionId: "missing.object" }],
     };
 
-    expect(() => loadWorldDefinition(input, registry)).toThrow(/missing\.object/);
+    expect(() => loadTestWorld(input)).toThrow(/missing\.object/);
   });
 
   it("rejects plugin state that violates the definition schema", () => {
@@ -172,7 +246,7 @@ describe("loadWorldDefinition", () => {
       objects: [{ ...base.objects[0]!, state: { open: "yes", locked: false } }],
     };
 
-    expect(() => loadWorldDefinition(input, registry)).toThrow(/door-1/);
+    expect(() => loadTestWorld(input)).toThrow(/door-1/);
   });
 
   it("rejects footprints that leave map bounds", () => {
@@ -182,7 +256,7 @@ describe("loadWorldDefinition", () => {
       objects: [{ ...base.objects[0]!, position: { x: 4, y: 1 } }],
     };
 
-    expect(() => loadWorldDefinition(input, registry)).toThrow(/bounds/i);
+    expect(() => loadTestWorld(input)).toThrow(/bounds/i);
   });
 
   it("rejects a render-only decoration outside the map", () => {
@@ -199,6 +273,6 @@ describe("loadWorldDefinition", () => {
       ],
     };
 
-    expect(() => loadWorldDefinition(input, registry)).toThrow(/decoration.*bounds/i);
+    expect(() => loadTestWorld(input)).toThrow(/decoration.*bounds/i);
   });
 });

@@ -32,7 +32,7 @@ export function AgentList({ view, selectedId, onSelect }: AgentListProps) {
               <CircleUserRound aria-hidden="true" size={18} />
               <span className="agent-row__copy">
                 <strong>{agent.displayName}</strong>
-                <span>{agent.currentGoalLabel ?? "尚无目标"}</span>
+                <span>{agent.bodyTask.label ?? agent.headTask.label ?? "无任务"}</span>
               </span>
               <span className={`status-dot status-dot--${agent.decisionStatus}`}>
                 {decisionLabels[agent.decisionStatus]}

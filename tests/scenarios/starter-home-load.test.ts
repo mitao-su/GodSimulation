@@ -6,11 +6,15 @@ import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 
 describe("starter home", () => {
   it("loads one continuous four-zone home with the milestone entities", () => {
     const registry = createPluginRegistry([spatialPlugin, homePlugin, agentsPlugin]);
-    const world = loadWorldDefinition(starterHome, registry, { seed: 20260831 }).world;
+    const world = loadWorldDefinition(starterHome, registry, {
+      seed: 20260831,
+      simulationRulesLock: testSimulationRulesLock,
+    }).world;
 
     expect(world.map.zones.map((zone) => zone.id)).toEqual([
       "living-room",

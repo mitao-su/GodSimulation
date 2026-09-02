@@ -3,10 +3,10 @@ import { z } from "zod";
 import {
   AgentIdSchema,
   EventIdSchema,
-  WorldSnapshotV2Schema,
+  WorldSnapshotWithCausalHistorySchema,
   type EventId,
   type WorldId,
-  type WorldSnapshotV2,
+  type WorldSnapshotWithCausalHistory,
 } from "@god-sim/protocol";
 
 const SourceReferenceSchema = z.object({ sourceEventId: EventIdSchema }).passthrough();
@@ -49,7 +49,9 @@ export function eventSequenceInWorld(
   return Number.isSafeInteger(sequence) ? sequence : null;
 }
 
-function subjectiveSources(snapshot: WorldSnapshotV2): readonly LabeledSourceReference[] {
+function subjectiveSources(
+  snapshot: WorldSnapshotWithCausalHistory,
+): readonly LabeledSourceReference[] {
   const state = SubjectiveStateSchema.parse(snapshot.state);
   return state.agents.flatMap((agent) => [
     ...agent.knowledge.objects.map((value, index) => ({
@@ -75,8 +77,10 @@ function subjectiveSources(snapshot: WorldSnapshotV2): readonly LabeledSourceRef
   ]);
 }
 
-export function assertSnapshotCausality(snapshotValue: WorldSnapshotV2): void {
-  const snapshot = WorldSnapshotV2Schema.parse(snapshotValue);
+export function assertSnapshotCausality(
+  snapshotValue: WorldSnapshotWithCausalHistory,
+): void {
+  const snapshot = WorldSnapshotWithCausalHistorySchema.parse(snapshotValue);
   if (snapshot.history.causalFromSequence > snapshot.lastEventSequence + 1) {
     throw new Error("Snapshot causal history begins past its Event tail");
   }

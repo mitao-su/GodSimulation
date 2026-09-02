@@ -16,15 +16,16 @@ test.afterAll(async () => {
 test("runs automatically only while decision review is disabled", async ({ page }) => {
   const runtimeErrors = collectRuntimeErrors(page);
   const review = page.getByRole("checkbox", { name: "决策审查" });
-  const worldTick = page.locator(".header-metric").filter({ hasText: "世界时间" }).locator("strong");
+  const gameTime = page.locator(".header-metric").filter({ hasText: "世界时间" }).locator("strong");
 
   await page.goto(app.url);
   await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
+  const initialGameTime = await gameTime.textContent();
   await review.click();
   await expect(review).not.toBeChecked();
 
   await expect(page.getByText("运行中", { exact: true })).toBeVisible();
-  await expect.poll(async () => Number(await worldTick.textContent())).toBeGreaterThan(0);
+  await expect.poll(() => gameTime.textContent()).not.toBe(initialGameTime);
   await expect(page.getByRole("button", { name: "放行世界" })).toBeDisabled();
 
   await review.click();

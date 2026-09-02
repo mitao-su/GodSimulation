@@ -18,14 +18,36 @@ function argument(name, fallback) {
   return index === -1 ? fallback : process.argv[index + 1];
 }
 
-function goalOption(request, predicate) {
-  const option = request.goalOptions.find(predicate);
+function taskOption(request, predicate) {
+  const option = request.taskOptions.find(predicate);
   if (!option) {
     throw new Error(
-      `No deterministic goal option for ${request.agentId}:${request.decisionReason.code}`,
+      `No deterministic task option for ${request.agentId}:${request.decisionReason.code}`,
     );
   }
   return option;
+}
+
+function targets(candidate, entityId) {
+  return candidate.kind === "operation" && candidate.fixedArguments.targetEntityId === entityId;
+}
+
+function operationFor(candidate, operationId, entityId) {
+  return candidate.operationId === operationId && targets(candidate, entityId);
+}
+
+function taskDecision(option, reason) {
+  const selection = {
+    kind: "replace",
+    taskOptionId: option.id,
+    arguments: option.operationId === "core.wait" ? { durationTicks: 600 } : {},
+  };
+  return {
+    schemaVersion: 2,
+    head: option.taskSlots.includes("HEAD") ? selection : { kind: "continue" },
+    body: option.taskSlots.includes("BODY") ? selection : { kind: "continue" },
+    reason,
+  };
 }
 
 function waitForDelay(milliseconds, signal) {
@@ -71,30 +93,43 @@ class ScenarioDecisionProvider {
         : 20;
     await waitForDelay(thinkingDelay, signal);
 
-    const option = goalOption(request, (candidate) => {
-      if (this.#scenario === "basic-loop" && request.decisionReason.code === "initial_goal") {
-        return (
-          candidate.goal.kind === "use_object" &&
-          candidate.goal.targetEntityId === "fridge-1"
+    const option = taskOption(request, (candidate) => {
+      if (this.#scenario === "basic-loop") {
+        const refrigeratorUse = operationFor(
+          candidate,
+          "object.home.refrigerator.use",
+          "fridge-1",
         );
+        if (request.taskOptions.some((item) => operationFor(
+          item,
+          "object.home.refrigerator.use",
+          "fridge-1",
+        ))) {
+          return refrigeratorUse;
+        }
+        if (request.taskOptions.some((item) => operationFor(item, "core.move", "fridge-1"))) {
+          return operationFor(candidate, "core.move", "fridge-1");
+        }
       }
       if (
         this.#scenario === "bladder-toilet" &&
         request.agentId === "alice" &&
-        request.decisionReason.code === "urgent_bladder"
+        request.decisionReason.code !== "initial_goal"
       ) {
-        return (
-          candidate.goal.kind === "use_object" &&
-          candidate.goal.targetEntityId === "toilet-1"
-        );
+        if (request.taskOptions.some((item) => operationFor(
+          item,
+          "object.home.toilet.use",
+          "toilet-1",
+        ))) {
+          return operationFor(candidate, "object.home.toilet.use", "toilet-1");
+        }
+        if (request.taskOptions.some((item) => operationFor(item, "core.move", "toilet-1"))) {
+          return operationFor(candidate, "core.move", "toilet-1");
+        }
       }
-      return candidate.goal.kind === "wait";
+      return candidate.kind === "operation" && candidate.operationId === "core.wait";
     });
-    return {
-      schemaVersion: 1,
-      goalOptionId: option.id,
-      reason: `Deterministic ${this.#scenario} decision`,
-    };
+    return taskDecision(option, `Deterministic ${this.#scenario} decision`);
   }
 }
 

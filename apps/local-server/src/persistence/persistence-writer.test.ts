@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TimelineStore, WorldCheckpoint } from "@god-sim/timeline";
 
+import { testSimulationRulesLock } from "../testing/simulation-rules-test-fixture";
 import { PersistenceWriter } from "./persistence-writer";
 
 function checkpoint(worldVersion: number): WorldCheckpoint {
@@ -9,12 +10,13 @@ function checkpoint(worldVersion: number): WorldCheckpoint {
     checkpointId: `checkpoint:starter-world:${worldVersion}:0` as never,
     events: [],
     snapshot: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       worldId: "starter-world" as never,
       worldVersion,
       worldTick: worldVersion,
       lastEventSequence: 0,
       pluginLockHash: "a".repeat(64) as never,
+      simulationRulesLock: testSimulationRulesLock,
       history: { mode: "strict", causalFromSequence: 1 },
       causalEventIds: [],
       state: {},

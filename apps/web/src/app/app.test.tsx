@@ -37,6 +37,7 @@ function view(
     worldName: "Starter Home",
     worldVersion: 3,
     worldTick: 12,
+    gameTime: { day: 1, hour: 8, minute: 1 },
     mode,
     reviewRequired: true,
     pauseReason: {
@@ -61,8 +62,15 @@ function view(
       {
         agentId: "alice",
         displayName: "Alice",
-        currentGoalLabel: "使用冰箱",
-        actionLabel: null,
+        headTask: { kind: "empty", label: null },
+        bodyTask: {
+          kind: "operation",
+          callId: "operation-call:alice:body",
+          operationId: "object.home.refrigerator.use",
+          label: "使用冰箱",
+          duration: { kind: "fixed", totalTicks: 10 },
+          progressTicks: 3,
+        },
         bladderLevel: "comfortable",
         decisionStatus: decisionStatus === "error" ? "error" : decisionStatus === "ready" ? "ready" : "thinking",
         perceivedSummaries: ["Wall", "Wall"],
@@ -144,6 +152,13 @@ describe("director workbench", () => {
     expect(screen.getByRole("button", { name: "放行世界" })).toBeDisabled();
   });
 
+  it("shows the Tick-derived calendar time instead of the raw Tick", () => {
+    render(<App client={new FakeWorldClient(view("THINKING", "pending"))} />);
+
+    expect(screen.getByText("第 1 天 08:01")).toBeVisible();
+    expect(screen.queryByText("12")).not.toBeInTheDocument();
+  });
+
   it("sends a release command when every decision is ready", async () => {
     const client = new FakeWorldClient(view("READY_FOR_RELEASE", "ready"));
     render(<App client={client} />);
@@ -192,6 +207,16 @@ describe("director workbench", () => {
     expect(
       consoleError.mock.calls.filter(([message]) => String(message).includes("same key")),
     ).toEqual([]);
+  });
+
+  it("shows separate head and body tasks in the agent inspector", async () => {
+    render(<App client={new FakeWorldClient(view("THINKING", "pending"))} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Alice/ }));
+
+    expect(screen.getByText("头部任务")).toBeVisible();
+    expect(screen.getByText("身体任务")).toBeVisible();
+    expect(screen.getAllByText("使用冰箱").length).toBeGreaterThan(0);
   });
 
   it("retries only the failed decision request", async () => {

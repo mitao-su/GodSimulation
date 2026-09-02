@@ -16,6 +16,24 @@ function requests(messages: readonly WorkerToHostMessage[]): ModelDecisionReques
     .map((message) => message.request);
 }
 
+function waitDecision(request: ModelDecisionRequest) {
+  const option = request.taskOptions.find(
+    (candidate) =>
+      candidate.kind === "operation" && candidate.operationId === "core.wait",
+  );
+  if (!option) throw new Error(`No wait task option for ${request.agentId}`);
+  return {
+    schemaVersion: 2 as const,
+    head: { kind: "continue" as const },
+    body: {
+      kind: "replace" as const,
+      taskOptionId: option.id,
+      arguments: { durationTicks: 600 },
+    },
+    reason: "Wait",
+  };
+}
+
 describe("local worker process", () => {
   it("publishes a final checkpoint before a normal shutdown", async () => {
     const session = await startTestWorker();
@@ -24,7 +42,6 @@ describe("local worker process", () => {
     await vi.waitFor(() => expect(requests(messages)).toHaveLength(2));
 
     const request = requests(messages)[0]!;
-    const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
     await worker.send({
       type: "decision_result",
       result: {
@@ -35,7 +52,7 @@ describe("local worker process", () => {
         decisionCycleId: request.decisionCycleId,
         schemaVersion: request.schemaVersion,
         pluginLockHash: request.pluginLockHash,
-        proposal: { schemaVersion: 1, goalOptionId: option.id, reason: "Wait" },
+        proposal: waitDecision(request),
       },
     });
     await vi.waitFor(() =>
@@ -71,7 +88,6 @@ describe("local worker process", () => {
 
       const [alice, bob] = requests(messages);
       for (const request of [alice!]) {
-        const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
         await worker.send({
           type: "decision_result",
           result: {
@@ -82,11 +98,7 @@ describe("local worker process", () => {
             decisionCycleId: request.decisionCycleId,
             schemaVersion: request.schemaVersion,
             pluginLockHash: request.pluginLockHash,
-            proposal: {
-              schemaVersion: 1,
-              goalOptionId: option.id,
-              reason: "Wait",
-            },
+            proposal: waitDecision(request),
           },
         });
       }
@@ -94,7 +106,6 @@ describe("local worker process", () => {
         expect(latestView(messages)).toMatchObject({ mode: "THINKING", worldTick: 0 }),
       );
 
-      const bobOption = bob!.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
       await worker.send({
         type: "decision_result",
         result: {
@@ -105,11 +116,7 @@ describe("local worker process", () => {
           decisionCycleId: bob!.decisionCycleId,
           schemaVersion: bob!.schemaVersion,
           pluginLockHash: bob!.pluginLockHash,
-          proposal: {
-            schemaVersion: 1,
-            goalOptionId: bobOption.id,
-            reason: "Wait",
-          },
+          proposal: waitDecision(bob!),
         },
       });
       await vi.waitFor(() =>
@@ -130,7 +137,6 @@ describe("local worker process", () => {
       await session.acknowledgeNextCheckpoint();
       await vi.waitFor(() => expect(requests(messages)).toHaveLength(2));
       for (const request of requests(messages)) {
-        const option = request.goalOptions.find((candidate) => candidate.goal.kind === "wait")!;
         await worker.send({
           type: "decision_result",
           result: {
@@ -141,11 +147,7 @@ describe("local worker process", () => {
             decisionCycleId: request.decisionCycleId,
             schemaVersion: request.schemaVersion,
             pluginLockHash: request.pluginLockHash,
-            proposal: {
-              schemaVersion: 1,
-              goalOptionId: option.id,
-              reason: "Wait",
-            },
+            proposal: waitDecision(request),
           },
         });
       }

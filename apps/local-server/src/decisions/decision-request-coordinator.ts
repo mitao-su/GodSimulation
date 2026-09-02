@@ -1,9 +1,12 @@
 import {
-  GoalProposalSchema,
   ModelDecisionResultSchema,
+  TaskDecisionSchema,
   TechnicalFailureSchema,
   type ModelDecisionRequest,
   type ModelDecisionResult,
+  type TaskDecision,
+  type TaskOption,
+  type TaskTrack,
   type TechnicalFailure,
 } from "@god-sim/protocol";
 import type { DecisionProvider } from "@god-sim/model-gateway";
@@ -35,6 +38,67 @@ export interface DecisionRequestCoordinatorOptions {
   readonly monotonicNow?: () => number;
 }
 
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalJson(entry)]),
+  );
+}
+
+function sameArguments(left: unknown, right: unknown): boolean {
+  return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
+}
+
+function validateProposal(
+  request: ModelDecisionRequest,
+  value: TaskDecision,
+): TaskDecision {
+  const proposal = TaskDecisionSchema.parse(value);
+  const selected = new Map<TaskTrack, TaskOption>();
+  for (const [track, selection] of [
+    ["HEAD", proposal.head],
+    ["BODY", proposal.body],
+  ] as const) {
+    if (selection.kind === "continue") continue;
+    const option = request.taskOptions.find(
+      (candidate) => candidate.id === selection.taskOptionId,
+    );
+    if (!option) {
+      throw new Error(`Task option ${selection.taskOptionId} was not offered`);
+    }
+    if (!option.taskSlots.includes(track)) {
+      throw new Error(`Task option ${selection.taskOptionId} does not occupy ${track}`);
+    }
+    if (option.kind === "empty" && Object.keys(selection.arguments).length > 0) {
+      throw new Error(`Empty task option ${selection.taskOptionId} accepts no arguments`);
+    }
+    selected.set(track, option);
+  }
+
+  for (const [track, option] of selected) {
+    if (option.taskSlots.length === 1) continue;
+    const selection = track === "HEAD" ? proposal.head : proposal.body;
+    if (selection.kind !== "replace") continue;
+    for (const requiredTrack of option.taskSlots) {
+      const peer = requiredTrack === "HEAD" ? proposal.head : proposal.body;
+      const peerOption = selected.get(requiredTrack);
+      if (
+        peer.kind !== "replace" ||
+        peerOption?.id !== option.id ||
+        !sameArguments(peer.arguments, selection.arguments)
+      ) {
+        throw new Error(
+          `Task option ${option.id} must use the same arguments on all declared tracks`,
+        );
+      }
+    }
+  }
+  return proposal;
+}
+
 export class DecisionRequestCoordinator {
   readonly #provider: DecisionProvider;
   readonly #persistence: PersistenceWriter;
@@ -59,14 +123,12 @@ export class DecisionRequestCoordinator {
     this.#controllers.set(request.requestId, controller);
     const startedAt = this.#monotonicNow();
     try {
-      let proposal: ReturnType<typeof GoalProposalSchema.parse>;
+      let proposal: TaskDecision;
       try {
-        proposal = GoalProposalSchema.parse(
+        proposal = validateProposal(
+          request,
           await this.#provider.decide(request, controller.signal),
         );
-        if (!request.goalOptions.some((option) => option.id === proposal.goalOptionId)) {
-          throw new Error(`Goal option ${proposal.goalOptionId} was not offered`);
-        }
       } catch (error) {
         if (controller.signal.aborted) return { type: "cancelled" };
         const message = error instanceof Error ? error.message : String(error);
@@ -91,7 +153,7 @@ export class DecisionRequestCoordinator {
             decisionReasonCode: request.decisionReason.code,
             modelId: this.#modelId,
             status: "failed",
-            goalOptionId: null,
+            taskDecision: null,
             responseReason: failure.message,
             latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
             retryOfRequestId: request.retryOfRequestId ?? null,
@@ -139,7 +201,7 @@ export class DecisionRequestCoordinator {
           decisionReasonCode: request.decisionReason.code,
           modelId: this.#modelId,
           status: "accepted",
-          goalOptionId: proposal.goalOptionId,
+          taskDecision: proposal,
           responseReason: proposal.reason,
           latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
           retryOfRequestId: request.retryOfRequestId ?? null,

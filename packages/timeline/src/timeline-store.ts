@@ -4,7 +4,7 @@ import type {
   TechnicalFailure,
   WorldId,
   WorldSnapshot,
-  WorldSnapshotV2,
+  WorldSnapshotCurrent,
 } from "@god-sim/protocol";
 
 import type { ModelCallRecord } from "./model-call-record";
@@ -18,7 +18,7 @@ export interface RestoredTimeline {
 export interface WorldCheckpoint {
   readonly checkpointId: CheckpointId;
   readonly events: readonly DomainEvent[];
-  readonly snapshot: WorldSnapshotV2;
+  readonly snapshot: WorldSnapshotCurrent;
 }
 
 export interface TimelineStore {

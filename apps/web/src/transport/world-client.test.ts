@@ -12,6 +12,7 @@ function view(): WorldView {
     worldName: "Starter Home",
     worldVersion: 1,
     worldTick: 0,
+    gameTime: { day: 1, hour: 8, minute: 0 },
     mode: "THINKING",
     reviewRequired: true,
     pauseReason: null,

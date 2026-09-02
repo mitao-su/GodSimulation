@@ -32,6 +32,9 @@ test("rethinks at the urgent threshold and completes toilet use", async ({ page 
   await expect(release).toBeEnabled();
   await release.click();
 
+  await expect(page.getByText("Move to Toilet completed", { exact: true })).toBeVisible();
+  await expect(release).toBeEnabled();
+  await release.click();
   await expect(page.getByText("Use toilet", { exact: true }).first()).toBeVisible();
   await expect
     .poll(

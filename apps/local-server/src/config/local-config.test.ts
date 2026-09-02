@@ -78,6 +78,7 @@ describe("local configuration", () => {
     });
 
     expect(config.decisionProvider).toEqual({ kind: "fixed" });
+    expect(config.rulesDirectory).toBe(join(projectRoot, "content", "rules"));
   });
 
   it("loads the bundled entry declared by each runtime plugin", async () => {

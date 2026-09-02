@@ -5,9 +5,10 @@ import {
   CheckpointIdSchema,
   DomainEventSchema,
   PluginLockSchema,
+  TaskDecisionSchema,
   TechnicalFailureSchema,
+  WorldSnapshotCurrentSchema,
   WorldSnapshotSchema,
-  WorldSnapshotV2Schema,
   type DomainEvent,
   type TechnicalFailure,
   type WorldId,
@@ -23,6 +24,7 @@ import type {
 import type { DatabaseSchema, EventRow, SnapshotRow } from "./database-schema";
 import { migrateInitialSchema } from "./migrations/001-initial";
 import { migrateArchitectureHardening } from "./migrations/002-architecture-hardening";
+import { migrateTaskDecisions } from "./migrations/003-task-decisions";
 
 export interface SqliteTimelineStoreOptions {
   readonly filename: string;
@@ -43,7 +45,7 @@ async function ensureWorld(db: DatabaseExecutor, worldId: string): Promise<void>
 
 function parseCheckpoint(checkpointValue: WorldCheckpoint): WorldCheckpoint {
   const checkpointId = CheckpointIdSchema.parse(checkpointValue.checkpointId);
-  const snapshot = WorldSnapshotV2Schema.parse(checkpointValue.snapshot);
+  const snapshot = WorldSnapshotCurrentSchema.parse(checkpointValue.snapshot);
   const events = checkpointValue.events.map((event) => DomainEventSchema.parse(event));
   let previousSequence: number | null = null;
 
@@ -294,6 +296,10 @@ class SqliteTimelineStore implements TimelineStore {
   }
 
   async saveModelCall(record: ModelCallRecord): Promise<void> {
+    const taskDecision =
+      record.taskDecision === null
+        ? null
+        : TaskDecisionSchema.parse(record.taskDecision);
     await this.#db.transaction().execute(async (transaction) => {
       await ensureWorld(transaction, record.worldId);
       const values = {
@@ -307,7 +313,9 @@ class SqliteTimelineStore implements TimelineStore {
         decision_reason_code: record.decisionReasonCode,
         model_id: record.modelId,
         status: record.status,
-        goal_option_id: record.goalOptionId,
+        goal_option_id: null,
+        task_decision_json:
+          taskDecision === null ? null : JSON.stringify(taskDecision),
         response_reason: record.responseReason,
         latency_ms: record.latencyMs,
         retry_of_request_id: record.retryOfRequestId,
@@ -334,6 +342,7 @@ class SqliteTimelineStore implements TimelineStore {
         stored.model_id !== values.model_id ||
         stored.status !== values.status ||
         stored.goal_option_id !== values.goal_option_id ||
+        stored.task_decision_json !== values.task_decision_json ||
         stored.response_reason !== values.response_reason ||
         stored.latency_ms !== values.latency_ms ||
         stored.retry_of_request_id !== values.retry_of_request_id ||
@@ -423,5 +432,6 @@ export async function createSqliteTimelineStore(
   });
   await migrateInitialSchema(db);
   await migrateArchitectureHardening(db);
+  await migrateTaskDecisions(db);
   return new SqliteTimelineStore(db, options.checkpointFailpoint);
 }

@@ -1,9 +1,11 @@
 import {
   JsonValueSchema,
   PluginLockHashSchema,
+  SimulationRulesLockSchema,
   type AgentId,
   type Coordinate,
   type EntityId,
+  type SimulationRulesLock,
 } from "@god-sim/protocol";
 
 import { MapDefinitionSchema, type MapDefinition } from "./map-definition";
@@ -15,12 +17,13 @@ import {
   type ObjectInstance,
   type WorldState,
 } from "../world/world-state";
-import { createEmptyBodySlots } from "../execution/body-slots";
+import { createEmptyTaskTracks } from "../execution/task-tracks";
 import { createEmptyKnowledge } from "../perception/agent-knowledge";
 
 const DEFAULT_PLUGIN_LOCK_HASH = "0".repeat(64);
 
 export interface WorldLoadOptions {
+  readonly simulationRulesLock: SimulationRulesLock;
   readonly reviewRequired?: boolean;
   readonly seed?: number;
   readonly pluginLockHash?: string;
@@ -135,9 +138,16 @@ function initialPerceptionSeeds(
 export function loadWorldDefinition(
   input: unknown,
   registry: PluginRegistry,
-  options: WorldLoadOptions = {},
+  options: WorldLoadOptions,
 ): LoadedWorldDefinition {
   const map = MapDefinitionSchema.parse(input);
+  const simulationRulesLock = SimulationRulesLockSchema.parse(options.simulationRulesLock);
+  if (
+    simulationRulesLock.rules.id !== map.rules.id ||
+    simulationRulesLock.rules.version !== map.rules.version
+  ) {
+    throw new Error("Simulation rules lock does not match the world rule reference");
+  }
   const referencedPlugins = validatePluginReferences(map, registry);
 
   for (const region of map.floorRegions) assertRegionInBounds("Floor region", region, map);
@@ -232,9 +242,8 @@ export function loadWorldDefinition(
       facing: spawn.facing,
       bladder: spawn.needs.bladder,
       bladderSensation: bladderSensation(spawn.needs.bladder),
-      currentGoal: null,
-      actionPlan: null,
-      bodySlots: createEmptyBodySlots(),
+      taskTracks: createEmptyTaskTracks(),
+      activeOperations: new Map(),
       knowledge: createEmptyKnowledge(zoneId),
       memories: [],
     });
@@ -254,6 +263,7 @@ export function loadWorldDefinition(
       pluginLockHash: PluginLockHashSchema.parse(
         options.pluginLockHash ?? DEFAULT_PLUGIN_LOCK_HASH,
       ),
+      simulationRulesLock,
       history: { mode: "strict", causalFromSequence: 1 },
       map,
       agents,

@@ -9,6 +9,7 @@ import {
   type PluginDescriptor,
 } from "../../apps/simulation-worker/src/runtime/plugin-lock";
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -46,6 +47,7 @@ export async function startTestWorker(): Promise<TestWorkerHandle> {
     protocolVersion: 1,
     worldDefinition: JsonValueSchema.parse(starterHome),
     pluginLock,
+    simulationRulesLock: testSimulationRulesLock,
     reviewRequired: true,
     deterministicSeed: 1,
   });

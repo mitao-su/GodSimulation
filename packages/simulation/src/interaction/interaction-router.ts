@@ -1,8 +1,16 @@
-import type { AgentId, Coordinate, EntityId } from "@god-sim/protocol";
 import type {
-  BodySlot,
-  EffectProposal,
-  InteractionAvailability,
+  AgentId,
+  Coordinate,
+  EntityId,
+  JsonObject,
+  OperationDuration,
+  TaskTrack,
+} from "@god-sim/protocol";
+import {
+  InteractionContextSchema,
+  type EffectProposal,
+  type InteractionAvailability,
+  type InteractionDefinition,
 } from "@god-sim/plugin-sdk";
 
 import type { PluginRegistry } from "../world/plugin-registry";
@@ -29,21 +37,34 @@ export type ObjectQuery =
 export interface InteractionQueryView {
   readonly id: string;
   readonly displayName: string;
-  readonly durationTicks: number;
-  readonly slots: readonly BodySlot[];
+  readonly duration: OperationDuration;
+  readonly taskSlots: readonly TaskTrack[];
   readonly availability: InteractionAvailability;
 }
 
 export type ObjectQueryResult =
-  | { readonly type: "movement" | "visibility"; readonly blocked: boolean; readonly objectIds: readonly EntityId[] }
+  | {
+      readonly type: "movement" | "visibility";
+      readonly blocked: boolean;
+      readonly objectIds: readonly EntityId[];
+    }
   | { readonly type: "occupancy"; readonly occupiedBy: string | null }
-  | { readonly type: "available_interactions"; readonly interactions: readonly InteractionQueryView[] };
+  | {
+      readonly type: "available_interactions";
+      readonly interactions: readonly InteractionQueryView[];
+    };
 
-function getObjectAndDefinition(world: WorldState, registry: PluginRegistry, entityId: EntityId) {
+function getObjectAndDefinition(
+  world: WorldState,
+  registry: PluginRegistry,
+  entityId: EntityId,
+) {
   const object = world.objects.get(entityId);
   if (!object) throw new Error(`Unknown object instance: ${entityId}`);
   const registered = registry.getObject(object.definitionId);
-  if (!registered) throw new Error(`Unknown object definition: ${object.definitionId}`);
+  if (!registered) {
+    throw new Error(`Unknown object definition: ${object.definitionId}`);
+  }
   const state = registered.definition.stateSchema.parse(object.state);
   return { object, definition: registered.definition, state };
 }
@@ -58,9 +79,9 @@ function interactionContext(
   if (!object) throw new Error(`Unknown object instance: ${entityId}`);
   const agent = world.agents.get(agentId);
   if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
-  return {
+  return InteractionContextSchema.parse({
     worldTick: world.tick,
-    trigger: "active_command" as const,
+    trigger: "active_command",
     object: { entityId, version: object.version },
     actor: {
       agentId,
@@ -68,7 +89,7 @@ function interactionContext(
       needs: { bladder: agent.bladder },
     },
     distance,
-  };
+  });
 }
 
 export function queryObject(
@@ -80,7 +101,11 @@ export function queryObject(
   switch (query.type) {
     case "movement": {
       const objects = spatial.blockingObjectsAt(query.position, query.agentId);
-      return { type: "movement", blocked: objects.length > 0, objectIds: objects.map((object) => object.id) };
+      return {
+        type: "movement",
+        blocked: objects.length > 0,
+        objectIds: objects.map((object) => object.id),
+      };
     }
     case "visibility": {
       const objects = spatial.occludingObjectsAt(query.position, query.agentId);
@@ -91,9 +116,16 @@ export function queryObject(
       };
     }
     case "occupancy":
-      return { type: "occupancy", occupiedBy: spatial.occupant(query.entityId) };
+      return {
+        type: "occupancy",
+        occupiedBy: spatial.occupant(query.entityId),
+      };
     case "available_interactions": {
-      const { definition, state } = getObjectAndDefinition(world, registry, query.entityId);
+      const { definition, state } = getObjectAndDefinition(
+        world,
+        registry,
+        query.entityId,
+      );
       const context = interactionContext(
         world,
         query.entityId,
@@ -102,13 +134,16 @@ export function queryObject(
       );
       return {
         type: "available_interactions",
-        interactions: definition.interactions.map((interaction) => ({
-          id: interaction.id,
-          displayName: interaction.displayName,
-          durationTicks: interaction.durationTicks,
-          slots: interaction.slots,
-          availability: interaction.canStart(state, context),
-        })),
+        interactions: definition.interactions.map((interaction) => {
+          const parameters = interaction.parametersSchema.parse({});
+          return {
+            id: interaction.id,
+            displayName: interaction.displayName,
+            duration: interaction.resolveDuration(state, context, parameters),
+            taskSlots: interaction.taskSlots,
+            availability: interaction.canStart(state, context, parameters),
+          };
+        }),
       };
     }
   }
@@ -118,17 +153,23 @@ export interface InteractionRequest {
   readonly agentId: AgentId;
   readonly entityId: EntityId;
   readonly interactionId: string;
-  readonly phase: "start" | "complete";
+  readonly parameters: JsonObject;
+  readonly phase: "start" | "complete" | "cancel" | "fail";
+  readonly failureCode?: string;
 }
 
 export type InteractionProposalResult =
   | {
       readonly accepted: true;
       readonly proposal: EffectProposal;
-      readonly durationTicks: number;
-      readonly slots: readonly BodySlot[];
+      readonly duration: OperationDuration;
+      readonly taskSlots: readonly TaskTrack[];
     }
-  | { readonly accepted: false; readonly reasonCode: string; readonly summary: string };
+  | {
+      readonly accepted: false;
+      readonly reasonCode: string;
+      readonly summary: string;
+    };
 
 function manhattan(a: Coordinate, b: Coordinate): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -139,7 +180,11 @@ export function proposeInteraction(
   registry: PluginRegistry,
   request: InteractionRequest,
 ): InteractionProposalResult {
-  const { object, definition, state } = getObjectAndDefinition(world, registry, request.entityId);
+  const { object, definition, state } = getObjectAndDefinition(
+    world,
+    registry,
+    request.entityId,
+  );
   const agent = world.agents.get(request.agentId);
   if (!agent) throw new Error(`Unknown agent instance: ${request.agentId}`);
   const spatial = new SpatialIndex(world, registry);
@@ -158,7 +203,7 @@ export function proposeInteraction(
 
   const interaction = definition.interactions.find(
     (candidate) => candidate.id === request.interactionId,
-  );
+  ) as InteractionDefinition<typeof state, JsonObject> | undefined;
   if (!interaction) {
     return {
       accepted: false,
@@ -167,17 +212,43 @@ export function proposeInteraction(
     };
   }
 
-  const context = interactionContext(world, object.id, agent.id, 1);
-  const availability = interaction.canStart(state, context);
-  if (!availability.available) return { accepted: false, ...availability };
+  const context = interactionContext(world, object.id, agent.id, 0);
+  const parameters = interaction.parametersSchema.parse(request.parameters);
+  if (request.phase === "start") {
+    const availability = interaction.canStart(state, context, parameters);
+    if (!availability.available) return { accepted: false, ...availability };
+  }
+
+  let proposal: EffectProposal;
+  switch (request.phase) {
+    case "start":
+      proposal = interaction.start?.(state, context, parameters) ?? {
+        effects: [],
+      };
+      break;
+    case "complete":
+      proposal = interaction.complete(state, context, parameters);
+      break;
+    case "cancel":
+      proposal = interaction.cancel(state, context, parameters);
+      break;
+    case "fail":
+      if (!request.failureCode) {
+        throw new Error("An interaction failure proposal requires a failure code");
+      }
+      proposal = interaction.fail(
+        state,
+        context,
+        parameters,
+        request.failureCode,
+      );
+      break;
+  }
 
   return {
     accepted: true,
-    proposal:
-      request.phase === "start"
-        ? (interaction.start?.(state, context) ?? { effects: [] })
-        : interaction.complete(state, context),
-    durationTicks: interaction.durationTicks,
-    slots: interaction.slots,
+    proposal,
+    duration: interaction.resolveDuration(state, context, parameters),
+    taskSlots: interaction.taskSlots,
   };
 }

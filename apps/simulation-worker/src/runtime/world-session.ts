@@ -4,6 +4,7 @@ import {
   type CheckpointId,
   type HostToWorkerMessage,
   type PluginLock,
+  type SimulationRulesLock,
   type TechnicalFailure,
   type WorkerToHostMessage,
   type WorldSnapshot,
@@ -22,6 +23,7 @@ export interface WorldSessionOptions {
   readonly worldDefinition: unknown;
   readonly plugins: readonly GamePlugin[];
   readonly pluginLock: PluginLock;
+  readonly simulationRulesLock: SimulationRulesLock;
   readonly reviewRequired: boolean;
   readonly deterministicSeed: number;
   readonly restoredSnapshot?: WorldSnapshot;
@@ -65,10 +67,12 @@ export class WorldSession {
           snapshot: options.restoredSnapshot,
           worldDefinition: map,
           plugins: options.plugins,
+          simulationRulesLock: options.simulationRulesLock,
         })
       : createSimulation({
           worldDefinition: map,
           plugins: options.plugins,
+          simulationRulesLock: options.simulationRulesLock,
           reviewRequired: options.reviewRequired,
           seed: options.deterministicSeed,
           pluginLockHash: options.pluginLock.hash,
@@ -137,45 +141,26 @@ export class WorldSession {
       }
       case "decision_result": {
         const previousMode = this.#engine.getView().mode;
-        const input = this.#findStoredInput(message.result.requestId);
-        const option = input?.goalOptions.find(
-          (candidate) => candidate.id === message.result.proposal.goalOptionId,
-        );
-        const buffered =
-          input && option
-            ? this.#engine.acceptDecision({
-                identity: DecisionIdentitySchema.parse({
-                  requestId: message.result.requestId,
-                  agentId: message.result.agentId,
-                  worldId: message.result.worldId,
-                  worldVersion: message.result.worldVersion,
-                  decisionCycleId: message.result.decisionCycleId,
-                  schemaVersion: message.result.schemaVersion,
-                  pluginLockHash: message.result.pluginLockHash,
-                  ...(message.result.retryOfRequestId === undefined
-                    ? {}
-                    : { retryOfRequestId: message.result.retryOfRequestId }),
-                }),
-                goalOptionId: message.result.proposal.goalOptionId,
-                goal: option.goal,
-                modelReason: message.result.proposal.reason,
-              })
-            : { accepted: false, reason: "Decision result does not match a pending option" };
+        const identity = DecisionIdentitySchema.parse({
+          requestId: message.result.requestId,
+          agentId: message.result.agentId,
+          worldId: message.result.worldId,
+          worldVersion: message.result.worldVersion,
+          decisionCycleId: message.result.decisionCycleId,
+          schemaVersion: message.result.schemaVersion,
+          pluginLockHash: message.result.pluginLockHash,
+          ...(message.result.retryOfRequestId === undefined
+            ? {}
+            : { retryOfRequestId: message.result.retryOfRequestId }),
+        });
+        const buffered = this.#engine.acceptDecision({
+          identity,
+          proposal: message.result.proposal,
+        });
         if (!buffered.accepted) {
           this.#emit({
             type: "decision_rejected",
-            result: DecisionIdentitySchema.parse({
-              requestId: message.result.requestId,
-              agentId: message.result.agentId,
-              worldId: message.result.worldId,
-              worldVersion: message.result.worldVersion,
-              decisionCycleId: message.result.decisionCycleId,
-              schemaVersion: message.result.schemaVersion,
-              pluginLockHash: message.result.pluginLockHash,
-              ...(message.result.retryOfRequestId === undefined
-                ? {}
-                : { retryOfRequestId: message.result.retryOfRequestId }),
-            }),
+            result: identity,
             reason: buffered.reason,
           });
           return { shutdownReady: false };
@@ -202,12 +187,6 @@ export class WorldSession {
       case "shutdown":
         return { shutdownReady: this.#requestShutdown() };
     }
-  }
-
-  #findStoredInput(requestId: string) {
-    return this.#engine
-      .getPendingDecisionInputs()
-      .find((input) => input.requestId === requestId);
   }
 
   #publishAfterStep(previousMode: ReturnType<SimulationEngine["getView"]>["mode"]): void {

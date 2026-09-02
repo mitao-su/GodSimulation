@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { simulationTestWorld, testPlugin } from "../testing/simulation-test-fixtures";
+import {
+  simulationTestWorld,
+  testPlugin,
+  testSimulationRulesLock,
+} from "../testing/simulation-test-fixtures";
 import { assertSnapshotCausality } from "./snapshot-causality";
 import { createSimulation } from "./simulation-engine";
 
@@ -11,9 +15,10 @@ function strictSnapshot() {
     reviewRequired: true,
     seed: 1,
     pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
   }).createSnapshot();
-  if (snapshot.schemaVersion !== 2) {
-    throw new Error("Expected a version-two snapshot fixture");
+  if (snapshot.schemaVersion !== 3) {
+    throw new Error("Expected a version-three snapshot fixture");
   }
   return snapshot;
 }

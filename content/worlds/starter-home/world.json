@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "id": "starter-world",
   "name": "Starter Home",
+  "rules": { "id": "default", "version": 1 },
   "tileSize": 16,
   "width": 18,
   "height": 12,

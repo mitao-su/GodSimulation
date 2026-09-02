@@ -7,13 +7,18 @@ import {
   OpenRouterDecisionProvider,
   type DecisionProvider,
 } from "@god-sim/model-gateway";
-import { JsonValueSchema, WorldIdSchema } from "@god-sim/protocol";
+import {
+  JsonValueSchema,
+  WorldIdSchema,
+  WorldRulesReferenceSchema,
+} from "@god-sim/protocol";
 import { createSqliteTimelineStore } from "@god-sim/sqlite-store";
 
 import { loadLocalConfig, type LocalConfig } from "../config/local-config";
 import { createDevelopmentLogger } from "../logging/development-logger";
 import { PersistenceWriter } from "../persistence/persistence-writer";
 import { buildExpectedPluginLock } from "../plugins/expected-plugin-lock";
+import { loadSimulationRules } from "../rules/load-simulation-rules";
 import type { SessionClientPort } from "../sessions/session-coordinator";
 import { SessionCoordinator } from "../sessions/session-coordinator";
 import { ProcessWorkerSupervisor } from "../sessions/worker-supervisor";
@@ -58,7 +63,16 @@ function configuredDecisionProvider(config: LocalConfig): DecisionProvider {
   if (config.decisionProvider.kind === "openrouter") {
     return new OpenRouterDecisionProvider(config.decisionProvider.model);
   }
-  return new FixedDecisionProvider({ defaultGoalKind: "wait" });
+  return new FixedDecisionProvider({
+    defaultDecision: {
+      head: { kind: "continue" },
+      body: {
+        kind: "operation",
+        operationId: "core.wait" as never,
+        arguments: { durationTicks: 10 },
+      },
+    },
+  });
 }
 
 async function staticRoot(config: LocalConfig, enabled: boolean): Promise<string | undefined> {
@@ -88,6 +102,18 @@ export async function startLocalServer(
     buildExpectedPluginLock(config.pluginDescriptors),
   ]);
   const worldDefinition = JsonValueSchema.parse(JSON.parse(worldText) as unknown);
+  const rulesReference = WorldRulesReferenceSchema.parse(
+    typeof worldDefinition === "object" &&
+      worldDefinition !== null &&
+      !Array.isArray(worldDefinition) &&
+      "rules" in worldDefinition
+      ? worldDefinition.rules
+      : undefined,
+  );
+  const simulationRulesLock = await loadSimulationRules({
+    rulesDirectory: config.rulesDirectory,
+    reference: rulesReference,
+  });
   const worldId = WorldIdSchema.parse(
     typeof worldDefinition === "object" &&
       worldDefinition !== null &&
@@ -144,6 +170,7 @@ export async function startLocalServer(
       protocolVersion: 1,
       worldDefinition,
       pluginLock,
+      simulationRulesLock,
       reviewRequired: config.reviewRequired,
       deterministicSeed: config.deterministicSeed,
       ...(restoredTimeline.snapshot === null

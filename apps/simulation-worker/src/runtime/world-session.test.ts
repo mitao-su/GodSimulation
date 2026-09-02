@@ -10,6 +10,7 @@ import agentsPlugin from "@god-sim/starter-agents";
 import { createSimulation } from "@god-sim/simulation";
 
 import starterHome from "../../../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../testing/simulation-rules-test-fixture";
 import { WorldSession } from "./world-session";
 
 const pluginLock = PluginLockSchema.parse({
@@ -31,6 +32,7 @@ describe("WorldSession restoration", () => {
       worldDefinition: starterHome,
       plugins: [spatialPlugin, homePlugin, agentsPlugin],
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       emit: (message) => emitted.push(message),
@@ -59,6 +61,7 @@ describe("WorldSession restoration", () => {
       worldDefinition: starterHome,
       plugins: [spatialPlugin, homePlugin, agentsPlugin],
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       emit: (message) => emitted.push(message),
@@ -71,7 +74,10 @@ describe("WorldSession restoration", () => {
         message.type === "decision_requested",
     );
     for (const { request } of requests) {
-      const wait = request.goalOptions.find((option) => option.goal.kind === "wait")!;
+      const wait = request.taskOptions.find(
+        (option) =>
+          option.kind === "operation" && option.operationId === "core.wait",
+      )!;
       session.handle({
         type: "decision_result",
         result: {
@@ -83,8 +89,13 @@ describe("WorldSession restoration", () => {
           schemaVersion: request.schemaVersion,
           pluginLockHash: request.pluginLockHash,
           proposal: {
-            schemaVersion: 1,
-            goalOptionId: wait.id,
+            schemaVersion: 2,
+            head: { kind: "continue" },
+            body: {
+              kind: "replace",
+              taskOptionId: wait.id,
+              arguments: { durationTicks: 10 },
+            },
             reason: "Wait",
           },
         },
@@ -121,6 +132,7 @@ describe("WorldSession restoration", () => {
       worldDefinition: starterHome,
       plugins: [spatialPlugin, homePlugin, agentsPlugin],
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       emit: (message) => emitted.push(message),
@@ -152,12 +164,14 @@ describe("WorldSession restoration", () => {
       reviewRequired: true,
       seed: 1,
       pluginLockHash: pluginLock.hash,
+      simulationRulesLock: testSimulationRulesLock,
     });
     const emitted: WorkerToHostMessage[] = [];
     const session = new WorldSession({
       worldDefinition: starterHome,
       plugins,
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       restoredSnapshot: engine.createSnapshot(),
@@ -185,6 +199,7 @@ describe("WorldSession restoration", () => {
       reviewRequired: true,
       seed: 1,
       pluginLockHash: pluginLock.hash,
+      simulationRulesLock: testSimulationRulesLock,
     });
     const inputs = engine.getPendingDecisionInputs();
     const alice = inputs.find((input) => input.agentId === "alice")!;
@@ -203,6 +218,7 @@ describe("WorldSession restoration", () => {
       worldDefinition: starterHome,
       plugins,
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       restoredSnapshot: engine.createSnapshot(),

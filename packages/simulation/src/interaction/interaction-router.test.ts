@@ -30,7 +30,14 @@ describe("queryObject", () => {
 
     expect(result).toMatchObject({
       type: "available_interactions",
-      interactions: [{ id: "use", availability: { available: true } }],
+      interactions: [
+        {
+          id: "use",
+          taskSlots: ["BODY"],
+          duration: { kind: "fixed", totalTicks: 10 },
+          availability: { available: true },
+        },
+      ],
     });
   });
 
@@ -40,6 +47,7 @@ describe("queryObject", () => {
       agentId: "bob" as never,
       entityId: "fridge-1" as never,
       interactionId: "use",
+      parameters: {},
       phase: "start",
     });
 
@@ -55,6 +63,8 @@ describe("queryObject", () => {
           },
         ],
       },
+      duration: { kind: "fixed", totalTicks: 10 },
+      taskSlots: ["BODY"],
     });
     expect(world.objects.get("fridge-1" as never)?.state).toEqual({ holder: null });
   });

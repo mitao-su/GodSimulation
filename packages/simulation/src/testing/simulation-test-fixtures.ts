@@ -6,6 +6,7 @@ import {
   type AgentDefinition,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
+import { SimulationRulesLockSchema } from "@god-sim/protocol";
 
 import { loadWorldDefinition } from "../map/map-loader";
 import { createPluginRegistry } from "../world/plugin-registry";
@@ -58,8 +59,13 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       id: "use",
       displayName: "Use fridge",
       trigger: "active_command",
-      durationTicks: 10,
-      slots: ["HANDS", "BODY"],
+      taskSlots: ["BODY"],
+      parametersSchema: z.object({}).strict(),
+      resolveDuration: () => ({ kind: "fixed", totalTicks: 10 }),
+      eventIgnore: [],
+      publicBehavior: { kind: "visible", label: "using the fridge" },
+      domainFailures: [{ code: "occupied", summary: "Fridge occupied" }],
+      resultSchema: z.object({}).strict(),
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
@@ -84,6 +90,33 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
           },
         ],
       }),
+      fail: (state, context) =>
+        state.holder === context.actor.agentId
+          ? {
+              effects: [
+                {
+                  type: "release_occupancy",
+                  entityId: context.object.entityId,
+                  agentId: context.actor.agentId,
+                  expectedObjectVersion: context.object.version,
+                },
+              ],
+            }
+          : { effects: [] },
+      cancel: (state, context) =>
+        state.holder === context.actor.agentId
+          ? {
+              effects: [
+                {
+                  type: "release_occupancy",
+                  entityId: context.object.entityId,
+                  agentId: context.actor.agentId,
+                  expectedObjectVersion: context.object.version,
+                },
+              ],
+            }
+          : { effects: [] },
+      fuse: () => null,
     },
   ],
   observe: (state, context) => ({
@@ -139,12 +172,59 @@ export const testPlugin = definePlugin(
 
 export const testPluginRegistry = createPluginRegistry([testPlugin]);
 
+export const testSimulationRulesLock = SimulationRulesLockSchema.parse({
+  hash: "c".repeat(64),
+  rules: {
+    schemaVersion: 1,
+    id: "default",
+    version: 1,
+    time: { secondsPerGameTick: 6, epoch: { day: 1, hour: 8, minute: 0 } },
+    context: { attentionBudgetTokens: 200_000, technicalHardLimitTokens: 200_000 },
+    fatigue: {
+      timeWeight: 0.6,
+      tokenWeight: 0.4,
+      forcedSleepThreshold: 0.6,
+      timePressureFullAtTicks: 43_200,
+    },
+    inventory: { capacityUnits: 9 },
+    operations: {
+      move: { ticksPerCell: 2 },
+      wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
+      observe: { durationTicks: 1 },
+    },
+    memory: {
+      importance: {
+        critical: { initialStrength: 1, halfLifeDays: 90 },
+        high: { initialStrength: 1, halfLifeDays: 30 },
+        normal: { initialStrength: 1, halfLifeDays: 7 },
+        low: { initialStrength: 1, halfLifeDays: 2 },
+      },
+      deletionThreshold: 0.1,
+      recall: {
+        maxReturnTokensPerOperation: 8_000,
+        rankingWeights: {
+          semanticSimilarity: 0.55,
+          keywordMatch: 0.25,
+          currentStrength: 0.2,
+        },
+      },
+    },
+    sound: {
+      speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
+      attenuationPerTile: 0.25,
+      fullContentThreshold: 1,
+      unclearContentThreshold: 0.25,
+    },
+  },
+});
+
 export function simulationTestWorld() {
   return loadWorldDefinition(
     {
       schemaVersion: 1,
       id: "test-world",
       name: "Test World",
+      rules: { id: "default", version: 1 },
       tileSize: 16,
       width: 6,
       height: 5,
@@ -194,6 +274,6 @@ export function simulationTestWorld() {
       ],
     },
     testPluginRegistry,
-    { seed: 1 },
+    { seed: 1, simulationRulesLock: testSimulationRulesLock },
   ).world;
 }

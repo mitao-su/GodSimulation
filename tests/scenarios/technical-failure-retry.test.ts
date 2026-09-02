@@ -6,9 +6,10 @@ import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 
 import {
-  adoptGoal,
+  adoptTask,
   selectWait,
   starterEngine,
 } from "./fixtures/fixed-decision-provider";
@@ -57,8 +58,8 @@ describe("technical failure retry", () => {
 
   it("restores a running world instead of forcing it into thinking", () => {
     const engine = starterEngine({ reviewRequired: false });
-    adoptGoal(engine, "alice" as never, selectWait);
-    adoptGoal(engine, "bob" as never, selectWait);
+    adoptTask(engine, "alice" as never, selectWait);
+    adoptTask(engine, "bob" as never, selectWait);
     engine.tick();
     expect(engine.getView().mode).toBe("RUNNING");
     const failureId = blockForRetry(engine);
@@ -73,8 +74,8 @@ describe("technical failure retry", () => {
 
   it("restores and retries a snapshot blocked while the world was running", () => {
     const engine = starterEngine({ reviewRequired: false });
-    adoptGoal(engine, "alice" as never, selectWait);
-    adoptGoal(engine, "bob" as never, selectWait);
+    adoptTask(engine, "alice" as never, selectWait);
+    adoptTask(engine, "bob" as never, selectWait);
     engine.tick();
     const failureId = blockForRetry(engine);
 
@@ -82,6 +83,7 @@ describe("technical failure retry", () => {
       snapshot: engine.createSnapshot(),
       worldDefinition: starterHome,
       plugins: [spatialPlugin, homePlugin, agentsPlugin],
+      simulationRulesLock: testSimulationRulesLock,
     });
     retry(restored, failureId);
 
@@ -93,8 +95,8 @@ describe("technical failure retry", () => {
 
   it("does not release a blocked ready world until persistence recovery succeeds", () => {
     const engine = starterEngine({ reviewRequired: true });
-    adoptGoal(engine, "alice" as never, selectWait);
-    adoptGoal(engine, "bob" as never, selectWait);
+    adoptTask(engine, "alice" as never, selectWait);
+    adoptTask(engine, "bob" as never, selectWait);
     engine.tick();
     expect(engine.getView().mode).toBe("READY_FOR_RELEASE");
     const failureId = blockForRetry(engine);

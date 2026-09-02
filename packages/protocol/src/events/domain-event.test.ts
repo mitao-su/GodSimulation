@@ -93,4 +93,56 @@ describe("domain events", () => {
       entityId: "passage-1",
     });
   });
+
+  it("records one strict lifecycle for an operation call", () => {
+    const started = DomainEventSchema.parse({
+      schemaVersion: 1,
+      eventId: "event:starter-world:9",
+      type: "operation_started",
+      worldId: "starter-world",
+      worldVersion: 4,
+      worldTick: 2,
+      sequence: 9,
+      parentSequence: 8,
+      causationId: "release:cycle-2",
+      correlationId: "cycle-2",
+      agentId: "alice",
+      callId: "operation-call:cycle-2:alice:0",
+      operationId: "core.wait",
+      taskSlots: ["HEAD", "BODY"],
+      label: "Sleep",
+    });
+    const terminated = DomainEventSchema.parse({
+      schemaVersion: 1,
+      eventId: "event:starter-world:10",
+      type: "operation_terminated",
+      worldId: "starter-world",
+      worldVersion: 5,
+      worldTick: 12,
+      sequence: 10,
+      parentSequence: 9,
+      causationId: "operation-call:cycle-2:alice:0",
+      correlationId: "operation-call:cycle-2:alice:0",
+      agentId: "alice",
+      callId: "operation-call:cycle-2:alice:0",
+      operationId: "core.wait",
+      outcome: "completed",
+      reasonCode: "operation_completed",
+    });
+
+    expect(started).toMatchObject({
+      type: "operation_started",
+      taskSlots: ["HEAD", "BODY"],
+    });
+    expect(terminated).toMatchObject({
+      type: "operation_terminated",
+      outcome: "completed",
+    });
+    expect(
+      DomainEventSchema.safeParse({
+        ...started,
+        taskSlots: ["BODY", "HEAD"],
+      }).success,
+    ).toBe(false);
+  });
 });

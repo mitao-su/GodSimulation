@@ -8,15 +8,44 @@ describe("detectPlanConflict", () => {
     const base = simulationTestWorld();
     const alice = {
       ...base.agents.get("alice" as never)!,
-      currentGoal: {
-        id: "goal:alice:fixture",
-        label: "Use fixture",
-        goal: {
-          kind: "use_object" as const,
-          targetEntityId: "fridge-1" as never,
-          interactionId: "use",
+      taskTracks: {
+        HEAD: { kind: "empty" as const },
+        BODY: {
+          kind: "operation" as const,
+          callId: "operation-call:alice:fixture" as never,
         },
       },
+      activeOperations: new Map([
+        [
+          "operation-call:alice:fixture" as never,
+          {
+            callId: "operation-call:alice:fixture" as never,
+            operationId: "object.test.fridge.use" as never,
+            taskOptionId: "task-option:alice:fixture" as never,
+            taskSlots: ["BODY" as const],
+            arguments: { targetEntityId: "fridge-1", parameters: {} },
+            duration: { kind: "fixed" as const, totalTicks: 10 },
+            startedAtTick: 0,
+            progressTicks: 2,
+            plan: {
+              currentActionIndex: 0,
+              actions: [
+                {
+                  id: "operation-call:alice:fixture:action:0",
+                  kind: "interact_object" as const,
+                  purpose: "direct" as const,
+                  targetEntityId: "fridge-1" as never,
+                  interactionId: "use",
+                  durationTicks: 10,
+                  progressTicks: 2,
+                  started: true,
+                },
+              ],
+            },
+            label: "Use fixture",
+          },
+        ],
+      ]),
     };
 
     const conflict = detectPlanConflict(alice, [

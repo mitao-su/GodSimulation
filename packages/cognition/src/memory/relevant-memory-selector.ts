@@ -6,8 +6,8 @@ function terms(input: DecisionPromptInput): ReadonlySet<string> {
   const text = [
     input.decisionReason.code,
     input.decisionReason.summary,
-    input.currentGoal?.label ?? "",
-    ...input.goalOptions.map((option) => option.label),
+    ...input.activeTasks.operations.map((operation) => operation.label),
+    ...input.taskOptions.map((option) => option.label),
     ...input.perception.visibleEntities.map((entity) => entity.displayName),
   ]
     .join(" ")

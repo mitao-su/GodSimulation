@@ -1,7 +1,8 @@
 import {
   type AgentId,
   type DecisionIdentity,
-  type GoalOption,
+  type JsonObject,
+  type TaskOption,
   type WorldCommand,
 } from "@god-sim/protocol";
 import {
@@ -14,6 +15,9 @@ import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../../fixtures/simulation-rules";
+
+export type TaskOptionSelector = (option: TaskOption) => boolean;
 
 export function starterEngine(
   options: {
@@ -31,7 +35,9 @@ export function starterEngine(
           : spawn.agentId === "bob"
             ? options.bobBladder
             : undefined;
-      return bladder === undefined ? spawn : { ...spawn, needs: { ...spawn.needs, bladder } };
+      return bladder === undefined
+        ? spawn
+        : { ...spawn, needs: { ...spawn.needs, bladder } };
     }),
   };
   return createSimulation({
@@ -39,13 +45,15 @@ export function starterEngine(
     plugins: [spatialPlugin, homePlugin, agentsPlugin],
     reviewRequired: options.reviewRequired ?? true,
     seed: 1,
+    simulationRulesLock: testSimulationRulesLock,
   });
 }
 
 interface SnapshotAgent {
   readonly id: string;
   readonly bladder: number;
-  readonly actionPlan: unknown;
+  readonly taskTracks: unknown;
+  readonly activeOperations: readonly unknown[];
 }
 
 interface SnapshotObject {
@@ -63,14 +71,24 @@ function snapshotState(engine: SimulationEngine): {
   };
 }
 
-export function snapshotAgent(engine: SimulationEngine, agentId: string): SnapshotAgent {
-  const agent = snapshotState(engine).agents.find((candidate) => candidate.id === agentId);
+export function snapshotAgent(
+  engine: SimulationEngine,
+  agentId: string,
+): SnapshotAgent {
+  const agent = snapshotState(engine).agents.find(
+    (candidate) => candidate.id === agentId,
+  );
   if (!agent) throw new Error(`No snapshot agent ${agentId}`);
   return agent;
 }
 
-export function snapshotObject(engine: SimulationEngine, entityId: string): SnapshotObject {
-  const object = snapshotState(engine).objects.find((candidate) => candidate.id === entityId);
+export function snapshotObject(
+  engine: SimulationEngine,
+  entityId: string,
+): SnapshotObject {
+  const object = snapshotState(engine).objects.find(
+    (candidate) => candidate.id === entityId,
+  );
   if (!object) throw new Error(`No snapshot object ${entityId}`);
   return object;
 }
@@ -92,35 +110,73 @@ function identityFromInput(
   };
 }
 
-export function adoptGoal(
+function defaultArguments(option: TaskOption): JsonObject {
+  return option.kind === "operation" && option.operationId === "core.wait"
+    ? { durationTicks: 600 }
+    : {};
+}
+
+export function adoptTask(
   engine: SimulationEngine,
   agentId: AgentId,
-  select: (option: GoalOption) => boolean,
+  select: TaskOptionSelector,
+  argumentsValue?: JsonObject,
 ): AdoptedDecision {
   const input = engine
     .getPendingDecisionInputs()
     .find((candidate) => candidate.agentId === agentId);
   if (!input) throw new Error(`No pending decision for ${agentId}`);
-  const option = input.goalOptions.find(select);
-  if (!option) throw new Error(`No matching goal option for ${agentId}`);
+  const option = input.taskOptions.find(select);
+  if (!option) throw new Error(`No matching task option for ${agentId}`);
+  const selection = {
+    kind: "replace" as const,
+    taskOptionId: option.id,
+    arguments: argumentsValue ?? defaultArguments(option),
+  };
   const adopted: AdoptedDecision = {
     identity: identityFromInput(input),
-    goalOptionId: option.id,
-    goal: option.goal,
-    modelReason: "Fixed scenario choice",
+    proposal: {
+      schemaVersion: 2,
+      head: option.taskSlots.includes("HEAD")
+        ? selection
+        : { kind: "continue" },
+      body: option.taskSlots.includes("BODY")
+        ? selection
+        : { kind: "continue" },
+      reason: `Select ${option.label}`,
+    },
   };
   const buffered = engine.acceptDecision(adopted);
   if (!buffered.accepted) throw new Error(buffered.reason);
   return adopted;
 }
 
-export function selectUseObject(entityId: string): (option: GoalOption) => boolean {
-  return (option) =>
-    option.goal.kind === "use_object" && option.goal.targetEntityId === entityId;
+function targets(option: TaskOption, entityId: string): boolean {
+  return (
+    option.kind === "operation" &&
+    option.fixedArguments.targetEntityId === entityId
+  );
 }
 
-export function selectWait(option: GoalOption): boolean {
-  return option.goal.kind === "wait";
+export function selectMoveTo(entityId: string): TaskOptionSelector {
+  return (option) =>
+    option.kind === "operation" &&
+    option.operationId === "core.move" &&
+    targets(option, entityId);
+}
+
+export function selectInteraction(
+  entityId: string,
+  interactionId = "use",
+): TaskOptionSelector {
+  return (option) =>
+    option.kind === "operation" &&
+    option.operationId.endsWith(`.${interactionId}`) &&
+    targets(option, entityId);
+}
+
+export function selectWait(option: TaskOption): boolean {
+  return option.kind === "operation" && option.operationId === "core.wait";
 }
 
 export function releaseCommand(engine: SimulationEngine): WorldCommand {

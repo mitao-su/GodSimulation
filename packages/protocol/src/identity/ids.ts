@@ -36,8 +36,23 @@ export type DecisionCycleId = z.infer<typeof DecisionCycleIdSchema>;
 export const GoalOptionIdSchema = StableIdSchema.brand<"GoalOptionId">();
 export type GoalOptionId = z.infer<typeof GoalOptionIdSchema>;
 
+export const TaskOptionIdSchema = StableIdSchema.brand<"TaskOptionId">();
+export type TaskOptionId = z.infer<typeof TaskOptionIdSchema>;
+
+export const OperationIdSchema = StableIdSchema.brand<"OperationId">();
+export type OperationId = z.infer<typeof OperationIdSchema>;
+
+export const OperationCallIdSchema = StableIdSchema.brand<"OperationCallId">();
+export type OperationCallId = z.infer<typeof OperationCallIdSchema>;
+
 export const CausalIdSchema = StableIdSchema.brand<"CausalId">();
 export type CausalId = z.infer<typeof CausalIdSchema>;
 
 export const PluginLockHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export type PluginLockHash = z.infer<typeof PluginLockHashSchema>;
+
+export const SimulationRulesIdSchema = StableIdSchema.brand<"SimulationRulesId">();
+export type SimulationRulesId = z.infer<typeof SimulationRulesIdSchema>;
+
+export const SimulationRulesHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export type SimulationRulesHash = z.infer<typeof SimulationRulesHashSchema>;

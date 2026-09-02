@@ -1,10 +1,10 @@
 export type PromptSectionPlacement =
   | "persona"
   | "body_state"
-  | "current_goal"
+  | "active_tasks"
   | "memory"
   | "perception"
-  | "goal_options"
+  | "task_options"
   | "decision_reason";
 
 export interface PromptContributor {

@@ -31,6 +31,12 @@ function commandId(): string {
   return `command:web:${crypto.randomUUID()}`;
 }
 
+function formatGameTime(gameTime: WorldView["gameTime"]): string {
+  const hour = String(gameTime.hour).padStart(2, "0");
+  const minute = String(gameTime.minute).padStart(2, "0");
+  return `第 ${gameTime.day} 天 ${hour}:${minute}`;
+}
+
 function commandEnvelope(view: WorldView) {
   return {
     schemaVersion: 1 as const,
@@ -111,7 +117,7 @@ export function App({ client }: AppProps) {
         </div>
         <div className="header-metric">
           <Clock3 aria-hidden="true" size={16} />
-          <span>世界时间</span><strong>{view.worldTick}</strong>
+          <span>世界时间</span><strong>{formatGameTime(view.gameTime)}</strong>
         </div>
         <div className="header-metric">
           <Database aria-hidden="true" size={16} />

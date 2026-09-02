@@ -18,6 +18,8 @@ const eventLabels: Readonly<Record<DomainEvent["type"], string>> = {
   object_state_changed: "家具状态变化",
   agent_need_changed: "角色需求变化",
   action_failed: "动作执行失败",
+  operation_started: "任务已开始",
+  operation_terminated: "任务已结束",
   observation_remembered: "角色形成记忆",
   perception_recorded: "角色记录感知",
   perceptible_result_emitted: "角色感知到结果",
