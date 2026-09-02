@@ -8,6 +8,7 @@ import type {
   Facing,
   JsonValue,
   OperationCallId,
+  OperationResultContext,
   PluginLockHash,
   SimulationRulesLock,
   TaskDecision,
@@ -44,6 +45,7 @@ export interface AgentState {
   readonly bladderSensation: BladderSensation;
   readonly taskTracks: TaskTracks;
   readonly activeOperations: ReadonlyMap<OperationCallId, ActiveOperation>;
+  readonly pendingOperationResults: readonly OperationResultContext[];
   readonly knowledge: AgentKnowledge;
   readonly memories: readonly ImmediateMemory[];
 }

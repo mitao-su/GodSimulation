@@ -1,4 +1,9 @@
-import type { AgentId, EntityId, OperationCallId } from "@god-sim/protocol";
+import type {
+  AgentId,
+  EntityId,
+  JsonObject,
+  OperationCallId,
+} from "@god-sim/protocol";
 
 import type {
   ActiveOperation,
@@ -45,6 +50,7 @@ export interface CompletedOperation {
   readonly agentId: AgentId;
   readonly callId: OperationCallId;
   readonly label: string;
+  readonly result?: JsonObject;
 }
 
 export interface OperationAdvanceResult {

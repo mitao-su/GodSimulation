@@ -6,6 +6,18 @@ export interface DecisionReviewProps {
   readonly view: WorldView;
 }
 
+type TrackProposal = WorldView["pendingDecisions"][number]["headProposal"];
+
+function proposalText(proposal: TrackProposal): string {
+  if (!proposal) return "等待决策";
+  if (proposal.kind === "continue") return proposal.label;
+  const argumentsText =
+    Object.keys(proposal.arguments).length === 0
+      ? ""
+      : ` ${JSON.stringify(proposal.arguments)}`;
+  return `${proposal.label}${argumentsText}`;
+}
+
 export function DecisionReview({ view }: DecisionReviewProps) {
   const pendingCount = view.pendingDecisions.filter((decision) => decision.status === "pending").length;
   const readyCount = view.pendingDecisions.filter((decision) => decision.status === "ready").length;
@@ -30,6 +42,34 @@ export function DecisionReview({ view }: DecisionReviewProps) {
         <div className="decision-banner__counts" aria-label="决策进度">
           <span>{readyCount} 就绪</span>
           <span>{pendingCount} 等待</span>
+        </div>
+      ) : null}
+      {view.pendingDecisions.length > 0 ? (
+        <div className="decision-banner__proposals" aria-label="角色决策提案">
+          {view.pendingDecisions.map((decision) => {
+            const agentName =
+              view.agents.find((agent) => agent.agentId === decision.agentId)
+                ?.displayName ?? decision.agentId;
+            return (
+              <div className="decision-proposal" key={decision.requestId}>
+                <div className="decision-proposal__agent">
+                  <strong>{agentName}</strong>
+                  <span>{decision.status === "ready" ? "已就绪" : decision.status === "error" ? "错误" : "思考中"}</span>
+                </div>
+                <div className="decision-proposal__track">
+                  <span>HEAD</span>
+                  <strong>{proposalText(decision.headProposal)}</strong>
+                </div>
+                <div className="decision-proposal__track">
+                  <span>BODY</span>
+                  <strong>{proposalText(decision.bodyProposal)}</strong>
+                </div>
+                <span className="decision-proposal__reason">
+                  {decision.proposalReason ?? decision.reason}
+                </span>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>

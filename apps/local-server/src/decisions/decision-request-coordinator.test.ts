@@ -83,6 +83,56 @@ function coordinator(
 }
 
 describe("DecisionRequestCoordinator", () => {
+  it("normalizes synchronized fixed arguments before persistence and forwarding", async () => {
+    const records: ModelCallRecord[] = [];
+    const synchronizedRequest: ModelDecisionRequest = {
+      ...request,
+      taskOptions: [
+        {
+          kind: "operation",
+          id: "task-option:alice:sleep" as never,
+          operationId: "core.sleep" as never,
+          label: "Sleep",
+          taskSlots: ["HEAD", "BODY"],
+          argumentSchema: {},
+          fixedArguments: { bedId: "bed-1" },
+        },
+      ],
+    };
+    const decision: TaskDecision = {
+      schemaVersion: 2,
+      head: {
+        kind: "replace",
+        taskOptionId: "task-option:alice:sleep" as never,
+        arguments: {},
+      },
+      body: {
+        kind: "replace",
+        taskOptionId: "task-option:alice:sleep" as never,
+        arguments: { bedId: "bed-1" },
+      },
+      reason: "Sleep",
+    };
+
+    const outcome = await coordinator(records, async () => decision).decide(
+      synchronizedRequest,
+    );
+
+    expect(outcome).toMatchObject({
+      type: "result",
+      result: {
+        proposal: {
+          head: { arguments: { bedId: "bed-1" } },
+          body: { arguments: { bedId: "bed-1" } },
+        },
+      },
+    });
+    expect(records[0]?.taskDecision).toMatchObject({
+      head: { arguments: { bedId: "bed-1" } },
+      body: { arguments: { bedId: "bed-1" } },
+    });
+  });
+
   it("does not disguise an accepted-result persistence error as a model failure", async () => {
     const attemptedRecords: ModelCallRecord[] = [];
     const decisionCoordinator = new DecisionRequestCoordinator({

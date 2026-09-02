@@ -25,7 +25,6 @@ describe("queryObject", () => {
       type: "available_interactions",
       entityId: "fridge-1" as never,
       agentId: "alice" as never,
-      distance: 1,
     });
 
     expect(result).toMatchObject({
@@ -67,5 +66,40 @@ describe("queryObject", () => {
       taskSlots: ["BODY"],
     });
     expect(world.objects.get("fridge-1" as never)?.state).toEqual({ holder: null });
+  });
+
+  it("allows cancellation cleanup after the actor leaves interaction range", () => {
+    const base = simulationTestWorld();
+    const fridge = base.objects.get("fridge-1" as never)!;
+    const world = {
+      ...base,
+      objects: new Map(base.objects).set(fridge.id, {
+        ...fridge,
+        version: 1,
+        state: { holder: "alice" },
+      }),
+    };
+
+    const result = proposeInteraction(world, testPluginRegistry, {
+      agentId: "alice" as never,
+      entityId: "fridge-1" as never,
+      interactionId: "use",
+      parameters: {},
+      phase: "cancel",
+    });
+
+    expect(result).toMatchObject({
+      accepted: true,
+      proposal: {
+        effects: [
+          {
+            type: "release_occupancy",
+            entityId: "fridge-1",
+            agentId: "alice",
+            expectedObjectVersion: 1,
+          },
+        ],
+      },
+    });
   });
 });

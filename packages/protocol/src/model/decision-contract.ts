@@ -5,7 +5,8 @@ import {
   DecisionCycleIdSchema,
   EntityIdSchema,
   EventIdSchema,
-  GoalOptionIdSchema,
+  OperationCallIdSchema,
+  OperationIdSchema,
   PluginLockHashSchema,
   RequestIdSchema,
   WorldIdSchema,
@@ -15,57 +16,8 @@ import {
   TaskDecisionSchema,
   TaskOptionSchema,
 } from "../execution/task-contract";
-import { JsonValueSchema } from "../json/json-value";
-
-export const UseObjectGoalSchema = z
-  .object({
-    kind: z.literal("use_object"),
-    targetEntityId: EntityIdSchema,
-    interactionId: z.string().min(1),
-  })
-  .strict();
-
-export const WaitGoalSchema = z
-  .object({
-    kind: z.literal("wait"),
-    durationTicks: z.number().int().positive().max(600),
-  })
-  .strict();
-
-export const ObserveGoalSchema = z
-  .object({
-    kind: z.literal("observe"),
-    targetEntityId: EntityIdSchema,
-  })
-  .strict();
-
-export const GoalSchema = z.discriminatedUnion("kind", [
-  UseObjectGoalSchema,
-  WaitGoalSchema,
-  ObserveGoalSchema,
-]);
-
-export type Goal = z.infer<typeof GoalSchema>;
-
-export const GoalOptionSchema = z
-  .object({
-    id: GoalOptionIdSchema,
-    label: z.string().min(1).max(160),
-    goal: GoalSchema,
-  })
-  .strict();
-
-export type GoalOption = z.infer<typeof GoalOptionSchema>;
-
-export const GoalProposalSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    goalOptionId: GoalOptionIdSchema,
-    reason: z.string().min(1).max(500),
-  })
-  .strict();
-
-export type GoalProposal = z.infer<typeof GoalProposalSchema>;
+import { OperationTerminationOutcomeSchema } from "../events/operation-terminated.event";
+import { JsonObjectSchema, JsonValueSchema } from "../json/json-value";
 
 export const DecisionIdentitySchema = z
   .object({
@@ -96,16 +48,6 @@ export const BodySensationSchema = z
     need: z.literal("bladder"),
     level: z.enum(["comfortable", "noticeable", "urgent"]),
     description: z.string().min(1).max(200),
-  })
-  .strict();
-
-export const CurrentGoalContextSchema = z
-  .object({
-    goal: GoalSchema,
-    label: z.string().min(1).max(160),
-    actionKind: z.string().min(1).nullable(),
-    actionProgress: z.number().int().nonnegative().nullable(),
-    lastFailure: z.string().max(500).nullable(),
   })
   .strict();
 
@@ -150,6 +92,29 @@ export const PerceptionSnapshotSchema = z
   })
   .strict();
 
+export const OperationResultContextSchema = z
+  .object({
+    callId: OperationCallIdSchema,
+    operationId: OperationIdSchema,
+    terminal: z.boolean(),
+    outcome: OperationTerminationOutcomeSchema.nullable(),
+    reasonCode: z.string().min(1).max(120),
+    result: JsonObjectSchema,
+    emittedAtTick: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.terminal !== (value.outcome !== null)) {
+      context.addIssue({
+        code: "custom",
+        message: "Only terminal operation results have an outcome",
+      });
+    }
+  });
+export type OperationResultContext = z.infer<
+  typeof OperationResultContextSchema
+>;
+
 export const SubjectiveDecisionContextSchema = z
   .object({
     decisionReason: DecisionReasonSchema,
@@ -157,6 +122,7 @@ export const SubjectiveDecisionContextSchema = z
     activeTasks: ActiveTasksContextSchema,
     memories: z.array(DecisionMemorySchema),
     perception: PerceptionSnapshotSchema,
+    operationResults: z.array(OperationResultContextSchema).default([]),
   })
   .strict();
 

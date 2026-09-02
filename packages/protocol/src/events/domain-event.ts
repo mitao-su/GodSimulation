@@ -8,6 +8,7 @@ import { InteractionArbitratedEventSchema } from "./interaction-arbitrated.event
 import { ObjectStateChangedEventSchema } from "./object-state-changed.event";
 import { ObservationRememberedEventSchema } from "./observation-remembered.event";
 import { OperationStartedEventSchema } from "./operation-started.event";
+import { OperationResultEventSchema } from "./operation-result.event";
 import { OperationTerminatedEventSchema } from "./operation-terminated.event";
 import { PerceptibleResultEmittedEventSchema } from "./perceptible-result-emitted.event";
 import { PerceptionRecordedEventSchema } from "./perception-recorded.event";
@@ -22,6 +23,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   AgentNeedChangedEventSchema,
   ActionFailedEventSchema,
   OperationStartedEventSchema,
+  OperationResultEventSchema,
   OperationTerminatedEventSchema,
   ObservationRememberedEventSchema,
   PerceptionRecordedEventSchema,

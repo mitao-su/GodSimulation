@@ -12,6 +12,7 @@ export function cognitionContextFromInput(input: DecisionPromptInput): Cognition
     decisionReason: input.decisionReason,
     bodySensations: input.bodySensations,
     activeTasks: input.activeTasks,
+    operationResults: input.operationResults,
     memories: input.memories,
     perception: input.perception,
     taskOptions: input.taskOptions,

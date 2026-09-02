@@ -1,23 +1,16 @@
 import {
   OperationCallIdSchema,
-  TaskDecisionSchema,
+  resolveTaskDecision,
   type AgentId,
   type DomainEvent,
-  type JsonObject,
-  type JsonValue,
-  type TaskOption,
-  type TaskSelection,
+  type ResolvedTaskSelection,
   type TaskTrack,
 } from "@god-sim/protocol";
-import {
-  InteractionContextSchema,
-  type EffectProposal,
-  type InteractionDefinition,
-} from "@god-sim/plugin-sdk";
 
 import {
-  mergedOptionArguments,
-} from "../execution/operation-catalog";
+  operationInteractionLifecycleProposal,
+  recordOperationTermination,
+} from "../execution/operation-lifecycle";
 import { prepareOperationCall } from "../execution/operation-planner";
 import type { ActiveOperation } from "../execution/operation";
 import type { TaskTrackState, TaskTracks } from "../execution/task-tracks";
@@ -38,19 +31,9 @@ export interface DecisionReleaseTransition {
   readonly events: readonly DomainEvent[];
 }
 
-type ResolvedSelection =
-  | { readonly kind: "continue" }
-  | { readonly kind: "empty"; readonly option: TaskOption }
-  | {
-      readonly kind: "operation";
-      readonly option: Extract<TaskOption, { kind: "operation" }>;
-      readonly arguments: JsonObject;
-      readonly comparisonKey: string;
-    };
-
 interface AgentDecisionPlan {
   readonly agentId: AgentId;
-  readonly resolved: Readonly<Record<TaskTrack, ResolvedSelection>>;
+  readonly resolved: Readonly<Record<TaskTrack, ResolvedTaskSelection>>;
   readonly removedCallIds: ReadonlySet<ActiveOperation["callId"]>;
 }
 
@@ -61,72 +44,17 @@ export function allDecisionResultsAccepted(cycle: DecisionCycleState): boolean {
   });
 }
 
-function canonicalJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalJson);
-  if (typeof value !== "object" || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, canonicalJson(entry)]),
-  );
-}
-
-function comparisonKey(value: JsonObject): string {
-  return JSON.stringify(canonicalJson(value));
-}
-
-function selectionFor(
-  request: DecisionRequestState,
-  track: TaskTrack,
-): TaskSelection {
-  const decision = TaskDecisionSchema.parse(request.acceptedProposal);
-  return track === "HEAD" ? decision.head : decision.body;
-}
-
 function resolveSelections(
   agent: AgentState,
   request: DecisionRequestState,
-): Readonly<Record<TaskTrack, ResolvedSelection>> {
-  const options = request.promptInput.taskOptions;
-  const optionIds = new Set<string>();
-  for (const option of options) {
-    if (optionIds.has(option.id)) {
-      throw new Error(`Decision request contains duplicate task option ${option.id}`);
-    }
-    optionIds.add(option.id);
+): Readonly<Record<TaskTrack, ResolvedTaskSelection>> {
+  if (request.acceptedProposal === null) {
+    throw new Error("Cannot resolve an empty decision proposal");
   }
-
-  const resolve = (track: TaskTrack): ResolvedSelection => {
-    const selection = selectionFor(request, track);
-    if (selection.kind === "continue") return selection;
-    const option = options.find(
-      (candidate) => candidate.id === selection.taskOptionId,
-    );
-    if (!option) {
-      throw new Error(`Task option ${selection.taskOptionId} was not offered`);
-    }
-    if (!option.taskSlots.includes(track)) {
-      throw new Error(`Task option ${option.id} does not occupy ${track}`);
-    }
-    if (option.kind === "empty") {
-      if (Object.keys(selection.arguments).length !== 0) {
-        throw new Error(`Empty task option ${option.id} accepts no arguments`);
-      }
-      return { kind: "empty", option };
-    }
-    const normalized = mergedOptionArguments(option, selection.arguments);
-    return {
-      kind: "operation",
-      option,
-      arguments: selection.arguments,
-      comparisonKey: comparisonKey(normalized),
-    };
-  };
-
-  const resolved = {
-    HEAD: resolve("HEAD"),
-    BODY: resolve("BODY"),
-  } as const;
+  const resolved = resolveTaskDecision(
+    request.acceptedProposal,
+    request.promptInput.taskOptions,
+  ).tracks;
 
   for (const operation of agent.activeOperations.values()) {
     if (operation.taskSlots.length === 1) continue;
@@ -140,29 +68,6 @@ function resolveSelections(
     }
   }
 
-  for (const track of TASK_TRACKS) {
-    const selected = resolved[track];
-    if (selected.kind !== "operation" || selected.option.taskSlots.length === 1) {
-      continue;
-    }
-    for (const requiredTrack of selected.option.taskSlots) {
-      const peer = resolved[requiredTrack];
-      if (
-        peer.kind !== "operation" ||
-        peer.option.id !== selected.option.id
-      ) {
-        throw new Error(
-          `Task option ${selected.option.id} must be selected on all declared tracks`,
-        );
-      }
-      if (peer.comparisonKey !== selected.comparisonKey) {
-        throw new Error(
-          `Task option ${selected.option.id} requires the same arguments on every track`,
-        );
-      }
-    }
-  }
-
   return resolved;
 }
 
@@ -173,8 +78,8 @@ function assertCurrentCallsMatchTracks(agent: AgentState): void {
       return state.kind === "operation" && state.callId === callId;
     });
     if (
-      comparisonKey({ tracks: referencedTracks }) !==
-      comparisonKey({ tracks: operation.taskSlots })
+      referencedTracks.length !== operation.taskSlots.length ||
+      referencedTracks.some((track, index) => track !== operation.taskSlots[index])
     ) {
       throw new Error(`Active call ${callId} does not match its task tracks`);
     }
@@ -231,7 +136,7 @@ function applyAgentDecisionPlan(
   };
   const preparedByOption = new Map<
     string,
-    { readonly operation: ActiveOperation; readonly comparisonKey: string }
+    ActiveOperation
   >();
   let callIndex = 0;
 
@@ -245,14 +150,9 @@ function applyAgentDecisionPlan(
 
     const existing = preparedByOption.get(selected.option.id);
     if (existing) {
-      if (existing.comparisonKey !== selected.comparisonKey) {
-        throw new Error(
-          `Task option ${selected.option.id} requires the same arguments on every track`,
-        );
-      }
       taskTracks[track] = {
         kind: "operation",
-        callId: existing.operation.callId,
+        callId: existing.callId,
       };
       continue;
     }
@@ -277,10 +177,7 @@ function applyAgentDecisionPlan(
         `Task option ${selected.option.id} cannot start: ${preparation.reasonCode}: ${preparation.summary}`,
       );
     }
-    preparedByOption.set(selected.option.id, {
-      operation: preparation.operation,
-      comparisonKey: selected.comparisonKey,
-    });
+    preparedByOption.set(selected.option.id, preparation.operation);
     activeOperations.set(callId, preparation.operation);
     for (const occupiedTrack of preparation.operation.taskSlots) {
       taskTracks[occupiedTrack] = { kind: "operation", callId };
@@ -291,67 +188,10 @@ function applyAgentDecisionPlan(
     ...agent,
     taskTracks: taskTracks as TaskTracks,
     activeOperations,
+    pendingOperationResults: [],
   };
   assertCurrentCallsMatchTracks(next);
   return next;
-}
-
-function cancellationProposal(
-  world: WorldState,
-  registry: PluginRegistry,
-  agent: AgentState,
-  operation: ActiveOperation,
-): EffectProposal {
-  const action = operation.plan.actions[operation.plan.currentActionIndex];
-  if (!action || action.kind !== "interact_object" || !action.started) {
-    return { effects: [] };
-  }
-  const object = world.objects.get(action.targetEntityId);
-  if (!object) {
-    throw new Error(
-      `Cannot cancel ${operation.callId}: object ${action.targetEntityId} is missing`,
-    );
-  }
-  const definition = registry.getObject(object.definitionId)?.definition;
-  if (!definition) {
-    throw new Error(
-      `Cannot cancel ${operation.callId}: definition ${object.definitionId} is missing`,
-    );
-  }
-  const interaction = definition.interactions.find(
-    (candidate) => candidate.id === action.interactionId,
-  ) as InteractionDefinition<JsonValue, JsonObject> | undefined;
-  if (!interaction) {
-    throw new Error(
-      `Cannot cancel ${operation.callId}: interaction ${action.interactionId} is missing`,
-    );
-  }
-  const parameterInput =
-    action.purpose === "direct" &&
-    typeof operation.arguments["parameters"] === "object" &&
-    operation.arguments["parameters"] !== null &&
-    !Array.isArray(operation.arguments["parameters"])
-      ? operation.arguments["parameters"]
-      : {};
-  const parameters = interaction.parametersSchema.parse(parameterInput);
-  const context = InteractionContextSchema.parse({
-    worldTick: world.tick,
-    trigger: "active_command",
-    object: { entityId: object.id, version: object.version },
-    actor: {
-      agentId: agent.id,
-      position: agent.position,
-      needs: { bladder: agent.bladder },
-    },
-    distance:
-      Math.abs(agent.position.x - object.position.x) +
-      Math.abs(agent.position.y - object.position.y),
-  });
-  return interaction.cancel(
-    definition.stateSchema.parse(object.state),
-    context,
-    parameters,
-  );
 }
 
 export function preflightTaskDecision(
@@ -395,7 +235,13 @@ export function releaseDecisionCycle(
         if (!operation) {
           throw new Error(`Cannot cancel missing operation ${callId}`);
         }
-        return cancellationProposal(world, registry, agent, operation).effects;
+        return operationInteractionLifecycleProposal(
+          world,
+          registry,
+          agent.id,
+          operation,
+          "cancel",
+        ).effects;
       });
   });
   const cancellation = commitProposal(
@@ -446,20 +292,17 @@ export function releaseDecisionCycle(
     )) {
       const operation = previousAgent.activeOperations.get(callId);
       if (!operation) throw new Error(`Cannot terminate missing operation ${callId}`);
-      const written = appendDomainEvent(
+      const written = recordOperationTermination(
         releasedWorld,
-        {
-          type: "operation_terminated",
-          agentId: plan.agentId,
-          callId,
-          operationId: operation.operationId,
-          outcome: "cancelled",
-          reasonCode: "task_replaced",
-        },
+        registry,
+        plan.agentId,
+        operation,
+        "cancelled",
+        "task_replaced",
         lifecycleMetadata,
       );
       releasedWorld = written.world;
-      events.push(written.event);
+      events.push(...written.events);
     }
   }
 

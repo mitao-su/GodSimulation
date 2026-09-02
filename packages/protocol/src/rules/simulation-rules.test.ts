@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createSimulationRulesLock,
   SimulationRulesLockSchema,
   SimulationRulesSchema,
   SpeakVolumeSchema,
+  verifySimulationRulesLock,
   WorldRulesReferenceSchema,
 } from "./simulation-rules";
 
@@ -154,5 +156,27 @@ describe("SimulationRulesSchema", () => {
         rules: validRules,
       }),
     ).toEqual({ hash: "a".repeat(64), rules: validRules });
+  });
+
+  it("creates a deterministic content hash and rejects forged locks", () => {
+    const lock = createSimulationRulesLock(validRules);
+
+    expect(lock.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(createSimulationRulesLock(structuredClone(validRules))).toEqual(lock);
+    expect(() =>
+      verifySimulationRulesLock({ ...lock, hash: "a".repeat(64) }),
+    ).toThrow(/hash mismatch/i);
+    expect(() =>
+      verifySimulationRulesLock({
+        ...lock,
+        rules: {
+          ...lock.rules,
+          operations: {
+            ...lock.rules.operations,
+            move: { ticksPerCell: 3 },
+          },
+        },
+      }),
+    ).toThrow(/hash mismatch/i);
   });
 });

@@ -45,6 +45,7 @@ describe("active operation snapshot state", () => {
       duration: { kind: "fixed", totalTicks: 4 },
       startedAtTick: 2,
       progressTicks: 1,
+      accumulatedObservations: [],
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -68,6 +69,7 @@ describe("active operation snapshot state", () => {
       duration: { kind: "fixed", totalTicks: 9 },
       startedAtTick: 2,
       progressTicks: 3,
+      accumulatedObservations: [],
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -129,6 +131,7 @@ describe("active operation snapshot state", () => {
       duration: { kind: "fixed", totalTicks: 100 },
       startedAtTick: 0,
       progressTicks: 7,
+      accumulatedObservations: [],
       plan: {
         currentActionIndex: 0,
         actions: [

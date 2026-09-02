@@ -5,6 +5,7 @@ import {
   EntityIdSchema,
   ModelDecisionResultSchema,
   RequestIdSchema,
+  resolveTaskDecision,
   TaskOptionSchema,
   TechnicalFailureSchema,
   type AgentId,
@@ -118,6 +119,7 @@ export function buildDecisionPromptInput(
       visibleEntities: visibleEntities(agent),
       heardEvents: [],
     },
+    operationResults: agent.pendingOperationResults,
     taskOptions,
   });
 }
@@ -225,33 +227,23 @@ export function acceptDecisionResult(
   if (request.failure) {
     return { accepted: false, world, reason: `Request ${result.requestId} has a recorded failure` };
   }
-  for (const [track, selection] of [
-    ["HEAD", result.proposal.head],
-    ["BODY", result.proposal.body],
-  ] as const) {
-    if (selection.kind === "continue") continue;
-    const offered = request.promptInput.taskOptions.find(
-      (option) => option.id === selection.taskOptionId,
-    );
-    if (!offered) {
-      return {
-        accepted: false,
-        world,
-        reason: `Task option ${selection.taskOptionId} was not offered`,
-      };
-    }
-    if (!offered.taskSlots.includes(track)) {
-      return {
-        accepted: false,
-        world,
-        reason: `Task option ${selection.taskOptionId} does not occupy ${track}`,
-      };
-    }
+  let normalizedProposal;
+  try {
+    normalizedProposal = resolveTaskDecision(
+      result.proposal,
+      request.promptInput.taskOptions,
+    ).normalizedDecision;
+  } catch (error) {
+    return {
+      accepted: false,
+      world,
+      reason: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const requests = new Map(cycle.requests).set(result.agentId, {
     ...request,
-    acceptedProposal: result.proposal,
+    acceptedProposal: normalizedProposal,
     failure: null,
   });
   return {

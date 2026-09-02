@@ -20,13 +20,16 @@ test("rethinks at the urgent threshold and completes toilet use", async ({ page 
     .locator(".detail-list div")
     .filter({ hasText: "内急状态" })
     .locator("dd");
+  const decisionStatus = page.locator(".decision-banner__copy");
 
   await page.goto(app.url);
   await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
   await expect(release).toBeEnabled();
   await release.click();
 
-  await expect(page.getByText("Bladder need became urgent", { exact: true })).toBeVisible();
+  await expect(
+    decisionStatus.getByText("Bladder need became urgent", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("角色思考中")).toBeVisible();
   await expect(bladderValue).toHaveText("urgent");
   await expect(release).toBeEnabled();

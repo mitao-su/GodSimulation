@@ -31,7 +31,6 @@ export type ObjectQuery =
       readonly type: "available_interactions";
       readonly entityId: EntityId;
       readonly agentId: AgentId;
-      readonly distance: number;
     };
 
 export interface InteractionQueryView {
@@ -69,16 +68,24 @@ function getObjectAndDefinition(
   return { object, definition: registered.definition, state };
 }
 
-function interactionContext(
+export function createInteractionContext(
   world: WorldState,
+  registry: PluginRegistry,
   entityId: EntityId,
   agentId: AgentId,
-  distance: number,
 ) {
   const object = world.objects.get(entityId);
   if (!object) throw new Error(`Unknown object instance: ${entityId}`);
   const agent = world.agents.get(agentId);
   if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
+  const spatial = new SpatialIndex(world, registry);
+  const positions = spatial.interactionPositions(entityId);
+  if (positions.length === 0) {
+    throw new Error(`Object ${entityId} has no interaction position`);
+  }
+  const distance = Math.min(
+    ...positions.map((position) => manhattan(agent.position, position)),
+  );
   return InteractionContextSchema.parse({
     worldTick: world.tick,
     trigger: "active_command",
@@ -126,11 +133,11 @@ export function queryObject(
         registry,
         query.entityId,
       );
-      const context = interactionContext(
+      const context = createInteractionContext(
         world,
+        registry,
         query.entityId,
         query.agentId,
-        query.distance,
       );
       return {
         type: "available_interactions",
@@ -162,6 +169,7 @@ export type InteractionProposalResult =
   | {
       readonly accepted: true;
       readonly proposal: EffectProposal;
+      readonly result: JsonObject | null;
       readonly duration: OperationDuration;
       readonly taskSlots: readonly TaskTrack[];
     }
@@ -180,20 +188,23 @@ export function proposeInteraction(
   registry: PluginRegistry,
   request: InteractionRequest,
 ): InteractionProposalResult {
-  const { object, definition, state } = getObjectAndDefinition(
+  const { definition, state } = getObjectAndDefinition(
     world,
     registry,
     request.entityId,
   );
   const agent = world.agents.get(request.agentId);
   if (!agent) throw new Error(`Unknown agent instance: ${request.agentId}`);
-  const spatial = new SpatialIndex(world, registry);
-  const distance = Math.min(
-    ...spatial
-      .interactionPositions(request.entityId)
-      .map((position) => manhattan(agent.position, position)),
+  const context = createInteractionContext(
+    world,
+    registry,
+    request.entityId,
+    request.agentId,
   );
-  if (distance !== 0) {
+  if (
+    context.distance !== 0 &&
+    (request.phase === "start" || request.phase === "complete")
+  ) {
     return {
       accepted: false,
       reasonCode: "not_at_interaction_position",
@@ -212,7 +223,6 @@ export function proposeInteraction(
     };
   }
 
-  const context = interactionContext(world, object.id, agent.id, 0);
   const parameters = interaction.parametersSchema.parse(request.parameters);
   if (request.phase === "start") {
     const availability = interaction.canStart(state, context, parameters);
@@ -220,34 +230,54 @@ export function proposeInteraction(
   }
 
   let proposal: EffectProposal;
+  let result: JsonObject | null = null;
   switch (request.phase) {
     case "start":
       proposal = interaction.start?.(state, context, parameters) ?? {
         effects: [],
       };
       break;
-    case "complete":
-      proposal = interaction.complete(state, context, parameters);
+    case "complete": {
+      const lifecycle = interaction.complete(state, context, parameters);
+      proposal = { effects: lifecycle.effects };
+      result =
+        lifecycle.result === undefined
+          ? null
+          : interaction.resultSchema.parse(lifecycle.result);
       break;
-    case "cancel":
-      proposal = interaction.cancel(state, context, parameters);
+    }
+    case "cancel": {
+      const lifecycle = interaction.cancel(state, context, parameters);
+      proposal = { effects: lifecycle.effects };
+      result =
+        lifecycle.result === undefined
+          ? null
+          : interaction.resultSchema.parse(lifecycle.result);
       break;
-    case "fail":
+    }
+    case "fail": {
       if (!request.failureCode) {
         throw new Error("An interaction failure proposal requires a failure code");
       }
-      proposal = interaction.fail(
+      const lifecycle = interaction.fail(
         state,
         context,
         parameters,
         request.failureCode,
       );
+      proposal = { effects: lifecycle.effects };
+      result =
+        lifecycle.result === undefined
+          ? null
+          : interaction.resultSchema.parse(lifecycle.result);
       break;
+    }
   }
 
   return {
     accepted: true,
     proposal,
+    result,
     duration: interaction.resolveDuration(state, context, parameters),
     taskSlots: interaction.taskSlots,
   };

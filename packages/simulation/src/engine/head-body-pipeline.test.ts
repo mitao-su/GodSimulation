@@ -27,6 +27,7 @@ function parallelOperationWorld() {
       duration: { kind: "fixed" as const, totalTicks: 1 },
       startedAtTick: 0,
       progressTicks: 0,
+      accumulatedObservations: [],
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -50,6 +51,7 @@ function parallelOperationWorld() {
       duration: { kind: "fixed" as const, totalTicks: 3 },
       startedAtTick: 0,
       progressTicks: 0,
+      accumulatedObservations: [],
       plan: {
         currentActionIndex: 0,
         actions: [

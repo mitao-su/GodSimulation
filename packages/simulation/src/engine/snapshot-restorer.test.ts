@@ -22,6 +22,7 @@ interface MutableTaskOption {
 
 interface MutablePromptInput {
   activeTasks?: unknown;
+  operationResults?: unknown;
   taskOptions?: MutableTaskOption[];
   goalOptions?: MutableTaskOption[];
   [key: string]: unknown;
@@ -47,6 +48,7 @@ interface MutableAgentState {
   knowledge: Record<string, unknown>;
   taskTracks?: unknown;
   activeOperations?: unknown;
+  pendingOperationResults?: unknown;
   [key: string]: unknown;
 }
 
@@ -65,6 +67,7 @@ function singleGoalStateFromCurrent(stateValue: unknown): MutableSnapshotState {
     const stable = { ...agent };
     delete stable.taskTracks;
     delete stable.activeOperations;
+    delete stable.pendingOperationResults;
     return {
       ...stable,
       currentGoal: null,
@@ -82,6 +85,7 @@ function singleGoalStateFromCurrent(stateValue: unknown): MutableSnapshotState {
         const stablePrompt = { ...request.promptInput };
         delete stablePrompt.activeTasks;
         delete stablePrompt.taskOptions;
+        delete stablePrompt.operationResults;
         return {
           ...request,
           promptInput: {
@@ -228,6 +232,7 @@ describe("simulation snapshot restoration", () => {
         ...testSimulationRulesLock,
         hash: "d".repeat(64),
       }),
+      expectedError: /rules lock hash mismatch/i,
     },
     {
       name: "normalized rule content",
@@ -241,8 +246,9 @@ describe("simulation snapshot restoration", () => {
           },
         },
       }),
+      expectedError: /rules lock hash mismatch/i,
     },
-  ])("rejects a version-three snapshot with mismatched $name", ({ configuredLock }) => {
+  ])("rejects a version-three snapshot with mismatched $name", ({ configuredLock, expectedError }) => {
     const original = createSimulation({
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
@@ -264,7 +270,7 @@ describe("simulation snapshot restoration", () => {
         plugins: [testPlugin],
         simulationRulesLock: configuredLock,
       }),
-    ).toThrow("Snapshot simulation rules do not match the configured rule lock");
+    ).toThrow(expectedError);
   });
 
   it("projects every strict subjective source into causalEventIds", () => {
@@ -473,7 +479,7 @@ describe("simulation snapshot restoration", () => {
     expect(restoredAlice.taskTracks.BODY.kind).toBe("operation");
     expect(restoredAlice.activeOperations).toEqual([
       expect.objectContaining({
-        operationId: "legacy.goal",
+        operationId: "object.test.fridge.use",
         label: "Use fridge",
         progressTicks: 3,
         plan: expect.objectContaining({
@@ -513,6 +519,17 @@ describe("simulation snapshot restoration", () => {
       goalOptionId: wait.id,
       reason: "Wait",
     };
+    for (const request of state.decisionCycle?.requests ?? []) {
+      if (request === aliceRequest) continue;
+      const peerWait = request.promptInput.goalOptions?.[0];
+      if (!peerWait) throw new Error("Missing peer legacy wait option");
+      request.acceptedProposal = {
+        schemaVersion: 1,
+        goalOptionId: peerWait.id,
+        reason: "Wait",
+      };
+    }
+    state.mode = "READY_FOR_RELEASE";
 
     const restored = restoreSimulation({
       snapshot: { ...snapshot, state: state as never },
@@ -537,7 +554,7 @@ describe("simulation snapshot restoration", () => {
         expect.objectContaining({
           kind: "operation",
           id: wait.id,
-          operationId: "legacy.goal",
+          operationId: "core.wait",
           taskSlots: ["BODY"],
         }),
       ]),
@@ -552,6 +569,29 @@ describe("simulation snapshot restoration", () => {
       },
       reason: "Wait",
     });
+
+    const ready = restored.getView();
+    expect(ready.mode).toBe("READY_FOR_RELEASE");
+    expect(
+      restored.dispatch({
+        schemaVersion: 1,
+        commandId: "command:release:migrated-legacy-goals" as never,
+        worldId: ready.worldId,
+        expectedWorldVersion: ready.worldVersion,
+        issuedAtRealTime: "2026-09-02T00:00:00.000Z",
+        type: "release_execution",
+      }),
+    ).toMatchObject({ accepted: true });
+    restored.tick();
+    const releasedState = restored.createSnapshot().state as MutableSnapshotState;
+    expect(restored.getView().mode).toBe("RUNNING");
+    expect(
+      releasedState.agents.flatMap((agent) => agent.activeOperations ?? []),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ operationId: "core.wait" }),
+      ]),
+    );
   });
 
   it("restores v1 furniture actions and locked-door knowledge as legacy generic state", () => {

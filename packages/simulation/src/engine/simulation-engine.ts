@@ -3,6 +3,7 @@ import {
   DecisionIdentitySchema,
   TaskDecisionSchema,
   TechnicalFailureSchema,
+  verifySimulationRulesLock,
   WorldCommandSchema,
   type DecisionIdentity,
   type DecisionPromptInput,
@@ -27,6 +28,7 @@ import {
   type DecisionRequestSpec,
 } from "../decision/decision-gate";
 import { buildTaskOptions } from "../execution/operation-catalog";
+import { recordFuseResults } from "../execution/operation-lifecycle";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
 import {
   loadWorldDefinition,
@@ -367,6 +369,18 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   #requestDecisionCycle(needs: readonly DecisionNeed[]): void {
     if (needs.length === 0) return;
+    const fuseCausationId = `fuse:${this.#world.id}:${this.#world.tick}`;
+    const fused = recordFuseResults(
+      this.#world,
+      this.#registry,
+      needs.map((need) => need.agentId),
+      {
+        causationId: fuseCausationId,
+        correlationId: fuseCausationId,
+      },
+    );
+    this.#world = fused.world;
+    this.#recordEvents(fused.events);
     const specs: DecisionRequestSpec[] = needs.map((need) => ({
       agentId: need.agentId,
       reason: need.reason,
@@ -578,9 +592,12 @@ class DeterministicSimulationEngine implements SimulationEngine {
 }
 
 export function createSimulation(options: SimulationOptions): SimulationEngine {
+  const simulationRulesLock = verifySimulationRulesLock(
+    options.simulationRulesLock,
+  );
   const registry = createPluginRegistry(options.plugins);
   const loaded = loadWorldDefinition(options.worldDefinition, registry, {
-    simulationRulesLock: options.simulationRulesLock,
+    simulationRulesLock,
     ...(options.reviewRequired === undefined
       ? {}
       : { reviewRequired: options.reviewRequired }),
@@ -597,12 +614,15 @@ export function createSimulation(options: SimulationOptions): SimulationEngine {
 }
 
 export function restoreSimulation(options: SimulationRestoreOptions): SimulationEngine {
+  const simulationRulesLock = verifySimulationRulesLock(
+    options.simulationRulesLock,
+  );
   const registry = createPluginRegistry(options.plugins);
   const world = restoreWorldSnapshot(
     options.snapshot,
     registry,
     options.worldDefinition,
-    options.simulationRulesLock,
+    simulationRulesLock,
   );
   return new DeterministicSimulationEngine(world, registry, null);
 }

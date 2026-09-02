@@ -13,14 +13,19 @@ import type { WorldState } from "../world/world-state";
 
 function operation(
   callId: string,
-  value: Omit<ActiveOperation, "callId" | "startedAtTick" | "progressTicks"> & {
+  value: Omit<
+    ActiveOperation,
+    "callId" | "startedAtTick" | "progressTicks" | "accumulatedObservations"
+  > & {
     readonly progressTicks?: number;
+    readonly accumulatedObservations?: ActiveOperation["accumulatedObservations"];
   },
 ): ActiveOperation {
   return {
     callId: callId as OperationCallId,
     startedAtTick: 0,
     progressTicks: value.progressTicks ?? 0,
+    accumulatedObservations: value.accumulatedObservations ?? [],
     ...value,
   };
 }

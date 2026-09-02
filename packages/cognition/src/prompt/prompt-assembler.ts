@@ -105,6 +105,11 @@ export function assembleDecisionRequest(
     JSON.stringify(input.activeTasks, null, 2),
     additions.get("active_tasks"),
   );
+  const operationResults = section(
+    "[OPERATION RESULTS]",
+    "operation_results",
+    JSON.stringify(input.operationResults, null, 2),
+  );
   const memories = section(
     "[RELEVANT MEMORIES]",
     "memory",
@@ -154,6 +159,7 @@ export function assembleDecisionRequest(
         content: [
           bodyState,
           activeTasks,
+          operationResults,
           memories,
           perception,
           taskOptions,

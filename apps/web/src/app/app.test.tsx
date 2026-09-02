@@ -84,6 +84,19 @@ function view(
         status: decisionStatus,
         reason: "看见目标被占用，需要重新决定",
         proposalReason: decisionStatus === "ready" ? "先等待" : null,
+        headProposal:
+          decisionStatus === "ready"
+            ? { kind: "continue", label: "Continue current HEAD task" }
+            : null,
+        bodyProposal:
+          decisionStatus === "ready"
+            ? {
+                kind: "replace",
+                taskOptionId: "task-option:alice:wait",
+                label: "Wait",
+                arguments: { durationTicks: 10 },
+              }
+            : null,
         error: failure,
       },
     ],
@@ -172,6 +185,16 @@ describe("director workbench", () => {
         expectedWorldVersion: 3,
       }),
     );
+  });
+
+  it("shows each accepted HEAD and BODY proposal before release", () => {
+    render(<App client={new FakeWorldClient(view("READY_FOR_RELEASE", "ready"))} />);
+
+    const proposals = screen.getByLabelText("角色决策提案");
+    expect(within(proposals).getByText("HEAD")).toBeVisible();
+    expect(within(proposals).getByText("Continue current HEAD task")).toBeVisible();
+    expect(within(proposals).getByText("BODY")).toBeVisible();
+    expect(within(proposals).getByText(/Wait/)).toBeVisible();
   });
 
   it("changes review mode through a protocol command", async () => {

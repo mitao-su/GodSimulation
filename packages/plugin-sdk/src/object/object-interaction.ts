@@ -47,6 +47,10 @@ export const InteractionAvailabilitySchema = z.discriminatedUnion("available", [
 
 export type InteractionAvailability = z.infer<typeof InteractionAvailabilitySchema>;
 
+export interface InteractionLifecycleProposal extends EffectProposal {
+  readonly result?: JsonObject;
+}
+
 export interface InteractionDefinition<
   State,
   Arguments extends JsonObject = Record<string, never>,
@@ -68,18 +72,18 @@ export interface InteractionDefinition<
     state: Readonly<State>,
     context: InteractionContext,
     argumentsValue: Readonly<Arguments>,
-  ): EffectProposal;
+  ): InteractionLifecycleProposal;
   fail(
     state: Readonly<State>,
     context: InteractionContext,
     argumentsValue: Readonly<Arguments>,
     failureCode: string,
-  ): EffectProposal;
+  ): InteractionLifecycleProposal;
   cancel(
     state: Readonly<State>,
     context: InteractionContext,
     argumentsValue: Readonly<Arguments>,
-  ): EffectProposal;
+  ): InteractionLifecycleProposal;
 }
 
 export const InteractionMetadataSchema = z

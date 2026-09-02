@@ -1,11 +1,9 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
-  SimulationRulesLockSchema,
+  createSimulationRulesLock,
   SimulationRulesSchema,
-  type JsonValue,
   type SimulationRulesLock,
   type WorldRulesReference,
 } from "@god-sim/protocol";
@@ -13,19 +11,6 @@ import {
 export interface LoadSimulationRulesOptions {
   readonly rulesDirectory: string;
   readonly reference: WorldRulesReference;
-}
-
-function isJsonArray(value: JsonValue): value is readonly JsonValue[] {
-  return Array.isArray(value);
-}
-
-function canonicalJson(value: JsonValue): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (isJsonArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key]!)}`)
-    .join(",")}}`;
 }
 
 export async function loadSimulationRules(
@@ -52,9 +37,5 @@ export async function loadSimulationRules(
     );
   }
 
-  const normalized = canonicalJson(rules);
-  return SimulationRulesLockSchema.parse({
-    hash: createHash("sha256").update(normalized, "utf8").digest("hex"),
-    rules,
-  });
+  return createSimulationRulesLock(rules);
 }

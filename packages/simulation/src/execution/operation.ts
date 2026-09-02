@@ -50,6 +50,12 @@ export interface OperationPlan {
   readonly currentActionIndex: number;
 }
 
+export interface OperationObservation {
+  readonly entityId: EntityId;
+  readonly kind: "object" | "agent";
+  readonly summary: string;
+}
+
 export interface ActiveOperation {
   readonly callId: OperationCallId;
   readonly operationId: OperationId;
@@ -60,5 +66,6 @@ export interface ActiveOperation {
   readonly duration: OperationDuration;
   readonly startedAtTick: number;
   readonly progressTicks: number;
+  readonly accumulatedObservations: readonly OperationObservation[];
   readonly plan: OperationPlan;
 }

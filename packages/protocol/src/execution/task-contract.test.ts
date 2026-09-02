@@ -6,6 +6,7 @@ import {
   TaskOptionSchema,
   TaskTrackSchema,
   canonicalTaskTracks,
+  resolveTaskDecision,
 } from "./task-contract";
 
 describe("task execution contract", () => {
@@ -125,5 +126,83 @@ describe("task execution contract", () => {
         fixedArguments: {},
       }),
     ).toMatchObject({ operationId: "core.wait", taskSlots: ["BODY"] });
+  });
+
+  it("normalizes fixed arguments before comparing synchronized selections", () => {
+    const synchronized = TaskOptionSchema.parse({
+      kind: "operation",
+      id: "task-option:alice:sleep",
+      operationId: "core.sleep",
+      label: "Sleep",
+      taskSlots: ["HEAD", "BODY"],
+      argumentSchema: {},
+      fixedArguments: { bedId: "bed-1" },
+    });
+
+    const resolved = resolveTaskDecision(
+      {
+        schemaVersion: 2,
+        head: {
+          kind: "replace",
+          taskOptionId: synchronized.id,
+          arguments: {},
+        },
+        body: {
+          kind: "replace",
+          taskOptionId: synchronized.id,
+          arguments: { bedId: "bed-1" },
+        },
+        reason: "Sleep in bed",
+      },
+      [synchronized],
+    );
+
+    expect(resolved.normalizedDecision.head).toEqual({
+      kind: "replace",
+      taskOptionId: synchronized.id,
+      arguments: { bedId: "bed-1" },
+    });
+    expect(resolved.normalizedDecision.body).toEqual(
+      resolved.normalizedDecision.head,
+    );
+    expect(resolved.tracks.HEAD).toMatchObject({
+      kind: "operation",
+      arguments: { bedId: "bed-1" },
+    });
+  });
+
+  it("rejects fixed argument overrides and partial synchronized selections", () => {
+    const synchronized = TaskOptionSchema.parse({
+      kind: "operation",
+      id: "task-option:alice:sleep",
+      operationId: "core.sleep",
+      label: "Sleep",
+      taskSlots: ["HEAD", "BODY"],
+      argumentSchema: {},
+      fixedArguments: { bedId: "bed-1" },
+    });
+    const decision = {
+      schemaVersion: 2 as const,
+      head: {
+        kind: "replace" as const,
+        taskOptionId: synchronized.id,
+        arguments: { bedId: "bed-2" },
+      },
+      body: { kind: "continue" as const },
+      reason: "Invalid sleep",
+    };
+
+    expect(() => resolveTaskDecision(decision, [synchronized])).toThrow(
+      /cannot change fixed argument bedId/i,
+    );
+    expect(() =>
+      resolveTaskDecision(
+        {
+          ...decision,
+          head: { ...decision.head, arguments: {} },
+        },
+        [synchronized],
+      ),
+    ).toThrow(/selected on all declared tracks/i);
   });
 });

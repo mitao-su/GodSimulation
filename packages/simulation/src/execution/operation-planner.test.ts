@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { EntityId, TaskOption } from "@god-sim/protocol";
 
@@ -139,5 +139,67 @@ describe("operation planner", () => {
       kind: "fixed",
       totalTicks: 1,
     });
+  });
+
+  it("resolves every core duration through the registered runtime", () => {
+    const world = knownFridgeWorld(true);
+    const wait = operationOption(
+      buildTaskOptions(world, testPluginRegistry, "alice" as never),
+      "core.wait",
+    );
+    const registered = testPluginRegistry.getOperation("core.wait")!;
+    const resolveDuration = vi.fn(registered.resolveDuration);
+    const operations = testPluginRegistry.operations as Map<unknown, typeof registered>;
+    operations.set(registered.id, { ...registered, resolveDuration });
+    try {
+      expect(
+        prepareOperationCall(
+          world,
+          testPluginRegistry,
+          "alice" as never,
+          wait,
+          { durationTicks: 7 },
+          "operation-call:test:resolver" as never,
+        ).kind,
+      ).toBe("prepared");
+      expect(resolveDuration).toHaveBeenCalledOnce();
+    } finally {
+      operations.set(registered.id, registered);
+    }
+  });
+
+  it("looks up furniture operations by registry identity without parsing the ID", () => {
+    const world = knownFridgeWorld(true);
+    const registered = testPluginRegistry.getOperation(
+      "object.test.fridge.use",
+    )!;
+    const alias = "custom.fridge-operation" as never;
+    const operations = testPluginRegistry.operations as Map<unknown, typeof registered>;
+    operations.set(alias, { ...registered, id: alias });
+    try {
+      const prepared = prepareOperationCall(
+        world,
+        testPluginRegistry,
+        "alice" as never,
+        {
+          kind: "operation",
+          id: "task-option:test:registry-alias" as never,
+          operationId: alias,
+          label: "Use fridge alias",
+          taskSlots: ["BODY"],
+          argumentSchema: {},
+          fixedArguments: { targetEntityId: "fridge-1", parameters: {} },
+        },
+        {},
+        "operation-call:test:registry-alias" as never,
+      );
+
+      expect(prepared).toMatchObject({
+        kind: "prepared",
+        operation: { operationId: alias },
+      });
+    } finally {
+      operations.delete(alias);
+    }
   });
 });

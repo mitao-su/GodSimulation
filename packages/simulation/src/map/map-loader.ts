@@ -244,6 +244,7 @@ export function loadWorldDefinition(
       bladderSensation: bladderSensation(spawn.needs.bladder),
       taskTracks: createEmptyTaskTracks(),
       activeOperations: new Map(),
+      pendingOperationResults: [],
       knowledge: createEmptyKnowledge(zoneId),
       memories: [],
     });

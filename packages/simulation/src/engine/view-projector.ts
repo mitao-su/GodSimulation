@@ -9,7 +9,37 @@ import { ObservationContextSchema } from "@god-sim/plugin-sdk";
 
 import type { PluginRegistry } from "../world/plugin-registry";
 import { projectGameTime } from "../world/game-time";
-import type { AgentState, WorldState } from "../world/world-state";
+import type {
+  AgentState,
+  DecisionRequestState,
+  WorldState,
+} from "../world/world-state";
+
+function decisionTrackProposal(
+  request: DecisionRequestState,
+  track: "HEAD" | "BODY",
+): WorldView["pendingDecisions"][number]["headProposal"] {
+  const proposal = request.acceptedProposal;
+  if (!proposal) return null;
+  const selection = track === "HEAD" ? proposal.head : proposal.body;
+  if (selection.kind === "continue") {
+    return { kind: "continue", label: `Continue current ${track} task` };
+  }
+  const option = request.promptInput.taskOptions.find(
+    (candidate) => candidate.id === selection.taskOptionId,
+  );
+  if (!option) {
+    throw new Error(
+      `Accepted decision references missing task option ${selection.taskOptionId}`,
+    );
+  }
+  return {
+    kind: "replace",
+    taskOptionId: selection.taskOptionId,
+    label: option.label,
+    arguments: selection.arguments,
+  };
+}
 
 function pauseReason(world: WorldState): WorldView["pauseReason"] {
   const cycle = world.decisionCycle;
@@ -193,6 +223,8 @@ export function projectWorldView(
           status: error ? "error" : request.acceptedProposal === null ? "pending" : "ready",
           reason: request.promptInput.decisionReason.summary,
           proposalReason: request.acceptedProposal?.reason ?? null,
+          headProposal: decisionTrackProposal(request, "HEAD"),
+          bodyProposal: decisionTrackProposal(request, "BODY"),
           error,
         };
       }) ?? [],

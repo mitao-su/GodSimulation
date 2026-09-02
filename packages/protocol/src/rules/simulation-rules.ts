@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 
 import {
   SimulationRulesHashSchema,
   SimulationRulesIdSchema,
 } from "../identity/ids";
+import type { JsonValue } from "../json/json-value";
 
 const PositiveFiniteNumberSchema = z.number().finite().positive();
 const PositiveIntegerSchema = z.number().int().positive();
@@ -175,3 +178,52 @@ export const SimulationRulesLockSchema = z
   })
   .strict();
 export type SimulationRulesLock = z.infer<typeof SimulationRulesLockSchema>;
+
+function isJsonArray(value: JsonValue): value is readonly JsonValue[] {
+  return Array.isArray(value);
+}
+
+export function canonicalSimulationRulesJson(value: JsonValue): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (isJsonArray(value)) {
+    return `[${value.map(canonicalSimulationRulesJson).join(",")}]`;
+  }
+  return `{${Object.keys(value)
+    .sort()
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${canonicalSimulationRulesJson(value[key]!)}`,
+    )
+    .join(",")}}`;
+}
+
+export function simulationRulesHash(rulesValue: unknown): string {
+  const rules = SimulationRulesSchema.parse(rulesValue);
+  const bytes = new TextEncoder().encode(
+    canonicalSimulationRulesJson(rules as JsonValue),
+  );
+  return bytesToHex(sha256(bytes));
+}
+
+export function createSimulationRulesLock(
+  rulesValue: unknown,
+): SimulationRulesLock {
+  const rules = SimulationRulesSchema.parse(rulesValue);
+  return SimulationRulesLockSchema.parse({
+    hash: simulationRulesHash(rules),
+    rules,
+  });
+}
+
+export function verifySimulationRulesLock(
+  lockValue: unknown,
+): SimulationRulesLock {
+  const lock = SimulationRulesLockSchema.parse(lockValue);
+  const actualHash = simulationRulesHash(lock.rules);
+  if (lock.hash !== actualHash) {
+    throw new Error(
+      `Simulation rules lock hash mismatch: expected ${lock.hash}, computed ${actualHash}`,
+    );
+  }
+  return lock;
+}

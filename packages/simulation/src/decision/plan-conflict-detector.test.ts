@@ -27,6 +27,7 @@ describe("detectPlanConflict", () => {
             duration: { kind: "fixed" as const, totalTicks: 10 },
             startedAtTick: 0,
             progressTicks: 2,
+            accumulatedObservations: [],
             plan: {
               currentActionIndex: 0,
               actions: [

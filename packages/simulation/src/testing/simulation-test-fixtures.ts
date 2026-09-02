@@ -6,9 +6,10 @@ import {
   type AgentDefinition,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
-import { SimulationRulesLockSchema } from "@god-sim/protocol";
+import { createSimulationRulesLock } from "@god-sim/protocol";
 
 import { loadWorldDefinition } from "../map/map-loader";
+import type { RegisteredOperation } from "../execution/operation-runtime";
 import { createPluginRegistry } from "../world/plugin-registry";
 
 const wallDefinition: ObjectDefinition<Record<string, never>> = {
@@ -65,7 +66,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "using the fridge" },
       domainFailures: [{ code: "occupied", summary: "Fridge occupied" }],
-      resultSchema: z.object({}).strict(),
+      resultSchema: z.object({ status: z.literal("completed") }).strict(),
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
@@ -89,6 +90,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
             expectedObjectVersion: context.object.version,
           },
         ],
+        result: { status: "completed" },
       }),
       fail: (state, context) =>
         state.holder === context.actor.agentId
@@ -172,9 +174,48 @@ export const testPlugin = definePlugin(
 
 export const testPluginRegistry = createPluginRegistry([testPlugin]);
 
-export const testSimulationRulesLock = SimulationRulesLockSchema.parse({
-  hash: "c".repeat(64),
-  rules: {
+const synchronizedWaitOperation: RegisteredOperation = {
+  id: "test.synchronized_wait" as never,
+  ownerPluginId: null,
+  taskSlots: ["HEAD", "BODY"],
+  eventIgnore: [],
+  publicBehavior: { kind: "visible", label: "waiting" },
+  domainFailures: [],
+  resultSchema: z.object({}).strict(),
+  argumentsSchema: () =>
+    z.object({ durationTicks: z.number().int().positive() }).strict(),
+  offers: () => [],
+  canStart: () => ({ available: true }),
+  resolveDuration: (_context, value) => ({
+    kind: "fixed",
+    totalTicks: z.number().int().positive().parse(value["durationTicks"]),
+  }),
+  createPlan: (_context, value, callId) => {
+    const durationTicks = z.number().int().positive().parse(value["durationTicks"]);
+    return {
+      kind: "prepared",
+      plan: {
+        currentActionIndex: 0,
+        actions: [
+          {
+            id: `${callId}:action:0`,
+            kind: "wait",
+            durationTicks,
+            progressTicks: 0,
+          },
+        ],
+      },
+    };
+  },
+  fuse: () => null,
+  terminalResult: () => ({}),
+};
+(testPluginRegistry.operations as Map<unknown, RegisteredOperation>).set(
+  synchronizedWaitOperation.id,
+  synchronizedWaitOperation,
+);
+
+export const testSimulationRulesLock = createSimulationRulesLock({
     schemaVersion: 1,
     id: "default",
     version: 1,
@@ -215,7 +256,6 @@ export const testSimulationRulesLock = SimulationRulesLockSchema.parse({
       fullContentThreshold: 1,
       unclearContentThreshold: 0.25,
     },
-  },
 });
 
 export function simulationTestWorld() {

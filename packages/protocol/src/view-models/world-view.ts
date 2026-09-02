@@ -2,12 +2,14 @@ import { z } from "zod";
 
 import { DomainEventSchema } from "../events/domain-event";
 import { OperationDurationSchema } from "../execution/task-contract";
+import { JsonObjectSchema } from "../json/json-value";
 import {
   AgentIdSchema,
   EntityIdSchema,
   OperationCallIdSchema,
   OperationIdSchema,
   RequestIdSchema,
+  TaskOptionIdSchema,
   WorldIdSchema,
 } from "../identity/ids";
 import { CoordinateSchema, FacingSchema } from "../world/coordinate";
@@ -101,6 +103,42 @@ export const PendingDecisionViewSchema = z
     status: z.enum(["pending", "ready", "error"]),
     reason: z.string().min(1),
     proposalReason: z.string().min(1).nullable(),
+    headProposal: z
+      .discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("continue"),
+            label: z.string().min(1).max(160),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("replace"),
+            taskOptionId: TaskOptionIdSchema,
+            label: z.string().min(1).max(160),
+            arguments: JsonObjectSchema,
+          })
+          .strict(),
+      ])
+      .nullable(),
+    bodyProposal: z
+      .discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("continue"),
+            label: z.string().min(1).max(160),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("replace"),
+            taskOptionId: TaskOptionIdSchema,
+            label: z.string().min(1).max(160),
+            arguments: JsonObjectSchema,
+          })
+          .strict(),
+      ])
+      .nullable(),
     error: TechnicalFailureSchema.nullable(),
   })
   .strict();

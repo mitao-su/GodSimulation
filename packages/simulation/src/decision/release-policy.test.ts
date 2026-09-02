@@ -23,7 +23,7 @@ import type { WorldState } from "../world/world-state";
 const SYNCHRONIZED_WAIT: TaskOption = {
   kind: "operation",
   id: "task-option:synchronized-wait" as never,
-  operationId: "core.wait" as never,
+  operationId: "test.synchronized_wait" as never,
   label: "Synchronized wait",
   taskSlots: ["HEAD", "BODY"],
   argumentSchema: {},
@@ -349,28 +349,35 @@ describe("decision release policy", () => {
   it("rejects selecting a synchronized task on only one declared track", () => {
     const thinking = requests({ ...simulationTestWorld(), reviewRequired: false }, true);
     const full = synchronizedDecision(thinking, "alice");
-    const aliceReady = accept(readyWorld(thinking, "bob"), thinking, "alice", {
-      ...full,
-      body: { kind: "continue" },
-    });
-
-    expect(() => releaseDecisionCycle(aliceReady, testPluginRegistry)).toThrow(
-      /all declared tracks/i,
+    const result = acceptDecisionResult(
+      readyWorld(thinking, "bob"),
+      resultFor(thinking, "alice", {
+        ...full,
+        body: { kind: "continue" },
+      }),
     );
+
+    expect(result).toMatchObject({
+      accepted: false,
+      reason: expect.stringMatching(/all declared tracks/i),
+    });
   });
 
   it("rejects different arguments for the two halves of a synchronized task", () => {
     const thinking = requests({ ...simulationTestWorld(), reviewRequired: false }, true);
-    const aliceReady = accept(
+    const result = acceptDecisionResult(
       readyWorld(thinking, "bob"),
-      thinking,
-      "alice",
-      synchronizedDecision(thinking, "alice", 10, 11),
+      resultFor(
+        thinking,
+        "alice",
+        synchronizedDecision(thinking, "alice", 10, 11),
+      ),
     );
 
-    expect(() => releaseDecisionCycle(aliceReady, testPluginRegistry)).toThrow(
-      /same arguments/i,
-    );
+    expect(result).toMatchObject({
+      accepted: false,
+      reason: expect.stringMatching(/same arguments/i),
+    });
   });
 
   it("rejects replacing only one half of an existing synchronized call", () => {
@@ -493,6 +500,14 @@ describe("decision release policy", () => {
         agentId: "alice",
         outcome: "cancelled",
         reasonCode: "task_replaced",
+      }),
+      expect.objectContaining({
+        type: "operation_result",
+        agentId: "alice",
+        terminal: true,
+        outcome: "cancelled",
+        reasonCode: "task_replaced",
+        result: {},
       }),
     ]);
   });

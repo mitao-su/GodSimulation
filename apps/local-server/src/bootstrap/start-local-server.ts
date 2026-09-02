@@ -65,12 +65,8 @@ function configuredDecisionProvider(config: LocalConfig): DecisionProvider {
   }
   return new FixedDecisionProvider({
     defaultDecision: {
-      head: { kind: "continue" },
-      body: {
-        kind: "operation",
-        operationId: "core.wait" as never,
-        arguments: { durationTicks: 10 },
-      },
+      head: { kind: "empty" },
+      body: { kind: "empty" },
     },
   });
 }

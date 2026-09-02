@@ -1,38 +1,16 @@
-import type {
-  AgentId,
-  EntityId,
-  EventId,
-  OperationCallId,
-} from "@god-sim/protocol";
+import type { AgentId } from "@god-sim/protocol";
 
 import {
-  replanMoveOperation,
-  type ReplanMoveOperationResult,
-} from "./operation-planner";
-import type { ActiveOperation } from "./operation";
+  createOperationRuntimeContext,
+  type OperationRecoveryFailure,
+  type OperationRecoveryResult,
+} from "./operation-runtime";
 import type { AgentNavigationKnowledge } from "./path-planner";
 import type { PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 
-export interface TraversalFailure {
-  readonly callId: OperationCallId;
-  readonly entityId: EntityId;
-  readonly observedObjectVersion: number;
-  readonly reasonCode: string;
-  readonly sourceEventId: EventId;
-}
-
-export type RecoveryResult =
-  | {
-      readonly kind: "replanned";
-      readonly operation: ActiveOperation;
-      readonly knowledge: AgentNavigationKnowledge;
-    }
-  | {
-      readonly kind: "needs_decision";
-      readonly reasonCode: string;
-      readonly knowledge: AgentNavigationKnowledge;
-    };
+export type TraversalFailure = OperationRecoveryFailure;
+export type RecoveryResult = OperationRecoveryResult;
 
 export function recoverBlockedOperation(
   world: WorldState,
@@ -47,37 +25,18 @@ export function recoverBlockedOperation(
   if (!operation) {
     throw new Error(`Operation ${failure.callId} is not active for ${agentId}`);
   }
-  const knownTraversalBlockers = new Map(knowledge.knownTraversalBlockers);
-  knownTraversalBlockers.set(failure.entityId, {
-    entityId: failure.entityId,
-    observedObjectVersion: failure.observedObjectVersion,
-    reasonCode: failure.reasonCode,
-    sourceEventId: failure.sourceEventId,
-  });
-  const updatedKnowledge = { knownTraversalBlockers };
-  if (operation.operationId !== "core.move") {
+  const runtime = registry.getOperation(operation.operationId);
+  if (!runtime?.recover) {
     return {
       kind: "needs_decision",
       reasonCode: failure.reasonCode,
-      knowledge: updatedKnowledge,
+      knowledge,
     };
   }
-  const replanned: ReplanMoveOperationResult = replanMoveOperation(
-    world,
-    registry,
-    agentId,
+  return runtime.recover(
+    createOperationRuntimeContext(world, registry, agentId),
     operation,
-    updatedKnowledge,
+    failure,
+    knowledge,
   );
-  return replanned.kind === "replanned"
-    ? {
-        kind: "replanned",
-        operation: replanned.operation,
-        knowledge: updatedKnowledge,
-      }
-    : {
-        kind: "needs_decision",
-        reasonCode: replanned.reasonCode,
-        knowledge: updatedKnowledge,
-      };
 }

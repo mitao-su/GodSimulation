@@ -1,6 +1,7 @@
 import {
   CheckpointIdSchema,
   DecisionIdentitySchema,
+  verifySimulationRulesLock,
   type CheckpointId,
   type HostToWorkerMessage,
   type PluginLock,
@@ -48,6 +49,9 @@ export class WorldSession {
   #shutdownRequested = false;
 
   constructor(options: WorldSessionOptions) {
+    const simulationRulesLock = verifySimulationRulesLock(
+      options.simulationRulesLock,
+    );
     const map = MapDefinitionSchema.parse(options.worldDefinition);
     const registry = createPluginRegistry(options.plugins);
     for (const spawn of map.spawns) {
@@ -67,12 +71,12 @@ export class WorldSession {
           snapshot: options.restoredSnapshot,
           worldDefinition: map,
           plugins: options.plugins,
-          simulationRulesLock: options.simulationRulesLock,
+          simulationRulesLock,
         })
       : createSimulation({
           worldDefinition: map,
           plugins: options.plugins,
-          simulationRulesLock: options.simulationRulesLock,
+          simulationRulesLock,
           reviewRequired: options.reviewRequired,
           seed: options.deterministicSeed,
           pluginLockHash: options.pluginLock.hash,

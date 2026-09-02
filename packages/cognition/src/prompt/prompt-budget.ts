@@ -3,6 +3,7 @@ export type PromptSection =
   | "persona"
   | "body_state"
   | "active_tasks"
+  | "operation_results"
   | "memory"
   | "perception"
   | "task_options"
@@ -14,6 +15,7 @@ export const PROMPT_SECTION_CHARACTER_LIMITS: Readonly<Record<PromptSection, num
   persona: 4_000,
   body_state: 2_000,
   active_tasks: 8_000,
+  operation_results: 16_000,
   memory: 8_000,
   perception: 16_000,
   task_options: 64_000,

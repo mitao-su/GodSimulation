@@ -5,8 +5,6 @@ import {
   type DomainEvent,
   type EntityId,
   type EventId,
-  type OperationCallId,
-  type OperationId,
 } from "@god-sim/protocol";
 
 import {
@@ -21,6 +19,12 @@ import {
   type OperationAdvanceResult,
 } from "../execution/action-runner";
 import { recoverBlockedOperation } from "../execution/local-recovery";
+import {
+  accumulateOperationObservations,
+  operationInteractionLifecycleProposal,
+  recordOperationTermination,
+} from "../execution/operation-lifecycle";
+import type { ActiveOperation, OperationObservation } from "../execution/operation";
 import { detectPlanConflict } from "../decision/plan-conflict-detector";
 import { arbitrateInteractionBatch } from "../interaction/effect-arbiter";
 import { commitProposal } from "../interaction/effect-committer";
@@ -64,15 +68,8 @@ interface RecordedOperationFailure extends AgentOperationFailure {
 
 interface FailedOperationTermination {
   readonly agentId: AgentId;
-  readonly callId: OperationCallId;
-  readonly operationId: OperationId;
+  readonly operation: ActiveOperation;
   readonly reasonCode: string;
-}
-
-interface OperationIdentity {
-  readonly agentId: AgentId;
-  readonly callId: OperationCallId;
-  readonly operationId: OperationId;
 }
 
 function eventMetadata(causationId: string, correlationId = causationId) {
@@ -258,6 +255,9 @@ function completeInteraction(
       agentId: request.agentId,
       callId: request.callId,
       label: operation.label,
+      ...(request.purpose === "direct" && proposed.result !== null
+        ? { result: proposed.result }
+        : {}),
     });
   }
   return { world, events, failures, completedOperations };
@@ -510,14 +510,17 @@ export function refreshAllPerceptions(
   readonly world: WorldState;
   readonly events: readonly DomainEvent[];
   readonly conflicts: readonly DecisionNeed[];
+  readonly observationsByAgent: ReadonlyMap<AgentId, readonly OperationObservation[]>;
 } {
   let world = worldInput;
   const events: DomainEvent[] = [];
   const conflicts: DecisionNeed[] = [];
+  const observationsByAgent = new Map<AgentId, readonly OperationObservation[]>();
   for (const agentId of [...world.agents.keys()].sort((left, right) =>
     left.localeCompare(right),
   )) {
     const scan = collectPerceptionCandidates(world, registry, agentId);
+    observationsByAgent.set(agentId, scan.observations);
     world = applyPerceptionVisibility(world, scan);
     const recorded = recordPerceptionCandidates(
       world,
@@ -525,6 +528,12 @@ export function refreshAllPerceptions(
       (candidate) => perceptionMetadata(world.tick, candidate),
     );
     world = recorded.world;
+    world = accumulateOperationObservations(
+      world,
+      registry,
+      agentId,
+      scan.observations,
+    );
     events.push(...recorded.events);
     const agent = world.agents.get(agentId);
     if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
@@ -536,7 +545,7 @@ export function refreshAllPerceptions(
       });
     }
   }
-  return { world, events, conflicts };
+  return { world, events, conflicts, observationsByAgent };
 }
 
 function recordOperationFailures(
@@ -630,27 +639,18 @@ function applyOperationFailureLifecycles(
     const action = operation?.plan.actions[operation.plan.currentActionIndex];
     if (!operation || !action || action.kind !== "interact_object") continue;
 
-    const proposed = proposeInteraction(world, registry, {
-      agentId: item.agentId,
-      entityId: action.targetEntityId,
-      interactionId: action.interactionId,
-      parameters: interactionParameters(
-        world,
-        item.agentId,
-        item.failure.callId,
-      ),
-      phase: "fail",
-      failureCode: item.failure.code,
-    });
-    if (!proposed.accepted) {
-      throw new Error(
-        `Operation failure lifecycle ${item.failure.callId} was rejected: ${proposed.reasonCode}: ${proposed.summary}`,
-      );
-    }
+    const proposal = operationInteractionLifecycleProposal(
+      world,
+      registry,
+      item.agentId,
+      operation,
+      "fail",
+      item.failure.code,
+    );
     const committed = commitProposal(
       world,
       registry,
-      proposed.proposal,
+      proposal,
       eventMetadata(`${item.failure.actionId}:fail`, item.failure.callId),
     );
     if (!committed.accepted) {
@@ -732,8 +732,7 @@ function recoverFailedOperations(
         );
         terminations.push({
           agentId: item.agentId,
-          callId: item.failure.callId,
-          operationId: operation.operationId,
+          operation,
           reasonCode: recovered.reasonCode,
         });
         needs.push({
@@ -754,8 +753,7 @@ function recoverFailedOperations(
     );
     terminations.push({
       agentId: item.agentId,
-      callId: item.failure.callId,
-      operationId: operation.operationId,
+      operation,
       reasonCode: item.failure.code,
     });
     needs.push({
@@ -769,18 +767,14 @@ function recoverFailedOperations(
   return { world, needs, terminations };
 }
 
-function activeOperationIdentities(world: WorldState): Map<string, OperationIdentity> {
-  const identities = new Map<string, OperationIdentity>();
+function activeOperationsAtTickStart(world: WorldState): Map<string, ActiveOperation> {
+  const operations = new Map<string, ActiveOperation>();
   for (const [agentId, agent] of world.agents) {
     for (const operation of agent.activeOperations.values()) {
-      identities.set(`${agentId}:${operation.callId}`, {
-        agentId,
-        callId: operation.callId,
-        operationId: operation.operationId,
-      });
+      operations.set(`${agentId}:${operation.callId}`, operation);
     }
   }
-  return identities;
+  return operations;
 }
 
 export function runTickPipeline(
@@ -794,7 +788,7 @@ export function runTickPipeline(
   let world = advanceWorldClock(worldInput);
   const events: DomainEvent[] = [];
   const needs = new Map<AgentId, DecisionNeed>();
-  const operationIdentities = activeOperationIdentities(world);
+  const operationSnapshots = activeOperationsAtTickStart(world);
 
   const bladder = advanceBladderNeeds(world);
   const recordedNeeds = recordNeedCrossings(bladder.world, bladder.crossings);
@@ -842,19 +836,19 @@ export function runTickPipeline(
   for (const termination of [...failed.terminations].sort(
     (left, right) =>
       left.agentId.localeCompare(right.agentId) ||
-      left.callId.localeCompare(right.callId),
+      left.operation.callId.localeCompare(right.operation.callId),
   )) {
-    const written = appendDomainEvent(
+    const written = recordOperationTermination(
       world,
-      {
-        type: "operation_terminated",
-        ...termination,
-        outcome: "failed",
-      },
-      eventMetadata(termination.callId),
+      registry,
+      termination.agentId,
+      termination.operation,
+      "failed",
+      termination.reasonCode,
+      eventMetadata(termination.operation.callId),
     );
     world = written.world;
-    events.push(written.event);
+    events.push(...written.events);
   }
 
   const completedByCall = new Map<string, CompletedOperation>();
@@ -869,26 +863,36 @@ export function runTickPipeline(
       left.agentId.localeCompare(right.agentId) ||
       left.callId.localeCompare(right.callId),
   )) {
-    const identity = operationIdentities.get(
+    const snapshot = operationSnapshots.get(
       `${completed.agentId}:${completed.callId}`,
     );
-    if (!identity) {
+    if (!snapshot) {
       throw new Error(
         `Completed operation ${completed.agentId}:${completed.callId} has no identity`,
       );
     }
-    const written = appendDomainEvent(
+    const runtime = registry.getOperation(snapshot.operationId);
+    if (!runtime) {
+      throw new Error(`Operation ${snapshot.operationId} is not registered`);
+    }
+    const operation = runtime.accumulateObservations
+      ? runtime.accumulateObservations(
+          snapshot,
+          perception.observationsByAgent.get(completed.agentId) ?? [],
+        )
+      : snapshot;
+    const written = recordOperationTermination(
       world,
-      {
-        type: "operation_terminated",
-        ...identity,
-        outcome: "completed",
-        reasonCode: "operation_completed",
-      },
+      registry,
+      completed.agentId,
+      operation,
+      "completed",
+      "operation_completed",
       eventMetadata(completed.callId),
+      completed.result,
     );
     world = written.world;
-    events.push(written.event);
+    events.push(...written.events);
     addDecisionNeed(needs, completed.agentId, {
       code: "operation_completed",
       summary: `${completed.label} completed`,
