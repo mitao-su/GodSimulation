@@ -108,10 +108,13 @@ describe("local server restart", () => {
     try {
       const restored = await store.loadLatest(beforeShutdown.worldId);
       expect(restored.snapshot).toMatchObject({
-        schemaVersion: 2,
+        schemaVersion: 3,
         worldId: beforeShutdown.worldId,
         worldVersion: beforeShutdown.worldVersion,
         worldTick: beforeShutdown.worldTick,
+        simulationRulesLock: {
+          rules: { id: "default", version: 1 },
+        },
       });
       expect(restored.events).toEqual([]);
     } finally {

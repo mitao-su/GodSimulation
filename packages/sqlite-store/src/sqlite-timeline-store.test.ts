@@ -2,22 +2,70 @@ import { describe, expect, it } from "vitest";
 
 import {
   DomainEventSchema,
-  WorldSnapshotV2Schema,
+  SimulationRulesLockSchema,
+  WorldSnapshotCurrentSchema,
   type DomainEvent,
-  type WorldSnapshotV2,
+  type WorldSnapshotCurrent,
 } from "@god-sim/protocol";
 import type { ModelCallRecord, WorldCheckpoint } from "@god-sim/timeline";
 
 import { createSqliteTimelineStore } from "./sqlite-timeline-store";
 
-function snapshotAt(sequence: number, marker = `snapshot-${sequence}`): WorldSnapshotV2 {
-  return WorldSnapshotV2Schema.parse({
-    schemaVersion: 2,
+const simulationRulesLock = SimulationRulesLockSchema.parse({
+  hash: "c".repeat(64),
+  rules: {
+    schemaVersion: 1,
+    id: "default",
+    version: 1,
+    time: { secondsPerGameTick: 6, epoch: { day: 1, hour: 8, minute: 0 } },
+    context: { attentionBudgetTokens: 200_000, technicalHardLimitTokens: 200_000 },
+    fatigue: {
+      timeWeight: 0.6,
+      tokenWeight: 0.4,
+      forcedSleepThreshold: 0.6,
+      timePressureFullAtTicks: 43_200,
+    },
+    inventory: { capacityUnits: 9 },
+    operations: {
+      move: { ticksPerCell: 2 },
+      wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
+      observe: { durationTicks: 1 },
+    },
+    memory: {
+      importance: {
+        critical: { initialStrength: 1, halfLifeDays: 90 },
+        high: { initialStrength: 1, halfLifeDays: 30 },
+        normal: { initialStrength: 1, halfLifeDays: 7 },
+        low: { initialStrength: 1, halfLifeDays: 2 },
+      },
+      deletionThreshold: 0.1,
+      recall: {
+        maxReturnTokensPerOperation: 8_000,
+        rankingWeights: {
+          semanticSimilarity: 0.55,
+          keywordMatch: 0.25,
+          currentStrength: 0.2,
+        },
+      },
+    },
+    sound: {
+      speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
+      attenuationPerTile: 0.25,
+      fullContentThreshold: 1,
+      unclearContentThreshold: 0.25,
+    },
+  },
+});
+
+function snapshotAt(sequence: number, marker = `snapshot-${sequence}`): WorldSnapshotCurrent {
+  return WorldSnapshotCurrentSchema.parse({
+    schemaVersion: 3,
     worldId: "starter-world",
     worldVersion: sequence,
     worldTick: sequence,
     lastEventSequence: sequence,
     pluginLockHash: "a".repeat(64),
+    simulationRulesLock,
     history: { mode: "strict", causalFromSequence: 1 },
     causalEventIds:
       sequence === 0
@@ -66,10 +114,19 @@ function modelCall(): ModelCallRecord {
     protocolSchemaVersion: 1,
     decisionCycleId: "cycle:1" as never,
     pluginLockHash: "a".repeat(64) as never,
-    decisionReasonCode: "initial_goal",
+    decisionReasonCode: "initial_task",
     modelId: "fixed-test",
     status: "accepted",
-    goalOptionId: "goal-option:alice:wait" as never,
+    taskDecision: {
+      schemaVersion: 2,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        taskOptionId: "task-option:alice:wait" as never,
+        arguments: { durationTicks: 10 },
+      },
+      reason: "Alice waits",
+    },
     responseReason: "Alice waits",
     latencyMs: 10,
     retryOfRequestId: null,
@@ -170,6 +227,25 @@ describe("SQLite timeline store", () => {
       await store.saveModelCall(record);
       await expect(
         store.saveModelCall({ ...record, decisionReasonCode: "conflict" }),
+      ).rejects.toThrow(/model call replay conflicts/i);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("includes the complete task decision in exact replay comparison", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const record = modelCall();
+    try {
+      await store.saveModelCall(record);
+      await expect(
+        store.saveModelCall({
+          ...record,
+          taskDecision: {
+            ...record.taskDecision!,
+            body: { kind: "continue" },
+          },
+        }),
       ).rejects.toThrow(/model call replay conflicts/i);
     } finally {
       await store.close();

@@ -1,6 +1,56 @@
 import { describe, expect, it } from "vitest";
 
-import { HostToWorkerMessageSchema, WorkerToHostMessageSchema } from "./host-worker-message";
+import {
+  SimulationRulesLockSchema,
+  HostToWorkerMessageSchema,
+  WorkerToHostMessageSchema,
+} from "..";
+
+const simulationRulesLock = SimulationRulesLockSchema.parse({
+  hash: "c".repeat(64),
+  rules: {
+    schemaVersion: 1,
+    id: "default",
+    version: 1,
+    time: { secondsPerGameTick: 6, epoch: { day: 1, hour: 8, minute: 0 } },
+    context: { attentionBudgetTokens: 200_000, technicalHardLimitTokens: 200_000 },
+    fatigue: {
+      timeWeight: 0.6,
+      tokenWeight: 0.4,
+      forcedSleepThreshold: 0.6,
+      timePressureFullAtTicks: 43_200,
+    },
+    inventory: { capacityUnits: 9 },
+    operations: {
+      move: { ticksPerCell: 2 },
+      wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
+      observe: { durationTicks: 1 },
+    },
+    memory: {
+      importance: {
+        critical: { initialStrength: 1, halfLifeDays: 90 },
+        high: { initialStrength: 1, halfLifeDays: 30 },
+        normal: { initialStrength: 1, halfLifeDays: 7 },
+        low: { initialStrength: 1, halfLifeDays: 2 },
+      },
+      deletionThreshold: 0.1,
+      recall: {
+        maxReturnTokensPerOperation: 8_000,
+        rankingWeights: {
+          semanticSimilarity: 0.55,
+          keywordMatch: 0.25,
+          currentStrength: 0.2,
+        },
+      },
+    },
+    sound: {
+      speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
+      attenuationPerTile: 0.25,
+      fullContentThreshold: 1,
+      unclearContentThreshold: 0.25,
+    },
+  },
+});
 
 describe("host-worker messages", () => {
   it("accepts a versioned snapshot when initializing a restored world", () => {
@@ -19,6 +69,7 @@ describe("host-worker messages", () => {
           },
         ],
       },
+      simulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       restoredSnapshot: {
@@ -36,6 +87,29 @@ describe("host-worker messages", () => {
     if (message.type === "initialize") {
       expect(message.restoredSnapshot?.worldVersion).toBe(12);
     }
+  });
+
+  it("rejects initialization without a simulation rule lock", () => {
+    expect(
+      HostToWorkerMessageSchema.safeParse({
+        type: "initialize",
+        protocolVersion: 1,
+        worldDefinition: {},
+        pluginLock: {
+          hash: "a".repeat(64),
+          entries: [
+            {
+              pluginId: "test.plugin",
+              version: "0.1.0",
+              stateVersion: 1,
+              buildHash: "b".repeat(64),
+            },
+          ],
+        },
+        reviewRequired: true,
+        deterministicSeed: 1,
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects a decision result without request identity", () => {
@@ -127,12 +201,13 @@ describe("host-worker messages", () => {
         },
       ],
       snapshot: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         worldId: "starter-world",
         worldVersion: 8,
         worldTick: 42,
         lastEventSequence: 17,
         pluginLockHash: "b".repeat(64),
+        simulationRulesLock,
         history: { mode: "strict", causalFromSequence: 1 },
         causalEventIds: ["event:starter-world:17"],
         state: {},
@@ -143,6 +218,27 @@ describe("host-worker messages", () => {
       type: "checkpoint_ready",
       checkpointId: "checkpoint:starter-world:8:17",
     });
+  });
+
+  it("rejects a legacy snapshot as a new checkpoint payload", () => {
+    expect(
+      WorkerToHostMessageSchema.safeParse({
+        type: "checkpoint_ready",
+        checkpointId: "checkpoint:starter-world:8:17",
+        events: [],
+        snapshot: {
+          schemaVersion: 2,
+          worldId: "starter-world",
+          worldVersion: 8,
+          worldTick: 42,
+          lastEventSequence: 17,
+          pluginLockHash: "b".repeat(64),
+          history: { mode: "strict", causalFromSequence: 1 },
+          causalEventIds: [],
+          state: {},
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("acknowledges only a named checkpoint", () => {

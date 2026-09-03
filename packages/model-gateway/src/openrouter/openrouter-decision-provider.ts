@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import {
-  GoalProposalSchema,
   ModelDecisionRequestSchema,
-  type GoalProposal,
+  TaskDecisionSchema,
   type ModelDecisionRequest,
+  type TaskDecision,
 } from "@god-sim/protocol";
 
 import { ModelConfigSchema, type ModelConfig } from "../config/model-config";
@@ -35,18 +35,39 @@ function redact(message: string, apiKey: string): string {
 }
 
 function responseFormat() {
+  const selection = {
+    anyOf: [
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind"],
+        properties: { kind: { const: "continue" } },
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "taskOptionId", "arguments"],
+        properties: {
+          kind: { const: "replace" },
+          taskOptionId: { type: "string" },
+          arguments: { type: "object", additionalProperties: true },
+        },
+      },
+    ],
+  };
   return {
     type: "json_schema",
     json_schema: {
-      name: "goal_proposal",
+      name: "task_decision",
       strict: true,
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["schemaVersion", "goalOptionId", "reason"],
+        required: ["schemaVersion", "head", "body", "reason"],
         properties: {
-          schemaVersion: { const: 1 },
-          goalOptionId: { type: "string" },
+          schemaVersion: { const: 2 },
+          head: selection,
+          body: selection,
           reason: { type: "string" },
         },
       },
@@ -63,7 +84,10 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
     this.#fetch = fetchImplementation;
   }
 
-  async decide(requestValue: ModelDecisionRequest, signal: AbortSignal): Promise<GoalProposal> {
+  async decide(
+    requestValue: ModelDecisionRequest,
+    signal: AbortSignal,
+  ): Promise<TaskDecision> {
     const request = ModelDecisionRequestSchema.parse(requestValue);
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.#config.apiKey}`,
@@ -93,7 +117,7 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
       } catch (error) {
         throw new Error("OpenRouter assistant content was not valid JSON", { cause: error });
       }
-      return GoalProposalSchema.parse(parsedContent);
+      return TaskDecisionSchema.parse(parsedContent);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(redact(message, this.#config.apiKey));

@@ -1,5 +1,6 @@
 import type { AgentDefinition } from "../agent/agent-definition";
 import type { ObjectDefinition } from "../object/object-definition";
+import { assertOperationContract } from "../operation/operation-contract";
 import { PluginManifestSchema, type PluginManifest } from "./plugin-manifest";
 import { JsonValueSchema } from "@god-sim/protocol";
 
@@ -53,6 +54,12 @@ export function definePlugin(
 
   for (const definition of registrations.objects) {
     JsonValueSchema.parse(definition.stateSchema.parse(definition.initialState()));
+    for (const interaction of definition.interactions) {
+      assertOperationContract(
+        "Object " + definition.id + " interaction " + interaction.id,
+        interaction,
+      );
+    }
     if (
       definition.traversal &&
       !definition.interactions.some(

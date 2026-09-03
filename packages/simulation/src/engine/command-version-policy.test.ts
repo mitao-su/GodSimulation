@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { simulationTestWorld, testPlugin } from "../testing/simulation-test-fixtures";
+import {
+  simulationTestWorld,
+  testPlugin,
+  testSimulationRulesLock,
+} from "../testing/simulation-test-fixtures";
 import { createSimulation } from "./simulation-engine";
 
 function engine() {
@@ -10,6 +14,7 @@ function engine() {
     reviewRequired: true,
     seed: 1,
     pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
   });
 }
 

@@ -17,12 +17,20 @@ const input = DecisionPromptInputSchema.parse({
   bodySensations: [
     { need: "bladder", level: "comfortable", description: "Bladder is comfortable" },
   ],
-  currentGoal: {
-    goal: { kind: "use_object", targetEntityId: "fridge-1", interactionId: "use" },
-    label: "Use refrigerator",
-    actionKind: "move",
-    actionProgress: 12,
-    lastFailure: null,
+  activeTasks: {
+    tracks: { HEAD: null, BODY: "operation-call:alice:body" },
+    operations: [
+      {
+        callId: "operation-call:alice:body",
+        operationId: "core.wait",
+        label: "Wait",
+        taskSlots: ["BODY"],
+        arguments: { durationTicks: 10 },
+        duration: { kind: "fixed", totalTicks: 10 },
+        startedAtTick: 2,
+        progressTicks: 1,
+      },
+    ],
   },
   memories: [
     {
@@ -34,8 +42,23 @@ const input = DecisionPromptInputSchema.parse({
     },
   ],
   perception: { zoneId: "living-room", visibleEntities: [], heardEvents: [] },
-  goalOptions: [
-    { id: "alice-wait", label: "Wait", goal: { kind: "wait", durationTicks: 10 } },
+  taskOptions: [
+    {
+      kind: "empty",
+      id: "task-option:alice:empty-head",
+      label: "Clear head task",
+      taskSlots: ["HEAD"],
+      argumentSchema: {},
+    },
+    {
+      kind: "operation",
+      id: "task-option:alice:wait",
+      operationId: "core.wait",
+      label: "Wait",
+      taskSlots: ["BODY"],
+      argumentSchema: {},
+      fixedArguments: {},
+    },
   ],
 });
 
@@ -63,10 +86,10 @@ describe("assembleDecisionRequest", () => {
       "[CORE RULES]",
       "[PERSONA]",
       "[BODY STATE]",
-      "[CURRENT GOAL]",
+      "[ACTIVE TASKS]",
       "[RELEVANT MEMORIES]",
       "[CURRENT PERCEPTION]",
-      "[OFFERED GOALS]",
+      "[TASK OPTIONS]",
       "[DECISION REASON]",
       "[RESPONSE FORMAT]",
     ];
@@ -76,7 +99,9 @@ describe("assembleDecisionRequest", () => {
       expect(prompt.indexOf(headings[index]!)).toBeGreaterThan(prompt.indexOf(headings[index - 1]!));
     }
     expect(prompt).not.toContain("occupied by Bob");
-    expect(request.goalOptions).toEqual(input.goalOptions);
+    expect(prompt).toContain('"head"');
+    expect(prompt).toContain('"body"');
+    expect(request.taskOptions).toEqual(input.taskOptions);
   });
 
   it("rejects a plugin contributor that requests an unknown placement", () => {

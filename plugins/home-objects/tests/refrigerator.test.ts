@@ -25,14 +25,14 @@ const useRefrigerator = refrigeratorDefinition.interactions[0];
 
 describe("refrigerator definition", () => {
   it("rejects use while occupied by another agent", () => {
-    expect(useRefrigerator?.canStart({ occupiedBy: "bob" }, context)).toMatchObject({
+    expect(useRefrigerator?.canStart({ occupiedBy: "bob" }, context, {})).toMatchObject({
       available: false,
       reasonCode: "occupied",
     });
   });
 
   it("proposes reserving occupancy at interaction start", () => {
-    expect(useRefrigerator?.start?.({ occupiedBy: null }, context).effects).toEqual([
+    expect(useRefrigerator?.start?.({ occupiedBy: null }, context, {}).effects).toEqual([
       {
         type: "reserve_occupancy",
         entityId: "fridge-1",

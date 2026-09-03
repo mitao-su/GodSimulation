@@ -45,7 +45,7 @@ describe("door definition", () => {
 
   it("proposes opening without mutating the supplied state", () => {
     const state = Object.freeze({ open: false, locked: false });
-    const result = interaction("open").complete(state, context);
+    const result = interaction("open").complete(state, context, {});
 
     expect(result.effects).toContainEqual({
       type: "replace_object_state",
@@ -58,7 +58,7 @@ describe("door definition", () => {
 
   it("reports a locked door without exposing it through normal observation", () => {
     const state = Object.freeze({ open: false, locked: true });
-    expect(interaction("open").canStart(state, context)).toMatchObject({
+    expect(interaction("open").canStart(state, context, {})).toMatchObject({
       available: false,
       reasonCode: "locked",
     });

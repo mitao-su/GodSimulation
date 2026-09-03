@@ -44,6 +44,7 @@ export interface ModelCallRow {
   model_id: string;
   status: string;
   goal_option_id: string | null;
+  task_decision_json: string | null;
   response_reason: string | null;
   latency_ms: number;
   retry_of_request_id: string | null;

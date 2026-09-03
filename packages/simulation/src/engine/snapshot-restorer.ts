@@ -1,418 +1,45 @@
-import { z } from "zod";
+import type { z } from "zod";
 
 import {
-  AgentIdSchema,
-  CoordinateSchema,
-  DecisionCycleIdSchema,
-  DecisionIdentitySchema,
-  DecisionPromptInputSchema,
-  EntityIdSchema,
-  EventIdSchema,
-  FacingSchema,
-  GoalProposalSchema,
-  GoalSchema,
   JsonValueSchema,
-  TechnicalFailureSchema,
-  WorldModeSchema,
   WorldSnapshotSchema,
   type AgentId,
   type EntityId,
-  type EventId,
+  type OperationCallId,
+  type SimulationRulesLock,
+  type TechnicalFailure,
   type WorldSnapshot,
 } from "@god-sim/protocol";
+import type {
+  SerializedAgentSchema,
+  SerializedDecisionCycleSchema,
+  SerializedKnowledgeSchema,
+  SerializedObjectSchema,
+} from "./snapshot-state-codec";
 import {
-  BodySlotSchema,
-  ObservedInteractionAvailabilitySchema,
-} from "@god-sim/plugin-sdk";
+  parseSerializedState,
+  uniqueMap,
+} from "./snapshot-migrations/legacy-snapshot";
+import {
+  validateAndResolveSnapshotMode,
+  validateRestoredOperations,
+  validateSnapshotRulesLock,
+  validateSnapshotWorldIdentity,
+} from "./snapshot-restore-validation";
 
 import { MapDefinitionSchema } from "../map/map-definition";
 import { loadWorldDefinition } from "../map/map-loader";
 import type { AgentKnowledge } from "../perception/agent-knowledge";
+import type { SimulationRegistry } from "./simulation-registry";
 import type { PluginRegistry } from "../world/plugin-registry";
 import {
   bladderSensation,
   type AgentState,
   type DecisionCycleState,
   type ObjectInstance,
-  type WorldHistory,
   type WorldState,
 } from "../world/world-state";
-import { assertSnapshotCausality } from "./snapshot-causality";
 
-const ObservationKindSchema = z.enum([
-  "vision",
-  "hearing",
-  "contact",
-  "interaction",
-  "body",
-  "memory",
-]);
-
-const ActionBaseShape = {
-  id: z.string().min(1),
-  goalId: z.string().min(1),
-  durationTicks: z.number().int().positive(),
-  progressTicks: z.number().int().nonnegative(),
-  slots: z.array(BodySlotSchema),
-};
-
-const MoveActionSchema = z
-  .object({
-    ...ActionBaseShape,
-    kind: z.literal("move"),
-    path: z.array(CoordinateSchema).min(1),
-  })
-  .strict();
-
-const ObjectInteractionActionSchema = z
-  .object({
-    ...ActionBaseShape,
-    kind: z.literal("interact_object"),
-    purpose: z.enum(["goal", "automatic_traversal"]),
-    targetEntityId: EntityIdSchema,
-    interactionId: z.string().min(1),
-    started: z.boolean(),
-  })
-  .strict();
-
-const LegacyObjectActionSchema = z
-  .object({
-    ...ActionBaseShape,
-    kind: z.enum([
-      "open_object",
-      "close_object",
-      "lock_object",
-      "unlock_object",
-      "use_object",
-    ]),
-    targetEntityId: EntityIdSchema,
-    interactionId: z.string().min(1),
-    started: z.boolean(),
-  })
-  .strict();
-
-const WaitActionSchema = z
-  .object({ ...ActionBaseShape, kind: z.literal("wait") })
-  .strict();
-
-const ObserveActionSchema = z
-  .object({
-    ...ActionBaseShape,
-    kind: z.literal("observe"),
-    targetEntityId: EntityIdSchema,
-  })
-  .strict();
-
-const RunningActionSchema = z.discriminatedUnion("kind", [
-  MoveActionSchema,
-  ObjectInteractionActionSchema,
-  WaitActionSchema,
-  ObserveActionSchema,
-]);
-
-const LegacyRunningActionSchema = z.discriminatedUnion("kind", [
-  MoveActionSchema,
-  LegacyObjectActionSchema,
-  WaitActionSchema,
-  ObserveActionSchema,
-]);
-
-const ActiveGoalSchema = z
-  .object({
-    id: z.string().min(1),
-    goal: GoalSchema,
-    label: z.string().min(1),
-  })
-  .strict();
-
-const ActionPlanSchema = z
-  .object({
-    goalId: z.string().min(1),
-    goal: GoalSchema,
-    actions: z.array(RunningActionSchema).min(1),
-    currentActionIndex: z.number().int().nonnegative(),
-  })
-  .strict()
-  .refine((plan) => plan.currentActionIndex < plan.actions.length, {
-    message: "Snapshot action index is outside its action plan",
-  });
-
-const LegacyActionPlanSchema = z
-  .object({
-    goalId: z.string().min(1),
-    goal: GoalSchema,
-    actions: z.array(LegacyRunningActionSchema).min(1),
-    currentActionIndex: z.number().int().nonnegative(),
-  })
-  .strict()
-  .refine((plan) => plan.currentActionIndex < plan.actions.length, {
-    message: "Snapshot action index is outside its action plan",
-  });
-
-const BodySlotsSchema = z
-  .object({
-    HEAD: z.string().min(1).nullable(),
-    HANDS: z.string().min(1).nullable(),
-    BODY: z.string().min(1).nullable(),
-  })
-  .strict();
-
-const KnownObjectSchema = z
-  .object({
-    entityId: EntityIdSchema,
-    displayName: z.string().min(1),
-    status: z.string().min(1),
-    summary: z.string().min(1),
-    observable: JsonValueSchema,
-    interactionAvailability: z.array(ObservedInteractionAvailabilitySchema).default([]),
-    position: CoordinateSchema,
-    sourceEventId: EventIdSchema,
-    observedAtTick: z.number().int().nonnegative(),
-    observationKind: ObservationKindSchema,
-  })
-  .strict();
-
-const KnownAgentSchema = z
-  .object({
-    agentId: AgentIdSchema,
-    displayName: z.string().min(1),
-    position: CoordinateSchema,
-    sourceEventId: EventIdSchema,
-    observedAtTick: z.number().int().nonnegative(),
-  })
-  .strict();
-
-const ImmediateMemorySchema = z
-  .object({
-    id: z.string().min(1),
-    sourceEventId: EventIdSchema,
-    formedAtTick: z.number().int().nonnegative(),
-    observationKind: ObservationKindSchema,
-    summary: z.string().min(1),
-    relatedEntityId: EntityIdSchema.nullable(),
-  })
-  .strict();
-
-const KnownTraversalBlockerSchema = z
-  .object({
-    entityId: EntityIdSchema,
-    observedObjectVersion: z.number().int().nonnegative(),
-    reasonCode: z.string().min(1),
-    sourceEventId: EventIdSchema,
-  })
-  .strict();
-
-const SerializedKnowledgeSchema = z
-  .object({
-    zoneId: z.string().min(1),
-    objects: z.array(KnownObjectSchema),
-    agents: z.array(KnownAgentSchema),
-    visibleEntityIds: z.array(EntityIdSchema),
-    knownTraversalBlockers: z.array(KnownTraversalBlockerSchema),
-  })
-  .strict();
-
-const LegacySerializedKnowledgeSchema = z
-  .object({
-    zoneId: z.string().min(1),
-    objects: z.array(KnownObjectSchema),
-    agents: z.array(KnownAgentSchema),
-    visibleEntityIds: z.array(EntityIdSchema),
-    knownLockedDoorIds: z.array(EntityIdSchema),
-  })
-  .strict();
-
-const SerializedAgentSchema = z
-  .object({
-    id: AgentIdSchema,
-    definitionId: z.string().min(1),
-    displayName: z.string().min(1),
-    resourceId: z.string().min(1),
-    animationSetId: z.string().min(1),
-    position: CoordinateSchema,
-    facing: FacingSchema,
-    bladder: z.number().int().min(0).max(100),
-    bladderSensation: z.enum(["comfortable", "noticeable", "urgent"]),
-    currentGoal: ActiveGoalSchema.nullable(),
-    actionPlan: ActionPlanSchema.nullable(),
-    bodySlots: BodySlotsSchema,
-    knowledge: SerializedKnowledgeSchema,
-    memories: z.array(ImmediateMemorySchema),
-  })
-  .strict();
-
-const LegacySerializedAgentSchema = z
-  .object({
-    id: AgentIdSchema,
-    definitionId: z.string().min(1),
-    displayName: z.string().min(1),
-    resourceId: z.string().min(1),
-    animationSetId: z.string().min(1),
-    position: CoordinateSchema,
-    facing: FacingSchema,
-    bladder: z.number().int().min(0).max(100),
-    bladderSensation: z.enum(["comfortable", "noticeable", "urgent"]),
-    currentGoal: ActiveGoalSchema.nullable(),
-    actionPlan: LegacyActionPlanSchema.nullable(),
-    bodySlots: BodySlotsSchema,
-    knowledge: LegacySerializedKnowledgeSchema,
-    memories: z.array(ImmediateMemorySchema),
-  })
-  .strict();
-
-const SerializedObjectSchema = z
-  .object({
-    id: EntityIdSchema,
-    definitionId: z.string().min(1),
-    version: z.number().int().nonnegative(),
-    position: CoordinateSchema,
-    facing: FacingSchema,
-    state: JsonValueSchema,
-  })
-  .strict();
-
-const SerializedDecisionRequestSchema = z
-  .object({
-    agentId: AgentIdSchema,
-    identity: DecisionIdentitySchema,
-    promptInput: DecisionPromptInputSchema,
-    acceptedProposal: GoalProposalSchema.nullable(),
-    failure: TechnicalFailureSchema.nullable().default(null),
-  })
-  .strict();
-
-const SerializedDecisionCycleSchema = z
-  .object({
-    id: DecisionCycleIdSchema,
-    baseWorldVersion: z.number().int().nonnegative(),
-    requestedAgentIds: z.array(AgentIdSchema).min(1),
-    requests: z.array(SerializedDecisionRequestSchema).min(1),
-  })
-  .strict();
-
-const SerializedWorldStateBaseShape = {
-  name: z.string().min(1),
-  mode: WorldModeSchema,
-  suspendedMode: z
-    .enum(["THINKING", "READY_FOR_RELEASE", "RUNNING"])
-    .nullable()
-    .optional(),
-  reviewRequired: z.boolean(),
-  randomState: z.number().int().min(0).max(0xffff_ffff),
-  map: MapDefinitionSchema,
-  objects: z.array(SerializedObjectSchema),
-  decisionCycle: SerializedDecisionCycleSchema.nullable(),
-  technicalFailure: TechnicalFailureSchema.nullable(),
-};
-
-const SerializedWorldStateSchema = z
-  .object({
-    ...SerializedWorldStateBaseShape,
-    agents: z.array(SerializedAgentSchema).min(1),
-  })
-  .strict();
-
-const LegacySerializedWorldStateSchema = z
-  .object({
-    ...SerializedWorldStateBaseShape,
-    agents: z.array(LegacySerializedAgentSchema).min(1),
-  })
-  .strict();
-
-function uniqueMap<Key, Value>(
-  values: readonly Value[],
-  keyOf: (value: Value) => Key,
-  label: string,
-): Map<Key, Value> {
-  const result = new Map<Key, Value>();
-  for (const value of values) {
-    const key = keyOf(value);
-    if (result.has(key)) throw new Error(`Snapshot contains duplicate ${label}`);
-    result.set(key, value);
-  }
-  return result;
-}
-
-function legacySourceEventId(agentId: AgentId, entityId: EntityId): EventId {
-  return EventIdSchema.parse(`event:legacy-locked-door:${agentId}:${entityId}`);
-}
-
-function normalizeLegacyState(
-  value: z.infer<typeof LegacySerializedWorldStateSchema>,
-): z.infer<typeof SerializedWorldStateSchema> {
-  const objects = uniqueMap(value.objects, (object) => object.id, "object ID");
-  return SerializedWorldStateSchema.parse({
-    ...value,
-    agents: value.agents.map((agent) => ({
-      ...agent,
-      actionPlan:
-        agent.actionPlan === null
-          ? null
-          : {
-              ...agent.actionPlan,
-              actions: agent.actionPlan.actions.map((action) => {
-                if (
-                  action.kind === "move" ||
-                  action.kind === "wait" ||
-                  action.kind === "observe"
-                ) {
-                  return action;
-                }
-                const { kind, ...rest } = action;
-                return {
-                  ...rest,
-                  kind: "interact_object",
-                  purpose: kind === "open_object" ? "automatic_traversal" : "goal",
-                };
-              }),
-            },
-      knowledge: {
-        zoneId: agent.knowledge.zoneId,
-        objects: agent.knowledge.objects,
-        agents: agent.knowledge.agents,
-        visibleEntityIds: agent.knowledge.visibleEntityIds,
-        knownTraversalBlockers: agent.knowledge.knownLockedDoorIds.map((entityId) => {
-          const object = objects.get(entityId);
-          if (!object) {
-            throw new Error(
-              `Snapshot agent ${agent.id} knows unknown legacy locked door ${entityId}`,
-            );
-          }
-          return {
-            entityId,
-            observedObjectVersion: object.version,
-            reasonCode: "legacy_locked_door",
-            sourceEventId: legacySourceEventId(agent.id, entityId),
-          };
-        }),
-      },
-    })),
-  });
-}
-
-function parseSerializedState(snapshot: WorldSnapshot): {
-  readonly state: z.infer<typeof SerializedWorldStateSchema>;
-  readonly history: WorldHistory;
-} {
-  if (snapshot.schemaVersion === 2) {
-    assertSnapshotCausality(snapshot);
-    return {
-      state: SerializedWorldStateSchema.parse(snapshot.state),
-      history: snapshot.history,
-    };
-  }
-
-  const currentState = SerializedWorldStateSchema.safeParse(snapshot.state);
-  return {
-    state: currentState.success
-      ? currentState.data
-      : normalizeLegacyState(LegacySerializedWorldStateSchema.parse(snapshot.state)),
-    history: {
-      mode: "legacy",
-      causalFromSequence: snapshot.lastEventSequence + 1,
-    },
-  };
-}
 
 function assertCoordinateInMap(
   position: { readonly x: number; readonly y: number },
@@ -505,8 +132,48 @@ function restoreAgents(
       baseline.map.height,
       `agent ${agentId}`,
     );
+    const activeOperations = uniqueMap(
+      agent.activeOperations,
+      (operation) => operation.callId,
+      "active operation call ID",
+    );
+    const referencedCallIds = new Set<OperationCallId>();
+    for (const track of ["HEAD", "BODY"] as const) {
+      const task = agent.taskTracks[track];
+      if (task.kind === "empty") continue;
+      const operation = activeOperations.get(task.callId);
+      if (!operation) {
+        throw new Error(
+          `Snapshot agent ${agentId} track ${track} references missing operation ${task.callId}`,
+        );
+      }
+      if (!operation.taskSlots.includes(track)) {
+        throw new Error(
+          `Snapshot operation ${task.callId} does not occupy track ${track}`,
+        );
+      }
+      referencedCallIds.add(task.callId);
+    }
+    for (const operation of activeOperations.values()) {
+      if (
+        operation.taskSlots.some((track) => {
+          const task = agent.taskTracks[track];
+          return task.kind !== "operation" || task.callId !== operation.callId;
+        })
+      ) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} is not referenced by every declared track`,
+        );
+      }
+      if (!referencedCallIds.has(operation.callId)) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} is not referenced by a task track`,
+        );
+      }
+    }
     restored.set(agentId, {
       ...agent,
+      activeOperations,
       knowledge: restoreKnowledge(agent.knowledge),
     });
   }
@@ -517,11 +184,11 @@ function restoreDecisionCycle(
   value: z.infer<typeof SerializedDecisionCycleSchema> | null,
   snapshot: WorldSnapshot,
   agents: ReadonlyMap<AgentId, AgentState>,
-  technicalFailure: z.infer<typeof TechnicalFailureSchema> | null,
+  technicalFailure: TechnicalFailure | null,
 ): DecisionCycleState | null {
   if (value === null) return null;
   const requests = uniqueMap(value.requests, (request) => request.agentId, "decision agent ID");
-  const requestFailures = new Map<AgentId, z.infer<typeof TechnicalFailureSchema> | null>();
+  const requestFailures = new Map<AgentId, TechnicalFailure | null>();
   if (
     requests.size !== value.requestedAgentIds.length ||
     value.requestedAgentIds.some((agentId) => !requests.has(agentId))
@@ -546,11 +213,22 @@ function restoreDecisionCycle(
     ) {
       throw new Error(`Snapshot decision identity is inconsistent for ${agentId}`);
     }
-    if (
-      request.acceptedProposal !== null &&
-      !prompt.goalOptions.some((option) => option.id === request.acceptedProposal?.goalOptionId)
-    ) {
-      throw new Error(`Snapshot decision for ${agentId} accepted an unoffered goal`);
+    if (request.acceptedProposal !== null) {
+      for (const selection of [
+        request.acceptedProposal.head,
+        request.acceptedProposal.body,
+      ]) {
+        if (
+          selection.kind === "replace" &&
+          !prompt.taskOptions.some(
+            (option) => option.id === selection.taskOptionId,
+          )
+        ) {
+          throw new Error(
+            `Snapshot decision for ${agentId} accepted an unoffered task`,
+          );
+        }
+      }
     }
     const requestFailure =
       request.failure ??
@@ -588,22 +266,20 @@ function restoreDecisionCycle(
 
 export function restoreWorldSnapshot(
   snapshotValue: WorldSnapshot,
-  registry: PluginRegistry,
+  registry: SimulationRegistry,
   worldDefinition: unknown,
+  simulationRulesLock: SimulationRulesLock,
 ): WorldState {
   const snapshot = WorldSnapshotSchema.parse(snapshotValue);
-  const { state, history } = parseSerializedState(snapshot);
+  const configuredRulesLock = validateSnapshotRulesLock(
+    snapshot,
+    simulationRulesLock,
+  );
   const expectedMap = MapDefinitionSchema.parse(worldDefinition);
-  if (state.map.id !== snapshot.worldId || expectedMap.id !== snapshot.worldId) {
-    throw new Error("Snapshot world ID does not match its map");
-  }
-  if (JSON.stringify(state.map) !== JSON.stringify(expectedMap)) {
-    throw new Error("Snapshot map does not match the configured world definition");
-  }
-  if (state.name !== state.map.name) {
-    throw new Error("Snapshot world name does not match its map");
-  }
+  const { state, history } = parseSerializedState(snapshot, expectedMap.rules);
+  validateSnapshotWorldIdentity(snapshot, state, expectedMap);
   const baseline = loadWorldDefinition(expectedMap, registry, {
+    simulationRulesLock: configuredRulesLock,
     reviewRequired: state.reviewRequired,
     seed: state.randomState,
     pluginLockHash: snapshot.pluginLockHash,
@@ -616,41 +292,8 @@ export function restoreWorldSnapshot(
     agents,
     state.technicalFailure,
   );
-  const hasPendingDecision = decisionCycle
-    ? [...decisionCycle.requests.values()].some((request) => request.acceptedProposal === null)
-    : false;
-  const suspendedMode =
-    state.suspendedMode === undefined
-      ? state.mode === "TECHNICALLY_BLOCKED"
-        ? decisionCycle === null
-          ? "RUNNING"
-          : hasPendingDecision
-            ? "THINKING"
-            : "READY_FOR_RELEASE"
-        : null
-      : state.suspendedMode;
-  if ((state.mode === "TECHNICALLY_BLOCKED") !== (state.technicalFailure !== null)) {
-    throw new Error("Snapshot technical failure does not match its world mode");
-  }
-  if ((state.mode === "TECHNICALLY_BLOCKED") !== (suspendedMode !== null)) {
-    throw new Error("Snapshot suspended mode does not match its world mode");
-  }
-  const resumableMode =
-    state.mode === "TECHNICALLY_BLOCKED" ? suspendedMode : state.mode;
-  if (!resumableMode) throw new Error("Snapshot has no resumable world mode");
-  if (resumableMode === "RUNNING" && decisionCycle !== null) {
-    throw new Error("Running snapshot cannot retain a decision cycle");
-  }
-  if (resumableMode !== "RUNNING" && decisionCycle === null) {
-    throw new Error("Frozen snapshot requires a decision cycle");
-  }
-  if (resumableMode === "READY_FOR_RELEASE" && hasPendingDecision) {
-    throw new Error("Ready snapshot still has pending decisions");
-  }
-  if (resumableMode === "THINKING" && !hasPendingDecision) {
-    throw new Error("Thinking snapshot has no pending decision");
-  }
-  return {
+  const suspendedMode = validateAndResolveSnapshotMode(state, decisionCycle);
+  const restored: WorldState = {
     id: snapshot.worldId,
     name: state.name,
     version: snapshot.worldVersion,
@@ -661,6 +304,7 @@ export function restoreWorldSnapshot(
     randomState: state.randomState,
     lastEventSequence: snapshot.lastEventSequence,
     pluginLockHash: snapshot.pluginLockHash,
+    simulationRulesLock: configuredRulesLock,
     history,
     map: expectedMap,
     agents,
@@ -668,4 +312,6 @@ export function restoreWorldSnapshot(
     decisionCycle,
     technicalFailure: state.technicalFailure,
   };
+  validateRestoredOperations(restored, registry);
+  return restored;
 }

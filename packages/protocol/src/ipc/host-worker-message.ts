@@ -8,6 +8,7 @@ import {
   RequestIdSchema,
 } from "../identity/ids";
 import { JsonValueSchema } from "../json/json-value";
+import { SimulationRulesLockSchema } from "../rules/simulation-rules";
 import {
   DecisionIdentitySchema,
   ModelDecisionRequestSchema,
@@ -15,7 +16,10 @@ import {
 } from "../model/decision-contract";
 import { WorldViewSchema } from "../view-models/world-view";
 import { TechnicalFailureSchema } from "../world/technical-failure";
-import { WorldSnapshotSchema, WorldSnapshotV2Schema } from "../world/world-snapshot";
+import {
+  WorldSnapshotCurrentSchema,
+  WorldSnapshotSchema,
+} from "../world/world-snapshot";
 
 export const PluginLockEntrySchema = z
   .object({
@@ -39,6 +43,7 @@ const InitializeMessageSchema = z
     protocolVersion: z.literal(1),
     worldDefinition: JsonValueSchema,
     pluginLock: PluginLockSchema,
+    simulationRulesLock: SimulationRulesLockSchema,
     reviewRequired: z.boolean(),
     deterministicSeed: z.number().int().nonnegative(),
     restoredSnapshot: WorldSnapshotSchema.optional(),
@@ -143,7 +148,7 @@ const CheckpointReadyMessageSchema = z
     type: z.literal("checkpoint_ready"),
     checkpointId: CheckpointIdSchema,
     events: z.array(DomainEventSchema),
-    snapshot: WorldSnapshotV2Schema,
+    snapshot: WorldSnapshotCurrentSchema,
   })
   .strict();
 

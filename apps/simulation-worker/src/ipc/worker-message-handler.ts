@@ -79,6 +79,7 @@ export class WorkerMessageHandler {
       worldDefinition: message.worldDefinition,
       plugins: this.#plugins,
       pluginLock: this.#pluginLock,
+      simulationRulesLock: message.simulationRulesLock,
       reviewRequired: message.reviewRequired,
       deterministicSeed: message.deterministicSeed,
       ...(message.restoredSnapshot === undefined

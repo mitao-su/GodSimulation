@@ -12,6 +12,7 @@ import type {
   ObservedAgentValue,
   ObservedObjectValue,
 } from "./agent-knowledge";
+import type { OperationObservation } from "../execution/operation";
 import type { PerceptionCandidate } from "./perception-recorder";
 import { observeObject } from "./observable-state";
 import { ZoneIndex } from "../map/zone-index";
@@ -79,6 +80,7 @@ export interface PerceptionScan {
   readonly agentId: AgentId;
   readonly zoneId: string;
   readonly visibleEntityIds: ReadonlySet<EntityId>;
+  readonly observations: readonly OperationObservation[];
   readonly candidates: readonly PerceptionCandidate[];
 }
 
@@ -91,6 +93,7 @@ export function collectPerceptionCandidates(
   if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
   const visibleCells = computeVisibleCells(world, registry, agentId);
   const visibleEntityIds = new Set<EntityId>();
+  const observations: OperationObservation[] = [];
   const candidates: PerceptionCandidate[] = [];
 
   for (const object of [...world.objects.values()].sort((left, right) =>
@@ -99,6 +102,11 @@ export function collectPerceptionCandidates(
     if (!visibleCells.has(cellKey(object.position.x, object.position.y))) continue;
     visibleEntityIds.add(object.id);
     const current = observeObject(world, registry, agentId, object);
+    observations.push({
+      entityId: object.id,
+      kind: "object",
+      summary: current.summary,
+    });
     if (!objectObservationChanged(agent.knowledge.objects.get(object.id), current)) {
       continue;
     }
@@ -128,6 +136,11 @@ export function collectPerceptionCandidates(
       position: other.position,
       observedAtTick: world.tick,
     };
+    observations.push({
+      entityId,
+      kind: "agent",
+      summary: `${other.displayName} is nearby`,
+    });
     if (!agentObservationChanged(agent.knowledge.agents.get(other.id), current)) {
       continue;
     }
@@ -144,6 +157,7 @@ export function collectPerceptionCandidates(
     agentId,
     zoneId: new ZoneIndex(world.map).at(agent.position)?.id ?? agent.knowledge.zoneId,
     visibleEntityIds,
+    observations,
     candidates,
   };
 }

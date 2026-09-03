@@ -15,10 +15,10 @@ import {
 const PLACEMENTS = new Set<PromptSectionPlacement>([
   "persona",
   "body_state",
-  "current_goal",
+  "active_tasks",
   "memory",
   "perception",
-  "goal_options",
+  "task_options",
   "decision_reason",
 ]);
 
@@ -69,8 +69,9 @@ export function assembleDecisionRequest(
     "[CORE RULES]",
     "core_rules",
     [
-      "Choose exactly one goalOptionId from the offered goals.",
-      "Use only the character's listed sensations, memories, perception, and current goal.",
+      "Return one decision for HEAD and one decision for BODY.",
+      "For each track, either continue its current task or replace it with an offered task option for that track.",
+      "Use only the character's listed sensations, memories, perception, and active tasks.",
       "Do not invent hidden world facts or execution steps; the program handles movement and interaction.",
       "Return only the required JSON object.",
     ].join("\n"),
@@ -98,11 +99,16 @@ export function assembleDecisionRequest(
     JSON.stringify(input.bodySensations, null, 2),
     additions.get("body_state"),
   );
-  const currentGoal = section(
-    "[CURRENT GOAL]",
-    "current_goal",
-    JSON.stringify(input.currentGoal, null, 2),
-    additions.get("current_goal"),
+  const activeTasks = section(
+    "[ACTIVE TASKS]",
+    "active_tasks",
+    JSON.stringify(input.activeTasks, null, 2),
+    additions.get("active_tasks"),
+  );
+  const operationResults = section(
+    "[OPERATION RESULTS]",
+    "operation_results",
+    JSON.stringify(input.operationResults, null, 2),
   );
   const memories = section(
     "[RELEVANT MEMORIES]",
@@ -116,11 +122,11 @@ export function assembleDecisionRequest(
     JSON.stringify(input.perception, null, 2),
     additions.get("perception"),
   );
-  const goals = section(
-    "[OFFERED GOALS]",
-    "goal_options",
-    JSON.stringify(input.goalOptions, null, 2),
-    additions.get("goal_options"),
+  const taskOptions = section(
+    "[TASK OPTIONS]",
+    "task_options",
+    JSON.stringify(input.taskOptions, null, 2),
+    additions.get("task_options"),
   );
   const reason = section(
     "[DECISION REASON]",
@@ -131,7 +137,7 @@ export function assembleDecisionRequest(
   const responseFormat = section(
     "[RESPONSE FORMAT]",
     "response_format",
-    '{"schemaVersion":1,"goalOptionId":"<offered ID>","reason":"<brief reason>"}',
+    '{"schemaVersion":2,"head":{"kind":"continue"},"body":{"kind":"replace","taskOptionId":"<offered ID>","arguments":{}},"reason":"<brief reason>"}',
   );
 
   return ModelDecisionRequestSchema.parse({
@@ -152,16 +158,16 @@ export function assembleDecisionRequest(
         role: "user",
         content: [
           bodyState,
-          currentGoal,
+          activeTasks,
+          operationResults,
           memories,
           perception,
-          goals,
+          taskOptions,
           reason,
           responseFormat,
         ].join("\n\n"),
       },
     ],
-    goalOptions: input.goalOptions,
+    taskOptions: input.taskOptions,
   });
 }
-

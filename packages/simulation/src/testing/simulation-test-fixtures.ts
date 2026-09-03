@@ -6,9 +6,11 @@ import {
   type AgentDefinition,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
+import { createSimulationRulesLock } from "@god-sim/protocol";
 
 import { loadWorldDefinition } from "../map/map-loader";
-import { createPluginRegistry } from "../world/plugin-registry";
+import type { RegisteredOperation } from "../execution/operation-runtime";
+import { createSimulationRegistry } from "../engine/simulation-registry";
 
 const wallDefinition: ObjectDefinition<Record<string, never>> = {
   id: "test.wall",
@@ -58,8 +60,88 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       id: "use",
       displayName: "Use fridge",
       trigger: "active_command",
-      durationTicks: 10,
-      slots: ["HANDS", "BODY"],
+      taskSlots: ["BODY"],
+      parametersSchema: z.object({}).strict(),
+      resolveDuration: () => ({ kind: "fixed", totalTicks: 10 }),
+      eventIgnore: [],
+      publicBehavior: { kind: "visible", label: "using the fridge" },
+      domainFailures: [{ code: "occupied", summary: "Fridge occupied" }],
+      resultSchema: z
+        .object({ status: z.enum(["completed", "cancelled", "failed"]) })
+        .strict(),
+      canStart: (state, context) =>
+        state.holder === null || state.holder === context.actor.agentId
+          ? { available: true }
+          : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
+      start: (_state, context) => ({
+        effects: [
+          {
+            type: "reserve_occupancy",
+            entityId: context.object.entityId,
+            agentId: context.actor.agentId,
+            expectedObjectVersion: context.object.version,
+          },
+        ],
+      }),
+      complete: (_state, context) => ({
+        effects: [
+          {
+            type: "release_occupancy",
+            entityId: context.object.entityId,
+            agentId: context.actor.agentId,
+            expectedObjectVersion: context.object.version,
+          },
+        ],
+        result: { status: "completed" },
+      }),
+      fail: (state, context) => ({
+        effects:
+          state.holder === context.actor.agentId
+            ? [
+                {
+                  type: "release_occupancy" as const,
+                  entityId: context.object.entityId,
+                  agentId: context.actor.agentId,
+                  expectedObjectVersion: context.object.version,
+                },
+              ]
+            : [],
+        result: { status: "failed" },
+      }),
+      cancel: (state, context) => ({
+        effects:
+          state.holder === context.actor.agentId
+            ? [
+                {
+                  type: "release_occupancy" as const,
+                  entityId: context.object.entityId,
+                  agentId: context.actor.agentId,
+                  expectedObjectVersion: context.object.version,
+                },
+              ]
+            : [],
+        result: { status: "cancelled" },
+      }),
+      fuse: () => null,
+    },
+    {
+      id: "stock",
+      displayName: "Stock fridge",
+      trigger: "active_command",
+      taskSlots: ["BODY"],
+      parametersSchema: z.object({}).strict(),
+      // Deliberately state-dependent: starting the interaction reserves
+      // occupancy, which changes `state.holder` and therefore what this
+      // resolver returns. Restoration must trust the duration locked at
+      // call creation instead of re-evaluating this resolver.
+      resolveDuration: (state) => ({
+        kind: "fixed",
+        totalTicks: state.holder === null ? 10 : 20,
+      }),
+      eventIgnore: [],
+      publicBehavior: { kind: "visible", label: "stocking the fridge" },
+      domainFailures: [{ code: "occupied", summary: "Fridge occupied" }],
+      resultSchema: z.object({}).strict(),
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
@@ -84,6 +166,33 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
           },
         ],
       }),
+      fail: () => ({ effects: [] }),
+      cancel: () => ({ effects: [] }),
+      fuse: () => null,
+    },
+    {
+      id: "configure",
+      displayName: "Configure fridge",
+      trigger: "active_command",
+      taskSlots: ["BODY"],
+      // Deliberately parameter-requiring: `available_interactions` queries
+      // cannot preview this interaction with empty arguments and must
+      // surface it as parameter-requiring instead of throwing.
+      parametersSchema: z.object({ mode: z.enum(["eco", "turbo"]) }).strict(),
+      resolveDuration: (_state, _context, parameters) => ({
+        kind: "fixed",
+        totalTicks: parameters.mode === "turbo" ? 4 : 8,
+      }),
+      eventIgnore: [],
+      publicBehavior: { kind: "visible", label: "configuring the fridge" },
+      domainFailures: [],
+      resultSchema: z.object({}).strict(),
+      canStart: () => ({ available: true }),
+      start: () => ({ effects: [] }),
+      complete: () => ({ effects: [] }),
+      fail: () => ({ effects: [] }),
+      cancel: () => ({ effects: [] }),
+      fuse: () => null,
     },
   ],
   observe: (state, context) => ({
@@ -137,7 +246,95 @@ export const testPlugin = definePlugin(
   },
 );
 
-export const testPluginRegistry = createPluginRegistry([testPlugin]);
+export const testPluginRegistry = createSimulationRegistry([testPlugin]);
+
+const synchronizedWaitOperation: RegisteredOperation = {
+  id: "test.synchronized_wait" as never,
+  ownerPluginId: null,
+  taskSlots: ["HEAD", "BODY"],
+  eventIgnore: [],
+  publicBehavior: { kind: "visible", label: "waiting" },
+  domainFailures: [],
+  resultSchema: z.object({}).strict(),
+  stateSchema: z.object({}).strict(),
+  argumentsSchema: () =>
+    z.object({ durationTicks: z.number().int().positive() }).strict(),
+  initialState: () => ({}),
+  offers: () => [],
+  canStart: () => ({ available: true }),
+  resolveDuration: (_context, value) => ({
+    kind: "fixed",
+    totalTicks: z.number().int().positive().parse(value["durationTicks"]),
+  }),
+  createPlan: (_context, value, callId) => {
+    const durationTicks = z.number().int().positive().parse(value["durationTicks"]);
+    return {
+      kind: "prepared",
+      plan: {
+        currentActionIndex: 0,
+        actions: [
+          {
+            id: `${callId}:action:0`,
+            kind: "wait",
+            durationTicks,
+            progressTicks: 0,
+          },
+        ],
+      },
+    };
+  },
+  fuse: () => null,
+  acknowledgeFuseResult: (_context, operation) => operation,
+  terminalResult: () => ({}),
+  validateRestored: () => undefined,
+};
+(testPluginRegistry.operations as Map<unknown, RegisteredOperation>).set(
+  synchronizedWaitOperation.id,
+  synchronizedWaitOperation,
+);
+
+export const testSimulationRulesLock = createSimulationRulesLock({
+    schemaVersion: 1,
+    id: "default",
+    version: 1,
+    time: { secondsPerGameTick: 6, epoch: { day: 1, hour: 8, minute: 0 } },
+    context: { attentionBudgetTokens: 200_000, technicalHardLimitTokens: 200_000 },
+    fatigue: {
+      timeWeight: 0.6,
+      tokenWeight: 0.4,
+      forcedSleepThreshold: 0.6,
+      timePressureFullAtTicks: 43_200,
+    },
+    inventory: { capacityUnits: 9 },
+    operations: {
+      move: { ticksPerCell: 2 },
+      wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
+      observe: { durationTicks: 1 },
+    },
+    memory: {
+      importance: {
+        critical: { initialStrength: 1, halfLifeDays: 90 },
+        high: { initialStrength: 1, halfLifeDays: 30 },
+        normal: { initialStrength: 1, halfLifeDays: 7 },
+        low: { initialStrength: 1, halfLifeDays: 2 },
+      },
+      deletionThreshold: 0.1,
+      recall: {
+        maxReturnTokensPerOperation: 8_000,
+        rankingWeights: {
+          semanticSimilarity: 0.55,
+          keywordMatch: 0.25,
+          currentStrength: 0.2,
+        },
+      },
+    },
+    sound: {
+      speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
+      attenuationPerTile: 0.25,
+      fullContentThreshold: 1,
+      unclearContentThreshold: 0.25,
+    },
+});
 
 export function simulationTestWorld() {
   return loadWorldDefinition(
@@ -145,6 +342,7 @@ export function simulationTestWorld() {
       schemaVersion: 1,
       id: "test-world",
       name: "Test World",
+      rules: { id: "default", version: 1 },
       tileSize: 16,
       width: 6,
       height: 5,
@@ -194,6 +392,6 @@ export function simulationTestWorld() {
       ],
     },
     testPluginRegistry,
-    { seed: 1 },
+    { seed: 1, simulationRulesLock: testSimulationRulesLock },
   ).world;
 }

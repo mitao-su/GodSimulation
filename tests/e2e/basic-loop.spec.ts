@@ -17,7 +17,7 @@ test.afterAll(async () => {
   await app?.stop();
 });
 
-test("runs the perception-conflict decision loop", async ({ page }, testInfo) => {
+test("runs the semantic move and interaction loop", async ({ page }, testInfo) => {
   const runtimeErrors = collectRuntimeErrors(page);
 
   await page.goto(app.url);
@@ -28,8 +28,10 @@ test("runs the perception-conflict decision loop", async ({ page }, testInfo) =>
   await expect(page.getByRole("button", { name: "放行世界" })).toBeEnabled();
   await page.getByRole("button", { name: "放行世界" }).click();
 
-  await expect(page.getByText(/Refrigerator used by bob.*current goal/i)).toBeVisible();
-  await expect(page.getByText("角色思考中")).toBeVisible();
+  await expect(page.getByText("Move to Refrigerator completed", { exact: true })).toBeVisible();
+  await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "放行世界" }).click();
+  await expect(page.getByText("Use refrigerator", { exact: true }).first()).toBeVisible();
 
   for (const viewport of [
     { width: 1_280, height: 720 },

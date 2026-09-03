@@ -3,15 +3,16 @@ import {
   DecisionPromptInputSchema,
   DecisionReasonSchema,
   EntityIdSchema,
-  GoalOptionSchema,
   ModelDecisionResultSchema,
   RequestIdSchema,
+  resolveTaskDecision,
+  TaskOptionSchema,
   TechnicalFailureSchema,
   type AgentId,
   type DecisionIdentity,
   type DecisionPromptInput,
   type DecisionReason,
-  type GoalOption,
+  type TaskOption,
   type ModelDecisionResult,
   type RequestId,
   type TechnicalFailure,
@@ -22,7 +23,7 @@ import type { AgentState, DecisionRequestState, WorldState } from "../world/worl
 export interface DecisionRequestSpec {
   readonly agentId: AgentId;
   readonly reason: DecisionReason;
-  readonly goalOptions: readonly GoalOption[];
+  readonly taskOptions: readonly TaskOption[];
 }
 
 export interface DecisionRequestTransition {
@@ -36,16 +37,28 @@ export interface DecisionAcceptanceResult {
   readonly reason: string | null;
 }
 
-function currentGoalContext(agent: AgentState): DecisionPromptInput["currentGoal"] {
-  const activeGoal = agent.currentGoal;
-  if (!activeGoal) return null;
-  const action = agent.actionPlan?.actions[agent.actionPlan.currentActionIndex];
+function activeTasksContext(agent: AgentState): DecisionPromptInput["activeTasks"] {
+  const callIdFor = (track: "HEAD" | "BODY") => {
+    const state = agent.taskTracks[track];
+    return state.kind === "operation" ? state.callId : null;
+  };
   return {
-    goal: activeGoal.goal,
-    label: activeGoal.label,
-    actionKind: action?.kind ?? null,
-    actionProgress: action?.progressTicks ?? null,
-    lastFailure: null,
+    tracks: {
+      HEAD: callIdFor("HEAD"),
+      BODY: callIdFor("BODY"),
+    },
+    operations: [...agent.activeOperations.values()]
+      .sort((left, right) => left.callId.localeCompare(right.callId))
+      .map((operation) => ({
+        callId: operation.callId,
+        operationId: operation.operationId,
+        label: operation.label,
+        taskSlots: [...operation.taskSlots],
+        arguments: operation.arguments,
+        duration: operation.duration,
+        startedAtTick: operation.startedAtTick,
+        progressTicks: operation.progressTicks,
+      })),
   };
 }
 
@@ -81,7 +94,7 @@ export function buildDecisionPromptInput(
   agent: AgentState,
   identity: DecisionIdentity,
   reason: DecisionReason,
-  goalOptions: readonly GoalOption[],
+  taskOptions: readonly TaskOption[],
 ): DecisionPromptInput {
   return DecisionPromptInputSchema.parse({
     ...identity,
@@ -93,7 +106,7 @@ export function buildDecisionPromptInput(
         description: `Bladder need is ${agent.bladderSensation}`,
       },
     ],
-    currentGoal: currentGoalContext(agent),
+    activeTasks: activeTasksContext(agent),
     memories: agent.memories.map((memory) => ({
       memoryId: memory.id,
       sourceEventId: memory.sourceEventId,
@@ -106,7 +119,8 @@ export function buildDecisionPromptInput(
       visibleEntities: visibleEntities(agent),
       heardEvents: [],
     },
-    goalOptions,
+    operationResults: agent.pendingOperationResults,
+    taskOptions,
   });
 }
 
@@ -134,9 +148,9 @@ export function requestDecisions(
     const agent = world.agents.get(requestSpec.agentId);
     if (!agent) throw new Error(`Unknown agent instance: ${requestSpec.agentId}`);
     const reason = DecisionReasonSchema.parse(requestSpec.reason);
-    const goalOptions = requestSpec.goalOptions.map((option) => GoalOptionSchema.parse(option));
-    if (goalOptions.length === 0) {
-      throw new Error(`Decision request for ${requestSpec.agentId} has no goal options`);
+    const taskOptions = requestSpec.taskOptions.map((option) => TaskOptionSchema.parse(option));
+    if (taskOptions.length === 0) {
+      throw new Error(`Decision request for ${requestSpec.agentId} has no task options`);
     }
     const identity: DecisionIdentity = {
       requestId: RequestIdSchema.parse(`decision-request:${cycleVersion}:${index}`),
@@ -151,7 +165,7 @@ export function requestDecisions(
       agent,
       identity,
       reason,
-      goalOptions,
+      taskOptions,
     );
     requests.set(requestSpec.agentId, {
       identity,
@@ -213,20 +227,23 @@ export function acceptDecisionResult(
   if (request.failure) {
     return { accepted: false, world, reason: `Request ${result.requestId} has a recorded failure` };
   }
-  const offered = request.promptInput.goalOptions.some(
-    (option) => option.id === result.proposal.goalOptionId,
-  );
-  if (!offered) {
+  let normalizedProposal;
+  try {
+    normalizedProposal = resolveTaskDecision(
+      result.proposal,
+      request.promptInput.taskOptions,
+    ).normalizedDecision;
+  } catch (error) {
     return {
       accepted: false,
       world,
-      reason: `Goal option ${result.proposal.goalOptionId} was not offered`,
+      reason: error instanceof Error ? error.message : String(error),
     };
   }
 
   const requests = new Map(cycle.requests).set(result.agentId, {
     ...request,
-    acceptedProposal: result.proposal,
+    acceptedProposal: normalizedProposal,
     failure: null,
   });
   return {

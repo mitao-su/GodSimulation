@@ -7,10 +7,11 @@ import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 import {
-  adoptGoal,
+  adoptTask,
   releaseCommand,
-  selectUseObject,
+  selectMoveTo,
   selectWait,
   starterEngine,
 } from "./fixtures/fixed-decision-provider";
@@ -53,6 +54,7 @@ function lockedPassageEngine(): SimulationEngine {
     plugins: [spatialPlugin, homePlugin, agentsPlugin],
     reviewRequired: true,
     seed: 1,
+    simulationRulesLock: testSimulationRulesLock,
   });
 }
 
@@ -96,8 +98,8 @@ describe("causal memory", () => {
   it("remembers a failed automatic traversal from its action_failed event", () => {
     const engine = lockedPassageEngine();
     takeEvents(engine);
-    adoptGoal(engine, "alice" as never, selectUseObject("fridge-1"));
-    adoptGoal(engine, "bob" as never, selectWait);
+    adoptTask(engine, "alice" as never, selectMoveTo("fridge-1"));
+    adoptTask(engine, "bob" as never, selectWait);
     engine.tick();
     takeEvents(engine);
     engine.dispatch(releaseCommand(engine));
@@ -119,8 +121,8 @@ describe("causal memory", () => {
       aliceBladder: 74,
     });
     takeEvents(engine);
-    adoptGoal(engine, "alice" as never, selectWait);
-    adoptGoal(engine, "bob" as never, selectWait);
+    adoptTask(engine, "alice" as never, selectWait);
+    adoptTask(engine, "bob" as never, selectWait);
     engine.tick();
     takeEvents(engine);
     engine.dispatch(releaseCommand(engine));

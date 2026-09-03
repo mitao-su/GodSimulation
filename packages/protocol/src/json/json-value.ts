@@ -6,7 +6,11 @@ export type JsonValue =
   | number
   | string
   | readonly JsonValue[]
-  | { readonly [key: string]: JsonValue };
+  | JsonObject;
+
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
 
 export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -17,4 +21,9 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
     z.array(JsonValueSchema),
     z.record(z.string(), JsonValueSchema),
   ]),
+);
+
+export const JsonObjectSchema: z.ZodType<JsonObject> = z.record(
+  z.string(),
+  JsonValueSchema,
 );

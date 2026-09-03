@@ -6,17 +6,20 @@ import type {
   DecisionPromptInput,
   EntityId,
   Facing,
-  GoalProposal,
   JsonValue,
+  OperationCallId,
+  OperationResultContext,
   PluginLockHash,
+  SimulationRulesLock,
+  TaskDecision,
   TechnicalFailure,
   WorldId,
   WorldMode,
 } from "@god-sim/protocol";
 
 import type { MapDefinition } from "../map/map-definition";
-import type { ActionPlan, ActiveGoal } from "../execution/action";
-import type { BodySlotReservations } from "../execution/body-slots";
+import type { ActiveOperation } from "../execution/operation";
+import type { TaskTracks } from "../execution/task-tracks";
 import type { AgentKnowledge, ImmediateMemory } from "../perception/agent-knowledge";
 
 export interface ObjectInstance {
@@ -40,9 +43,9 @@ export interface AgentState {
   readonly facing: Facing;
   readonly bladder: number;
   readonly bladderSensation: BladderSensation;
-  readonly currentGoal: ActiveGoal | null;
-  readonly actionPlan: ActionPlan | null;
-  readonly bodySlots: BodySlotReservations;
+  readonly taskTracks: TaskTracks;
+  readonly activeOperations: ReadonlyMap<OperationCallId, ActiveOperation>;
+  readonly pendingOperationResults: readonly OperationResultContext[];
   readonly knowledge: AgentKnowledge;
   readonly memories: readonly ImmediateMemory[];
 }
@@ -57,7 +60,7 @@ export interface DecisionCycleState {
 export interface DecisionRequestState {
   readonly identity: DecisionIdentity;
   readonly promptInput: DecisionPromptInput;
-  readonly acceptedProposal: GoalProposal | null;
+  readonly acceptedProposal: TaskDecision | null;
   readonly failure: TechnicalFailure | null;
 }
 
@@ -76,6 +79,7 @@ export interface WorldState {
   readonly randomState: number;
   readonly lastEventSequence: number;
   readonly pluginLockHash: PluginLockHash;
+  readonly simulationRulesLock: SimulationRulesLock;
   readonly history: WorldHistory;
   readonly map: MapDefinition;
   readonly agents: ReadonlyMap<AgentId, AgentState>;

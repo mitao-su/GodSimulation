@@ -6,6 +6,7 @@ import { JsonValueSchema, type WorkerToHostMessage } from "@god-sim/protocol";
 
 import { ProcessWorkerSupervisor } from "../../apps/local-server/src/sessions/worker-supervisor";
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 import { pluginDescriptors, startTestWorker } from "./worker-test-harness";
 import { buildPluginLock } from "../../apps/simulation-worker/src/runtime/plugin-lock";
 
@@ -30,6 +31,7 @@ describe("worker decision validation and retry", () => {
         protocolVersion: 1,
         worldDefinition: JsonValueSchema.parse(starterHome),
         pluginLock,
+        simulationRulesLock: testSimulationRulesLock,
         reviewRequired: true,
         deterministicSeed: 1,
       });
@@ -63,6 +65,7 @@ describe("worker decision validation and retry", () => {
       protocolVersion: 1,
       worldDefinition: JsonValueSchema.parse(starterHome),
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
     });
@@ -86,7 +89,11 @@ describe("worker decision validation and retry", () => {
         expect(messages.filter((message) => message.type === "decision_requested")).toHaveLength(2),
       );
       const request = messages.find((message) => message.type === "decision_requested")!.request;
-      const option = request.goalOptions[0]!;
+      const option = request.taskOptions.find(
+        (candidate) =>
+          candidate.kind === "operation" && candidate.operationId === "core.wait",
+      );
+      if (!option) throw new Error(`No wait task option for ${request.agentId}`);
       await worker.send({
         type: "decision_result",
         result: {
@@ -97,7 +104,16 @@ describe("worker decision validation and retry", () => {
           decisionCycleId: request.decisionCycleId,
           schemaVersion: request.schemaVersion,
           pluginLockHash: request.pluginLockHash,
-          proposal: { schemaVersion: 1, goalOptionId: option.id, reason: "Stale" },
+          proposal: {
+            schemaVersion: 2,
+            head: { kind: "continue" },
+            body: {
+              kind: "replace",
+              taskOptionId: option.id,
+              arguments: { durationTicks: 600 },
+            },
+            reason: "Stale",
+          },
         },
       });
 

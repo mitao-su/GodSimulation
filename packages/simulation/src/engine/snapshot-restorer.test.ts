@@ -1,9 +1,111 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorldSnapshotV1 } from "@god-sim/protocol";
+import {
+  SimulationRulesLockSchema,
+  WorldSnapshotV2Schema,
+  type WorldSnapshotV1,
+} from "@god-sim/protocol";
 
-import { simulationTestWorld, testPlugin } from "../testing/simulation-test-fixtures";
+import {
+  simulationTestWorld,
+  testPlugin,
+  testSimulationRulesLock,
+} from "../testing/simulation-test-fixtures";
 import { createSimulation, restoreSimulation } from "./simulation-engine";
+
+interface MutableTaskOption {
+  readonly id: string;
+  readonly label: string;
+  readonly operationId?: string;
+  readonly [key: string]: unknown;
+}
+
+interface MutablePromptInput {
+  activeTasks?: unknown;
+  operationResults?: unknown;
+  taskOptions?: MutableTaskOption[];
+  goalOptions?: MutableTaskOption[];
+  [key: string]: unknown;
+}
+
+interface MutableDecisionRequest {
+  readonly agentId: string;
+  promptInput: MutablePromptInput;
+  acceptedProposal: unknown;
+  [key: string]: unknown;
+}
+
+interface MutableDecisionCycle {
+  requests: MutableDecisionRequest[];
+  [key: string]: unknown;
+}
+
+interface MutableAgentState {
+  id: string;
+  currentGoal: unknown;
+  actionPlan: unknown;
+  bodySlots: unknown;
+  knowledge: Record<string, unknown>;
+  taskTracks?: unknown;
+  activeOperations?: unknown;
+  pendingOperationResults?: unknown;
+  [key: string]: unknown;
+}
+
+interface MutableSnapshotState {
+  stateSchemaVersion?: number;
+  map: Record<string, unknown>;
+  agents: MutableAgentState[];
+  decisionCycle: MutableDecisionCycle | null;
+  [key: string]: unknown;
+}
+
+function singleGoalStateFromCurrent(stateValue: unknown): MutableSnapshotState {
+  const state = structuredClone(stateValue) as MutableSnapshotState;
+  delete state.stateSchemaVersion;
+  state.agents = state.agents.map((agent) => {
+    const stable = { ...agent };
+    delete stable.taskTracks;
+    delete stable.activeOperations;
+    delete stable.pendingOperationResults;
+    return {
+      ...stable,
+      currentGoal: null,
+      actionPlan: null,
+      bodySlots: { HEAD: null, HANDS: null, BODY: null },
+    };
+  });
+  if (state.decisionCycle !== null) {
+    state.decisionCycle.requests = state.decisionCycle.requests.map(
+      (request) => {
+        const wait = request.promptInput.taskOptions?.find(
+          (option) => option.operationId === "core.wait",
+        );
+        if (!wait) throw new Error("Missing wait option in current snapshot fixture");
+        const stablePrompt = { ...request.promptInput };
+        delete stablePrompt.activeTasks;
+        delete stablePrompt.taskOptions;
+        delete stablePrompt.operationResults;
+        return {
+          ...request,
+          promptInput: {
+            ...stablePrompt,
+            currentGoal: null,
+            goalOptions: [
+              {
+                id: wait.id,
+                label: wait.label,
+                goal: { kind: "wait", durationTicks: 600 },
+              },
+            ],
+          },
+          acceptedProposal: null,
+        };
+      },
+    );
+  }
+  return state;
+}
 
 function allSubjectiveSourceIds(stateValue: unknown): Set<string> {
   const state = stateValue as {
@@ -33,9 +135,11 @@ function legacySnapshot(): WorldSnapshotV1 {
     reviewRequired: true,
     seed: 1,
     pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
   });
   const current = engine.createSnapshot();
-  const state = structuredClone(current.state) as {
+  const state = singleGoalStateFromCurrent(current.state) as {
+    map: { rules?: unknown };
     agents: Array<{
       id: string;
       currentGoal: unknown;
@@ -46,6 +150,7 @@ function legacySnapshot(): WorldSnapshotV1 {
       };
     }>;
   };
+  delete state.map.rules;
   for (const agent of state.agents) {
     delete agent.knowledge.knownTraversalBlockers;
     agent.knowledge.knownLockedDoorIds =
@@ -67,10 +172,10 @@ function legacySnapshot(): WorldSnapshotV1 {
       {
         id: "goal:legacy:action:0",
         goalId: "goal:legacy",
-        kind: "open_object",
-        targetEntityId: "wall-1",
-        interactionId: "open",
-        durationTicks: 2,
+        kind: "use_object",
+        targetEntityId: "fridge-1",
+        interactionId: "use",
+        durationTicks: 10,
         progressTicks: 1,
         slots: ["HANDS"],
         started: true,
@@ -89,18 +194,97 @@ function legacySnapshot(): WorldSnapshotV1 {
 }
 
 describe("simulation snapshot restoration", () => {
-  it("projects every strict subjective source into causalEventIds", () => {
-    const engine = createSimulation({
+  it("adopts the supplied rule lock when migrating a version-two snapshot", () => {
+    const original = createSimulation({
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
       reviewRequired: true,
       seed: 1,
       pluginLockHash: "a".repeat(64),
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const legacyValue = structuredClone(original.createSnapshot()) as Record<string, unknown>;
+    delete legacyValue.simulationRulesLock;
+    const legacyState = legacyValue.state as { map: { rules?: unknown } };
+    delete legacyState.map.rules;
+    const legacySnapshot = WorldSnapshotV2Schema.parse({
+      ...legacyValue,
+      schemaVersion: 2,
+    });
+
+    const restored = restoreSimulation({
+      snapshot: legacySnapshot,
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
+    });
+
+    expect(restored.createSnapshot()).toMatchObject({
+      schemaVersion: 3,
+      simulationRulesLock: testSimulationRulesLock,
+    });
+  });
+
+  it.each([
+    {
+      name: "hash",
+      configuredLock: SimulationRulesLockSchema.parse({
+        ...testSimulationRulesLock,
+        hash: "d".repeat(64),
+      }),
+      expectedError: /rules lock hash mismatch/i,
+    },
+    {
+      name: "normalized rule content",
+      configuredLock: SimulationRulesLockSchema.parse({
+        ...testSimulationRulesLock,
+        rules: {
+          ...testSimulationRulesLock.rules,
+          time: {
+            ...testSimulationRulesLock.rules.time,
+            secondsPerGameTick: 12,
+          },
+        },
+      }),
+      expectedError: /rules lock hash mismatch/i,
+    },
+  ])("rejects a version-three snapshot with mismatched $name", ({ configuredLock, expectedError }) => {
+    const original = createSimulation({
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      reviewRequired: true,
+      seed: 1,
+      pluginLockHash: "a".repeat(64),
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const currentSnapshot = {
+      ...original.createSnapshot(),
+      schemaVersion: 3,
+      simulationRulesLock: testSimulationRulesLock,
+    } as never;
+
+    expect(() =>
+      restoreSimulation({
+        snapshot: currentSnapshot,
+        worldDefinition: simulationTestWorld().map,
+        plugins: [testPlugin],
+        simulationRulesLock: configuredLock,
+      }),
+    ).toThrow(expectedError);
+  });
+
+  it("projects every strict subjective source into causalEventIds", () => {
+    const engine = createSimulation({
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      reviewRequired: true,
+    seed: 1,
+    pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
     });
     const snapshot = engine.createSnapshot();
 
-    expect(snapshot.schemaVersion).toBe(2);
-    if (snapshot.schemaVersion !== 2) return;
+    expect(snapshot.schemaVersion).toBe(3);
     expect(snapshot.history).toEqual({ mode: "strict", causalFromSequence: 1 });
     expect(new Set(snapshot.causalEventIds)).toEqual(
       allSubjectiveSourceIds(snapshot.state),
@@ -112,8 +296,9 @@ describe("simulation snapshot restoration", () => {
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
       reviewRequired: true,
-      seed: 1,
-      pluginLockHash: "a".repeat(64),
+    seed: 1,
+    pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
     });
     const originalCheckpoint = original.prepareCheckpoint();
     expect(original.acknowledgeCheckpoint(originalCheckpoint.checkpointId).accepted)
@@ -124,6 +309,7 @@ describe("simulation snapshot restoration", () => {
       snapshot,
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
     });
 
     expect(restored.createSnapshot()).toEqual(snapshot);
@@ -138,8 +324,9 @@ describe("simulation snapshot restoration", () => {
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
       reviewRequired: true,
-      seed: 1,
-      pluginLockHash: "a".repeat(64),
+    seed: 1,
+    pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
     });
     const snapshot = original.createSnapshot();
     const state = structuredClone(snapshot.state) as {
@@ -159,6 +346,7 @@ describe("simulation snapshot restoration", () => {
       snapshot: { ...snapshot, state: state as never },
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
     });
     const restoredState = restored.createSnapshot().state as {
       agents: Array<{
@@ -181,8 +369,9 @@ describe("simulation snapshot restoration", () => {
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
       reviewRequired: true,
-      seed: 1,
-      pluginLockHash: "a".repeat(64),
+    seed: 1,
+    pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
     });
     const request = original.getPendingDecisionInputs()[0]!;
     const failure = {
@@ -208,6 +397,7 @@ describe("simulation snapshot restoration", () => {
       snapshot: { ...snapshot, state: legacyState as never },
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
     });
 
     expect(restored.getView().pendingDecisions).toContainEqual(
@@ -219,16 +409,17 @@ describe("simulation snapshot restoration", () => {
     );
   });
 
-  it("restores a generic object interaction and projects its plugin display name", () => {
+  it("restores a generic object interaction as one compatibility operation", () => {
     const original = createSimulation({
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
       reviewRequired: true,
-      seed: 1,
-      pluginLockHash: "a".repeat(64),
+    seed: 1,
+    pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
     });
     const snapshot = original.createSnapshot();
-    const state = structuredClone(snapshot.state) as {
+    const state = singleGoalStateFromCurrent(snapshot.state) as {
       agents: Array<{
         id: string;
         currentGoal: unknown;
@@ -267,11 +458,140 @@ describe("simulation snapshot restoration", () => {
       snapshot: { ...snapshot, state: state as never },
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
     });
 
-    expect(restored.createSnapshot()).toEqual({ ...snapshot, state });
-    expect(restored.getView().agents.find((agent) => agent.agentId === "alice")?.actionLabel)
-      .toBe("Use fridge");
+    const nextState = restored.createSnapshot().state as {
+      stateSchemaVersion: number;
+      agents: Array<{
+        id: string;
+        taskTracks: { BODY: { kind: string; callId?: string } };
+        activeOperations: Array<{
+          operationId: string;
+          label: string;
+          progressTicks: number;
+          plan: { currentActionIndex: number; actions: unknown[] };
+        }>;
+      }>;
+    };
+    const restoredAlice = nextState.agents.find((agent) => agent.id === "alice")!;
+    expect(nextState.stateSchemaVersion).toBe(3);
+    expect(restoredAlice.taskTracks.BODY.kind).toBe("operation");
+    expect(restoredAlice.activeOperations).toEqual([
+      expect.objectContaining({
+        operationId: "object.test.fridge.use",
+        label: "Use fridge",
+        progressTicks: 3,
+        plan: expect.objectContaining({
+          currentActionIndex: 0,
+          actions: [
+            expect.objectContaining({
+              kind: "interact_object",
+              purpose: "direct",
+              targetEntityId: "fridge-1",
+              progressTicks: 3,
+            }),
+          ],
+        }),
+      }),
+    ]);
+  });
+
+  it("migrates an accepted legacy goal into a complete two-track decision", () => {
+    const original = createSimulation({
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      reviewRequired: true,
+      seed: 1,
+      pluginLockHash: "a".repeat(64),
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const snapshot = original.createSnapshot();
+    const state = singleGoalStateFromCurrent(snapshot.state);
+    const aliceRequest = state.decisionCycle?.requests.find(
+      (request) => request.agentId === "alice",
+    );
+    if (!aliceRequest) throw new Error("Missing Alice legacy decision fixture");
+    const wait = aliceRequest.promptInput.goalOptions?.[0];
+    if (!wait) throw new Error("Missing legacy wait option");
+    aliceRequest.acceptedProposal = {
+      schemaVersion: 1,
+      goalOptionId: wait.id,
+      reason: "Wait",
+    };
+    for (const request of state.decisionCycle?.requests ?? []) {
+      if (request === aliceRequest) continue;
+      const peerWait = request.promptInput.goalOptions?.[0];
+      if (!peerWait) throw new Error("Missing peer legacy wait option");
+      request.acceptedProposal = {
+        schemaVersion: 1,
+        goalOptionId: peerWait.id,
+        reason: "Wait",
+      };
+    }
+    state.mode = "READY_FOR_RELEASE";
+
+    const restored = restoreSimulation({
+      snapshot: { ...snapshot, state: state as never },
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const nextState = restored.createSnapshot().state as MutableSnapshotState;
+    const restoredRequest = nextState.decisionCycle?.requests.find(
+      (request) => request.agentId === "alice",
+    );
+    if (!restoredRequest) throw new Error("Missing restored Alice decision");
+
+    expect(restoredRequest.promptInput.activeTasks).toEqual({
+      tracks: { HEAD: null, BODY: null },
+      operations: [],
+    });
+    expect(restoredRequest.promptInput.taskOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "empty", taskSlots: ["HEAD"] }),
+        expect.objectContaining({ kind: "empty", taskSlots: ["BODY"] }),
+        expect.objectContaining({
+          kind: "operation",
+          id: wait.id,
+          operationId: "core.wait",
+          taskSlots: ["BODY"],
+        }),
+      ]),
+    );
+    expect(restoredRequest.acceptedProposal).toEqual({
+      schemaVersion: 2,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        taskOptionId: wait.id,
+        arguments: {},
+      },
+      reason: "Wait",
+    });
+
+    const ready = restored.getView();
+    expect(ready.mode).toBe("READY_FOR_RELEASE");
+    expect(
+      restored.dispatch({
+        schemaVersion: 1,
+        commandId: "command:release:migrated-legacy-goals" as never,
+        worldId: ready.worldId,
+        expectedWorldVersion: ready.worldVersion,
+        issuedAtRealTime: "2026-09-02T00:00:00.000Z",
+        type: "release_execution",
+      }),
+    ).toMatchObject({ accepted: true });
+    restored.tick();
+    const releasedState = restored.createSnapshot().state as MutableSnapshotState;
+    expect(restored.getView().mode).toBe("RUNNING");
+    expect(
+      releasedState.agents.flatMap((agent) => agent.activeOperations ?? []),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ operationId: "core.wait" }),
+      ]),
+    );
   });
 
   it("restores v1 furniture actions and locked-door knowledge as legacy generic state", () => {
@@ -280,11 +600,12 @@ describe("simulation snapshot restoration", () => {
       snapshot: legacy,
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
     });
     const next = restored.createSnapshot();
 
     expect(next).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       history: {
         mode: "legacy",
         causalFromSequence: legacy.lastEventSequence + 1,
@@ -294,15 +615,15 @@ describe("simulation snapshot restoration", () => {
     const state = next.state as {
       agents: Array<{
         id: string;
-        actionPlan: { actions: unknown[] } | null;
+        activeOperations: Array<{ plan: { actions: unknown[] } }>;
         knowledge: { knownTraversalBlockers: unknown[] };
       }>;
     };
     const alice = state.agents.find((agent) => agent.id === "alice")!;
-    expect(alice.actionPlan?.actions[0]).toMatchObject({
+    expect(alice.activeOperations[0]?.plan.actions[0]).toMatchObject({
       kind: "interact_object",
-      purpose: "automatic_traversal",
-      targetEntityId: "wall-1",
+      purpose: "direct",
+      targetEntityId: "fridge-1",
     });
     expect(alice.knowledge.knownTraversalBlockers).toEqual([
       {

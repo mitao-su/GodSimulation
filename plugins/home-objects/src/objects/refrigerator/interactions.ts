@@ -1,13 +1,44 @@
+import { z } from "zod";
+
 import type { InteractionDefinition } from "@god-sim/plugin-sdk";
 
 import type { RefrigeratorState } from "./state";
+
+const noArgumentsSchema = z.object({}).strict();
+const emptyResultSchema = z.object({}).strict();
+
+function releaseIfHeld(
+  state: Readonly<RefrigeratorState>,
+  context: Parameters<
+    InteractionDefinition<RefrigeratorState>["cancel"]
+  >[1],
+) {
+  if (state.occupiedBy !== context.actor.agentId) return { effects: [] };
+  return {
+    effects: [
+      {
+        type: "release_occupancy" as const,
+        entityId: context.object.entityId,
+        agentId: context.actor.agentId,
+        expectedObjectVersion: context.object.version,
+      },
+    ],
+  };
+}
 
 export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState> = {
   id: "use",
   displayName: "Use refrigerator",
   trigger: "active_command",
-  durationTicks: 30,
-  slots: ["HANDS", "BODY"],
+  taskSlots: ["BODY"],
+  parametersSchema: noArgumentsSchema,
+  resolveDuration: () => ({ kind: "fixed", totalTicks: 30 }),
+  eventIgnore: [],
+  publicBehavior: { kind: "visible", label: "using the refrigerator" },
+  domainFailures: [
+    { code: "occupied", summary: "The refrigerator is occupied" },
+  ],
+  resultSchema: emptyResultSchema,
   canStart(state, context) {
     if (state.occupiedBy === null || state.occupiedBy === context.actor.agentId) {
       return { available: true };
@@ -45,4 +76,7 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
       ],
     };
   },
+  fail: releaseIfHeld,
+  cancel: releaseIfHeld,
+  fuse: () => null,
 };

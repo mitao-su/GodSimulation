@@ -57,13 +57,16 @@ function main() {
       )
       .all();
     const invalidSnapshots = [];
-    const latestVersionTwoByWorld = new Map();
+    const latestCausalSnapshotByWorld = new Map();
     for (const row of snapshotRows) {
       const snapshot = parseSnapshot(row, invalidSnapshots);
-      if (snapshot?.schemaVersion !== 2 || latestVersionTwoByWorld.has(row.world_id)) {
+      if (
+        (snapshot?.schemaVersion !== 2 && snapshot?.schemaVersion !== 3) ||
+        latestCausalSnapshotByWorld.has(row.world_id)
+      ) {
         continue;
       }
-      latestVersionTwoByWorld.set(row.world_id, { row, snapshot });
+      latestCausalSnapshotByWorld.set(row.world_id, { row, snapshot });
     }
 
     const maxSequence = database.prepare(
@@ -74,7 +77,7 @@ function main() {
     );
     const tailMismatches = [];
     const missingCausalEvents = [];
-    for (const { row, snapshot } of latestVersionTwoByWorld.values()) {
+    for (const { row, snapshot } of latestCausalSnapshotByWorld.values()) {
       const durableTail = maxSequence.get(row.world_id)?.max_sequence ?? 0;
       if (
         !Number.isSafeInteger(snapshot.lastEventSequence) ||
@@ -106,7 +109,7 @@ function main() {
 
     const lines = [
       "integrity: " + (integrityOk ? "ok" : "failed"),
-      "version-2 snapshots audited: " + latestVersionTwoByWorld.size,
+      "causal snapshots audited: " + latestCausalSnapshotByWorld.size,
       "invalid snapshots: " + invalidSnapshots.length,
       "event tail mismatches: " + tailMismatches.length,
       "duplicate world sequences: " + duplicateWorldSequences.length,

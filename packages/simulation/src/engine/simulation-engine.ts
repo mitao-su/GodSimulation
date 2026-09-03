@@ -1,22 +1,21 @@
 import {
   CheckpointIdSchema,
   DecisionIdentitySchema,
-  GoalOptionIdSchema,
-  GoalProposalSchema,
-  GoalSchema,
+  TaskDecisionSchema,
   TechnicalFailureSchema,
+  verifySimulationRulesLock,
   WorldCommandSchema,
   type DecisionIdentity,
   type DecisionPromptInput,
   type DomainEvent,
   type CheckpointId,
-  type Goal,
-  type GoalOptionId,
+  type TaskDecision,
   type ModelDecisionResult,
+  type SimulationRulesLock,
   type TechnicalFailure,
   type WorldCommand,
+  type WorldSnapshotCurrent,
   type WorldSnapshot,
-  type WorldSnapshotV2,
   type WorldView,
 } from "@god-sim/protocol";
 import type { GamePlugin } from "@god-sim/plugin-sdk";
@@ -28,7 +27,8 @@ import {
   retryDecisionRequest,
   type DecisionRequestSpec,
 } from "../decision/decision-gate";
-import { buildGoalOptions } from "../decision/goal-option-provider";
+import { buildTaskOptions } from "../execution/operation-catalog";
+import { recordFuseResults } from "../execution/operation-lifecycle";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
 import {
   loadWorldDefinition,
@@ -38,9 +38,12 @@ import {
   recordPerceptionCandidates,
   type PerceptionCandidate,
 } from "../perception/perception-recorder";
-import { createPluginRegistry, type PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
 import { appendDomainEvent } from "./event-writer";
+import {
+  createSimulationRegistry,
+  type SimulationRegistry,
+} from "./simulation-registry";
 import { assertSnapshotCausality } from "./snapshot-causality";
 import { projectWorldSnapshot } from "./snapshot-projector";
 import { restoreWorldSnapshot } from "./snapshot-restorer";
@@ -54,6 +57,7 @@ import { projectWorldView } from "./view-projector";
 export interface SimulationOptions {
   readonly worldDefinition: unknown;
   readonly plugins: readonly GamePlugin[];
+  readonly simulationRulesLock: SimulationRulesLock;
   readonly reviewRequired?: boolean;
   readonly seed?: number;
   readonly pluginLockHash?: string;
@@ -63,13 +67,12 @@ export interface SimulationRestoreOptions {
   readonly snapshot: WorldSnapshot;
   readonly worldDefinition: unknown;
   readonly plugins: readonly GamePlugin[];
+  readonly simulationRulesLock: SimulationRulesLock;
 }
 
 export interface AdoptedDecision {
   readonly identity: DecisionIdentity;
-  readonly goalOptionId: GoalOptionId;
-  readonly goal: Goal;
-  readonly modelReason: string;
+  readonly proposal: TaskDecision;
 }
 
 export interface BufferResult {
@@ -80,7 +83,7 @@ export interface BufferResult {
 export interface SimulationCheckpoint {
   readonly checkpointId: CheckpointId;
   readonly events: readonly DomainEvent[];
-  readonly snapshot: WorldSnapshotV2;
+  readonly snapshot: WorldSnapshotCurrent;
 }
 
 export interface SimulationEngine {
@@ -93,7 +96,7 @@ export interface SimulationEngine {
   getPendingDecisionInputs(): readonly DecisionPromptInput[];
   prepareCheckpoint(): SimulationCheckpoint;
   acknowledgeCheckpoint(checkpointId: CheckpointId): BufferResult;
-  createSnapshot(): WorldSnapshotV2;
+  createSnapshot(): WorldSnapshotCurrent;
 }
 
 function identitiesMatch(expected: DecisionIdentity, actual: DecisionIdentity): boolean {
@@ -107,10 +110,6 @@ function identitiesMatch(expected: DecisionIdentity, actual: DecisionIdentity): 
     expected.pluginLockHash === actual.pluginLockHash &&
     expected.retryOfRequestId === actual.retryOfRequestId
   );
-}
-
-function goalsMatch(expected: Goal, actual: Goal): boolean {
-  return JSON.stringify(expected) === JSON.stringify(actual);
 }
 
 function initialPerceptionCandidate(seed: InitialPerceptionSeed): PerceptionCandidate {
@@ -157,7 +156,7 @@ function initialPerceptionMetadata(candidate: PerceptionCandidate) {
 
 class DeterministicSimulationEngine implements SimulationEngine {
   #world: WorldState;
-  readonly #registry: PluginRegistry;
+  readonly #registry: SimulationRegistry;
   readonly #commandQueue: WorldCommand[] = [];
   readonly #decisionQueue = new Map<string, AdoptedDecision>();
   #eventOutbox: DomainEvent[] = [];
@@ -171,7 +170,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   constructor(
     world: WorldState,
-    registry: PluginRegistry,
+    registry: SimulationRegistry,
     initialPerceptions: readonly InitialPerceptionSeed[] | null,
   ) {
     this.#world = world;
@@ -212,14 +211,8 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   acceptDecision(decisionInput: AdoptedDecision): BufferResult {
     const identity = DecisionIdentitySchema.safeParse(decisionInput.identity);
-    const goalOptionId = GoalOptionIdSchema.safeParse(decisionInput.goalOptionId);
-    const goal = GoalSchema.safeParse(decisionInput.goal);
-    const proposal = GoalProposalSchema.safeParse({
-      schemaVersion: 1,
-      goalOptionId: decisionInput.goalOptionId,
-      reason: decisionInput.modelReason,
-    });
-    if (!identity.success || !goalOptionId.success || !goal.success || !proposal.success) {
+    const proposal = TaskDecisionSchema.safeParse(decisionInput.proposal);
+    if (!identity.success || !proposal.success) {
       return { accepted: false, reason: "Adopted decision failed schema validation" };
     }
     const cycle = this.#world.decisionCycle;
@@ -236,17 +229,19 @@ class DeterministicSimulationEngine implements SimulationEngine {
     if (this.#decisionQueue.has(identity.data.requestId)) {
       return { accepted: false, reason: `Request ${identity.data.requestId} is already buffered` };
     }
-    const option = request.promptInput.goalOptions.find(
-      (candidate) => candidate.id === goalOptionId.data,
-    );
-    if (!option || !goalsMatch(option.goal, goal.data)) {
-      return { accepted: false, reason: "Adopted goal is not the stored program-owned option" };
+    const validation = acceptDecisionResult(this.#world, {
+      ...identity.data,
+      proposal: proposal.data,
+    });
+    if (!validation.accepted) {
+      return {
+        accepted: false,
+        reason: validation.reason ?? "Adopted decision is invalid",
+      };
     }
     const decision: AdoptedDecision = {
       identity: identity.data,
-      goalOptionId: goalOptionId.data,
-      goal: goal.data,
-      modelReason: proposal.data.reason,
+      proposal: proposal.data,
     };
     this.#decisionQueue.set(identity.data.requestId, decision);
     return { accepted: true, reason: "Decision buffered" };
@@ -365,7 +360,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
     return { accepted: true, reason: `Checkpoint ${checkpointId} acknowledged` };
   }
 
-  createSnapshot(): WorldSnapshotV2 {
+  createSnapshot(): WorldSnapshotCurrent {
     return projectWorldSnapshot(this.#world);
   }
 
@@ -377,10 +372,22 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   #requestDecisionCycle(needs: readonly DecisionNeed[]): void {
     if (needs.length === 0) return;
+    const fuseCausationId = `fuse:${this.#world.id}:${this.#world.tick}`;
+    const fused = recordFuseResults(
+      this.#world,
+      this.#registry,
+      needs.map((need) => need.agentId),
+      {
+        causationId: fuseCausationId,
+        correlationId: fuseCausationId,
+      },
+    );
+    this.#world = fused.world;
+    this.#recordEvents(fused.events);
     const specs: DecisionRequestSpec[] = needs.map((need) => ({
       agentId: need.agentId,
       reason: need.reason,
-      goalOptions: buildGoalOptions(this.#world, this.#registry, need.agentId),
+      taskOptions: buildTaskOptions(this.#world, this.#registry, need.agentId),
     }));
     const transition = requestDecisions(this.#world, specs);
     this.#world = transition.world;
@@ -427,7 +434,9 @@ class DeterministicSimulationEngine implements SimulationEngine {
             throw new Error("The world is not ready for release");
           }
           const cycleId = this.#world.decisionCycle.id;
-          this.#world = releaseDecisionCycle(this.#world);
+          const released = releaseDecisionCycle(this.#world, this.#registry);
+          this.#world = released.world;
+          this.#recordEvents(released.events);
           this.#recordWorldReleased(cycleId, false, command.commandId);
           break;
         }
@@ -439,12 +448,18 @@ class DeterministicSimulationEngine implements SimulationEngine {
           };
           if (this.#world.mode === "TECHNICALLY_BLOCKED") break;
           const cycleId = this.#world.decisionCycle?.id;
-          const released = applyReleasePolicy(this.#world);
-          if (cycleId && released.mode === "RUNNING" && this.#world.mode !== "RUNNING") {
-            this.#world = released;
+          const released = applyReleasePolicy(this.#world, this.#registry);
+          if (
+            cycleId &&
+            released.world.mode === "RUNNING" &&
+            this.#world.mode !== "RUNNING"
+          ) {
+            this.#world = released.world;
+            this.#recordEvents(released.events);
             this.#recordWorldReleased(cycleId, true, command.commandId);
           } else {
-            this.#world = released;
+            this.#world = released.world;
+            this.#recordEvents(released.events);
           }
           break;
         }
@@ -495,12 +510,18 @@ class DeterministicSimulationEngine implements SimulationEngine {
             technicalFailure: null,
           };
           const cycleId = recovered.decisionCycle?.id;
-          const released = applyReleasePolicy(recovered);
-          if (cycleId && released.mode === "RUNNING" && recovered.mode !== "RUNNING") {
-            this.#world = released;
+          const released = applyReleasePolicy(recovered, this.#registry);
+          if (
+            cycleId &&
+            released.world.mode === "RUNNING" &&
+            recovered.mode !== "RUNNING"
+          ) {
+            this.#world = released.world;
+            this.#recordEvents(released.events);
             this.#recordWorldReleased(cycleId, true, command.commandId);
           } else {
-            this.#world = released;
+            this.#world = released.world;
+            this.#recordEvents(released.events);
           }
           break;
         }
@@ -522,11 +543,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
       if (!request || !adopted) continue;
       const result: ModelDecisionResult = {
         ...adopted.identity,
-        proposal: {
-          schemaVersion: 1,
-          goalOptionId: adopted.goalOptionId,
-          reason: adopted.modelReason,
-        },
+        proposal: adopted.proposal,
       };
       const accepted = acceptDecisionResult(this.#world, result);
       if (!accepted.accepted) throw new Error(accepted.reason ?? "Decision was rejected");
@@ -537,7 +554,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
           type: "decision_accepted",
           agentId,
           requestId: result.requestId,
-          goalOptionId: result.proposal.goalOptionId,
+          decision: result.proposal,
         },
         {
           causationId: result.requestId,
@@ -551,12 +568,18 @@ class DeterministicSimulationEngine implements SimulationEngine {
     this.#recordEvents(events);
 
     const cycleId = this.#world.decisionCycle?.id;
-    const released = applyReleasePolicy(this.#world);
-    if (cycleId && released.mode === "RUNNING" && this.#world.mode !== "RUNNING") {
-      this.#world = released;
+    const released = applyReleasePolicy(this.#world, this.#registry);
+    if (
+      cycleId &&
+      released.world.mode === "RUNNING" &&
+      this.#world.mode !== "RUNNING"
+    ) {
+      this.#world = released.world;
+      this.#recordEvents(released.events);
       this.#recordWorldReleased(cycleId, true, `release:${cycleId}`);
     } else {
-      this.#world = released;
+      this.#world = released.world;
+      this.#recordEvents(released.events);
     }
   }
 
@@ -572,8 +595,12 @@ class DeterministicSimulationEngine implements SimulationEngine {
 }
 
 export function createSimulation(options: SimulationOptions): SimulationEngine {
-  const registry = createPluginRegistry(options.plugins);
+  const simulationRulesLock = verifySimulationRulesLock(
+    options.simulationRulesLock,
+  );
+  const registry = createSimulationRegistry(options.plugins);
   const loaded = loadWorldDefinition(options.worldDefinition, registry, {
+    simulationRulesLock,
     ...(options.reviewRequired === undefined
       ? {}
       : { reviewRequired: options.reviewRequired }),
@@ -590,7 +617,15 @@ export function createSimulation(options: SimulationOptions): SimulationEngine {
 }
 
 export function restoreSimulation(options: SimulationRestoreOptions): SimulationEngine {
-  const registry = createPluginRegistry(options.plugins);
-  const world = restoreWorldSnapshot(options.snapshot, registry, options.worldDefinition);
+  const simulationRulesLock = verifySimulationRulesLock(
+    options.simulationRulesLock,
+  );
+  const registry = createSimulationRegistry(options.plugins);
+  const world = restoreWorldSnapshot(
+    options.snapshot,
+    registry,
+    options.worldDefinition,
+    simulationRulesLock,
+  );
   return new DeterministicSimulationEngine(world, registry, null);
 }

@@ -14,11 +14,42 @@ import { simulationTestWorld } from "../testing/simulation-test-fixtures";
 const aliceWaitRequest = {
   agentId: "alice" as never,
   reason: { code: "initial_goal", summary: "Choose a first goal" },
-  goalOptions: [
+  taskOptions: [
     {
-      id: "alice-wait" as never,
+      kind: "empty" as const,
+      id: "task-option:alice:empty-head" as never,
+      label: "Clear head task",
+      taskSlots: ["HEAD" as const],
+      argumentSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      kind: "empty" as const,
+      id: "task-option:alice:empty-body" as never,
+      label: "Clear body task",
+      taskSlots: ["BODY" as const],
+      argumentSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      kind: "operation" as const,
+      id: "task-option:alice:wait" as never,
+      operationId: "core.wait" as never,
       label: "Wait",
-      goal: { kind: "wait" as const, durationTicks: 10 },
+      taskSlots: ["BODY" as const],
+      argumentSchema: {
+        type: "object",
+        properties: { durationTicks: { type: "integer", minimum: 1 } },
+        required: ["durationTicks"],
+        additionalProperties: false,
+      },
+      fixedArguments: {},
     },
   ],
 };
@@ -57,6 +88,10 @@ describe("decision gate", () => {
     expect(request?.promptInput.perception.visibleEntities).toEqual([]);
     expect(JSON.stringify(request?.promptInput)).not.toContain("holder");
     expect(request?.promptInput.memories).toHaveLength(1);
+    expect(request?.promptInput.activeTasks).toEqual({
+      tracks: { HEAD: null, BODY: null },
+      operations: [],
+    });
     expect(request?.promptInput.bodySensations).toEqual([
       {
         need: "bladder",
@@ -66,15 +101,20 @@ describe("decision gate", () => {
     ]);
   });
 
-  it("accepts only the offered goal for the current request", () => {
+  it("accepts only task options offered for the selected track", () => {
     const thinking = requestDecisions(simulationTestWorld(), [aliceWaitRequest]).world;
     const request = thinking.decisionCycle?.requests.get("alice" as never);
     if (!request) throw new Error("Missing Alice decision request");
     const result: ModelDecisionResult = {
       ...request.identity,
       proposal: {
-        schemaVersion: 1,
-        goalOptionId: "not-offered" as never,
+        schemaVersion: 2,
+        head: { kind: "continue" },
+        body: {
+          kind: "replace",
+          taskOptionId: "task-option:alice:not-offered" as never,
+          arguments: {},
+        },
         reason: "Use an unavailable choice",
       },
     };
@@ -82,7 +122,7 @@ describe("decision gate", () => {
     const rejected = acceptDecisionResult(thinking, result);
 
     expect(rejected.accepted).toBe(false);
-    expect(rejected.reason).toMatch(/not offered/);
+    expect(rejected.reason).toMatch(/not offered/i);
     expect(rejected.world).toBe(thinking);
   });
 
@@ -92,11 +132,29 @@ describe("decision gate", () => {
       {
         ...aliceWaitRequest,
         agentId: "bob" as never,
-        goalOptions: [
+        taskOptions: [
           {
-            id: "bob-wait" as never,
+            kind: "empty" as const,
+            id: "task-option:bob:empty-head" as never,
+            label: "Clear head task",
+            taskSlots: ["HEAD" as const],
+            argumentSchema: {},
+          },
+          {
+            kind: "empty" as const,
+            id: "task-option:bob:empty-body" as never,
+            label: "Clear body task",
+            taskSlots: ["BODY" as const],
+            argumentSchema: {},
+          },
+          {
+            kind: "operation" as const,
+            id: "task-option:bob:wait" as never,
+            operationId: "core.wait" as never,
             label: "Wait",
-            goal: { kind: "wait" as const, durationTicks: 10 },
+            taskSlots: ["BODY" as const],
+            argumentSchema: {},
+            fixedArguments: {},
           },
         ],
       },
@@ -105,8 +163,13 @@ describe("decision gate", () => {
     const aliceAccepted = acceptDecisionResult(initial, {
       ...aliceRequest.identity,
       proposal: {
-        schemaVersion: 1,
-        goalOptionId: "alice-wait" as never,
+        schemaVersion: 2,
+        head: { kind: "continue" },
+        body: {
+          kind: "replace",
+          taskOptionId: "task-option:alice:wait" as never,
+          arguments: { durationTicks: 10 },
+        },
         reason: "Wait",
       },
     }).world;
@@ -127,7 +190,11 @@ describe("decision gate", () => {
 
     expect(retried.mode).toBe("THINKING");
     expect(retried.technicalFailure).toBeNull();
-    expect(retriedAlice.acceptedProposal?.goalOptionId).toBe("alice-wait");
+    expect(retriedAlice.acceptedProposal?.body).toEqual({
+      kind: "replace",
+      taskOptionId: "task-option:alice:wait",
+      arguments: { durationTicks: 10 },
+    });
     expect(retriedBob.acceptedProposal).toBeNull();
     expect(retriedBob.identity.requestId).not.toBe(bobRequest.identity.requestId);
     expect(retriedBob.identity.retryOfRequestId).toBe(bobRequest.identity.requestId);
@@ -139,11 +206,29 @@ describe("decision gate", () => {
       {
         ...aliceWaitRequest,
         agentId: "bob" as never,
-        goalOptions: [
+        taskOptions: [
           {
-            id: "bob-wait" as never,
+            kind: "empty" as const,
+            id: "task-option:bob:empty-head" as never,
+            label: "Clear head task",
+            taskSlots: ["HEAD" as const],
+            argumentSchema: {},
+          },
+          {
+            kind: "empty" as const,
+            id: "task-option:bob:empty-body" as never,
+            label: "Clear body task",
+            taskSlots: ["BODY" as const],
+            argumentSchema: {},
+          },
+          {
+            kind: "operation" as const,
+            id: "task-option:bob:wait" as never,
+            operationId: "core.wait" as never,
             label: "Wait",
-            goal: { kind: "wait" as const, durationTicks: 10 },
+            taskSlots: ["BODY" as const],
+            argumentSchema: {},
+            fixedArguments: {},
           },
         ],
       },

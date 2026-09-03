@@ -6,6 +6,7 @@ import {
   EntityIdSchema,
   FacingSchema,
   JsonValueSchema,
+  WorldRulesReferenceSchema,
   WorldIdSchema,
 } from "@god-sim/protocol";
 
@@ -77,6 +78,7 @@ export const MapDefinitionSchema = z
     schemaVersion: z.literal(1),
     id: WorldIdSchema,
     name: z.string().min(1).max(160),
+    rules: WorldRulesReferenceSchema,
     tileSize: z.literal(16),
     width: z.number().int().positive().max(256),
     height: z.number().int().positive().max(256),

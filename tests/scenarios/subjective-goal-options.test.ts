@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { starterEngine } from "./fixtures/fixed-decision-provider";
 
-describe("subjective goal options", () => {
-  it("offers remembered furniture and every active interaction on a visible door", () => {
+describe("subjective task options", () => {
+  it("offers movement to remembered furniture and observation of visible objects", () => {
     const engine = starterEngine();
     const input = engine
       .getPendingDecisionInputs()
@@ -16,35 +16,40 @@ describe("subjective goal options", () => {
         .map((entity) => entity.entityId),
     );
     const rememberedObjectIds = new Set(["fridge-1", "toilet-1"]);
-    const targetedGoals = input.goalOptions.filter(
-      (option) => option.goal.kind !== "wait",
+    const targetedTasks = input.taskOptions.filter(
+      (option) => option.kind === "operation" && option.operationId !== "core.wait",
     );
 
     expect(
-      targetedGoals.every((option) => {
-        const targetEntityId = option.goal.targetEntityId;
+      targetedTasks.every((option) => {
+        if (option.kind !== "operation") return false;
+        const targetEntityId = String(option.fixedArguments.targetEntityId);
         return (
-          visibleObjectIds.has(targetEntityId) ||
+          visibleObjectIds.has(targetEntityId as never) ||
           rememberedObjectIds.has(targetEntityId)
         );
       }),
     ).toBe(true);
-    expect(targetedGoals.map((option) => option.goal.targetEntityId)).toEqual(
+    expect(
+      targetedTasks.map((option) =>
+        option.kind === "operation" ? option.fixedArguments.targetEntityId : null,
+      ),
+    ).toEqual(
       expect.arrayContaining(["fridge-1", "toilet-1"]),
     );
 
-    const doorGoals = targetedGoals
-      .filter((option) => option.goal.targetEntityId === "door-living-kitchen")
-      .map((option) => option.goal);
-    expect(doorGoals).toContainEqual({
-      kind: "observe",
-      targetEntityId: "door-living-kitchen",
-    });
+    const doorOperations = targetedTasks
+      .filter(
+        (option) =>
+          option.kind === "operation" &&
+          option.fixedArguments.targetEntityId === "door-living-kitchen",
+      )
+      .map((option) => option.kind === "operation" ? option.operationId : null);
+    expect(doorOperations).toEqual(
+      expect.arrayContaining(["core.move", "core.observe"]),
+    );
     expect(
-      doorGoals
-        .filter((goal) => goal.kind === "use_object")
-        .map((goal) => goal.interactionId)
-        .sort(),
-    ).toEqual(["close", "lock", "open", "unlock"]);
+      doorOperations.some((operationId) => operationId?.startsWith("object.")),
+    ).toBe(false);
   });
 });

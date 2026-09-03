@@ -6,8 +6,10 @@ import { basename, dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DomainEventSchema, WorldSnapshotV2Schema } from "@god-sim/protocol";
+import { DomainEventSchema, WorldSnapshotCurrentSchema } from "@god-sim/protocol";
 import { createSqliteTimelineStore } from "@god-sim/sqlite-store";
+
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 const auditScript = resolve(projectRoot, "scripts", "audit-world-history.mjs");
@@ -73,13 +75,14 @@ describe("world history audit", () => {
       decisionCycleId: "cycle:audit:1",
       reasonCode: "audit_fixture",
     });
-    const snapshot = WorldSnapshotV2Schema.parse({
-      schemaVersion: 2,
+    const snapshot = WorldSnapshotCurrentSchema.parse({
+      schemaVersion: 3,
       worldId: "starter-world",
       worldVersion: 1,
       worldTick: 1,
       lastEventSequence: 1,
       pluginLockHash: "a".repeat(64),
+      simulationRulesLock: testSimulationRulesLock,
       history: { mode: "strict", causalFromSequence: 1 },
       causalEventIds: [event.eventId],
       state: { privateMarker },
@@ -98,6 +101,7 @@ describe("world history audit", () => {
     const valid = runAudit(filename);
     expect(valid.status).toBe(0);
     expect(valid.stdout).toContain("integrity: ok");
+    expect(valid.stdout).toContain("causal snapshots audited: 1");
     expect(valid.stdout).toContain("missing causal events: 0");
     expect(`${valid.stdout}\n${valid.stderr}`).not.toContain(privateMarker);
 

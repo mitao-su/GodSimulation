@@ -54,7 +54,7 @@ export function AgentInspector({ view, selectedId }: AgentInspectorProps) {
       <div className="inspector-heading">
         <span className="inspector-heading__kind">角色</span>
         <h2>{agent.displayName}</h2>
-        <span>{agent.actionLabel ?? "暂停"}</span>
+        <span>{agent.bodyTask.label ?? agent.headTask.label ?? "无任务"}</span>
       </div>
       <div className="inspector-tabs" role="tablist" aria-label={`${agent.displayName} 信息`}>
         {tabItems.map((item) => {
@@ -76,8 +76,8 @@ export function AgentInspector({ view, selectedId }: AgentInspectorProps) {
 
       {tab === "overview" ? (
         <dl className="detail-list inspector-content">
-          <div><dt>当前目标</dt><dd>{agent.currentGoalLabel ?? "尚无"}</dd></div>
-          <div><dt>当前动作</dt><dd>{agent.actionLabel ?? "暂停"}</dd></div>
+          <div><dt>头部任务</dt><dd>{agent.headTask.label ?? "空任务"}</dd></div>
+          <div><dt>身体任务</dt><dd>{agent.bodyTask.label ?? "空任务"}</dd></div>
           <div><dt>内急状态</dt><dd>{agent.bladderLevel}</dd></div>
           <div><dt>决策状态</dt><dd>{agent.decisionStatus}</dd></div>
         </dl>

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  adoptGoal,
+  adoptTask,
   releaseCommand,
-  selectUseObject,
+  selectInteraction,
+  selectMoveTo,
   selectWait,
   snapshotAgent,
   snapshotObject,
@@ -17,8 +18,8 @@ describe("bladder and toilet loop", () => {
       aliceBladder: 74,
       bobBladder: 0,
     });
-    adoptGoal(engine, "alice" as never, selectWait);
-    adoptGoal(engine, "bob" as never, selectWait);
+    adoptTask(engine, "alice" as never, selectWait);
+    adoptTask(engine, "bob" as never, selectWait);
     engine.tick();
     engine.dispatch(releaseCommand(engine));
     engine.tick();
@@ -27,7 +28,7 @@ describe("bladder and toilet loop", () => {
     expect(engine.getView().pauseReason?.code).toBe("urgent_bladder");
     expect(snapshotAgent(engine, "alice").bladder).toBe(75);
 
-    adoptGoal(engine, "alice" as never, selectUseObject("toilet-1"));
+    adoptTask(engine, "alice" as never, selectMoveTo("toilet-1"));
     engine.tick();
     engine.dispatch(releaseCommand(engine));
     let completed = false;
@@ -36,11 +37,16 @@ describe("bladder and toilet loop", () => {
         completed = true;
         break;
       }
-      const pendingBob = engine
-        .getPendingDecisionInputs()
-        .some((input) => input.agentId === ("bob" as never));
-      if (pendingBob) {
-        adoptGoal(engine, "bob" as never, selectWait);
+      const pending = engine.getPendingDecisionInputs();
+      if (pending.length > 0) {
+        for (const input of pending) {
+          const selector =
+            input.agentId === "alice" &&
+            input.taskOptions.some(selectInteraction("toilet-1"))
+              ? selectInteraction("toilet-1")
+              : selectWait;
+          adoptTask(engine, input.agentId, selector);
+        }
         engine.tick();
         engine.dispatch(releaseCommand(engine));
       }

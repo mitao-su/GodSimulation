@@ -3,12 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   HostToWorkerMessage,
   ModelDecisionRequest,
+  TaskDecision,
   WorkerToHostMessage,
 } from "@god-sim/protocol";
 import type { DecisionProvider } from "@god-sim/model-gateway";
 import type { TimelineStore } from "@god-sim/timeline";
 
 import { PersistenceWriter } from "../persistence/persistence-writer";
+import { testSimulationRulesLock } from "../testing/simulation-rules-test-fixture";
 import { SessionCoordinator } from "./session-coordinator";
 import type { WorkerTransport } from "./worker-supervisor";
 
@@ -21,15 +23,35 @@ function request(agentId: "alice" | "bob"): ModelDecisionRequest {
     decisionCycleId: "cycle-1" as never,
     schemaVersion: 1,
     pluginLockHash: "a".repeat(64) as never,
-    decisionReason: { code: "initial_goal", summary: "Choose" },
+    decisionReason: { code: "initial_task", summary: "Choose" },
     messages: [{ role: "user", content: "Choose" }],
-    goalOptions: [
+    taskOptions: [
       {
-        id: `${agentId}-wait` as never,
+        kind: "operation",
+        id: `task-option:${agentId}:wait` as never,
+        operationId: "core.wait" as never,
         label: "Wait",
-        goal: { kind: "wait", durationTicks: 10 },
+        taskSlots: ["BODY"],
+        argumentSchema: {},
+        fixedArguments: {},
       },
     ],
+  };
+}
+
+function waitDecision(
+  agentId: "alice" | "bob",
+  reason = `${agentId} waits`,
+): TaskDecision {
+  return {
+    schemaVersion: 2,
+    head: { kind: "continue" },
+    body: {
+      kind: "replace",
+      taskOptionId: `task-option:${agentId}:wait` as never,
+      arguments: { durationTicks: 10 },
+    },
+    reason,
   };
 }
 
@@ -41,6 +63,7 @@ function worldView(): Extract<WorkerToHostMessage, { type: "world_view" }>["view
     worldName: "Starter Home",
     worldVersion: 1,
     worldTick: 0,
+    gameTime: { day: 1, hour: 8, minute: 0 },
     mode: "THINKING",
     reviewRequired: true,
     pauseReason: {
@@ -63,12 +86,13 @@ function checkpointReady(): Extract<WorkerToHostMessage, { type: "checkpoint_rea
     checkpointId: "checkpoint:starter-world:1:0" as never,
     events: [],
     snapshot: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       worldId: "starter-world" as never,
       worldVersion: 1,
       worldTick: 0,
       lastEventSequence: 0,
       pluginLockHash: "a".repeat(64) as never,
+      simulationRulesLock: testSimulationRulesLock,
       history: { mode: "strict", causalFromSequence: 1 },
       causalEventIds: [],
       state: {},
@@ -103,7 +127,10 @@ class FakeWorker implements WorkerTransport {
 function deferredProvider() {
   const resolvers = new Map<
     string,
-    { resolve: (value: { schemaVersion: 1; goalOptionId: never; reason: string }) => void; reject: (error: Error) => void }
+    {
+      resolve: (value: TaskDecision) => void;
+      reject: (error: Error) => void;
+    }
   >();
   const calls: string[] = [];
   const provider: DecisionProvider = {
@@ -191,11 +218,7 @@ describe("SessionCoordinator", () => {
       worker,
       decisionProvider: {
         async decide() {
-          return {
-            schemaVersion: 1,
-            goalOptionId: "alice-wait" as never,
-            reason: "Alice waits",
-          };
+          return waitDecision("alice", "Alice waits");
         },
       },
       persistence: new PersistenceWriter(store),
@@ -788,11 +811,9 @@ describe("SessionCoordinator", () => {
         decide(_requestValue, signal) {
           calls += 1;
           if (calls === 2) {
-            return Promise.resolve({
-              schemaVersion: 1,
-              goalOptionId: "alice-wait" as never,
-              reason: "Alice waits after recovery",
-            });
+            return Promise.resolve(
+              waitDecision("alice", "Alice waits after recovery"),
+            );
           }
           return new Promise((_resolve, reject) => {
             signal.addEventListener("abort", () => reject(signal.reason), { once: true });
@@ -856,11 +877,7 @@ describe("SessionCoordinator", () => {
       decisionProvider: {
         async decide() {
           calls += 1;
-          return {
-            schemaVersion: 1,
-            goalOptionId: "alice-wait" as never,
-            reason: "Keep this exact result",
-          };
+          return waitDecision("alice", "Keep this exact result");
         },
       },
       persistence: new PersistenceWriter(store),
@@ -1053,11 +1070,7 @@ describe("SessionCoordinator", () => {
       worker,
       decisionProvider: {
         async decide() {
-          return {
-            schemaVersion: 1,
-            goalOptionId: "alice-wait" as never,
-            reason: "Alice waits",
-          };
+          return waitDecision("alice", "Alice waits");
         },
       },
       persistence: PersistenceWriter.inMemory(),
@@ -1115,11 +1128,7 @@ describe("SessionCoordinator", () => {
         worker,
         decisionProvider: {
           async decide() {
-            return {
-              schemaVersion: 1,
-              goalOptionId: "alice-wait" as never,
-              reason: "Keep this result",
-            };
+            return waitDecision("alice", "Keep this result");
           },
         },
         persistence: new PersistenceWriter(store),
@@ -1179,15 +1188,18 @@ describe("SessionCoordinator", () => {
     worker.emit({ type: "decision_requested", request: request("alice") });
     worker.emit({ type: "decision_requested", request: request("bob") });
     await vi.waitFor(() => expect(deferred.calls).toEqual(["alice", "bob"]));
-    deferred.resolvers.get("alice")!.resolve({
-      schemaVersion: 1,
-      goalOptionId: "alice-wait" as never,
-      reason: "Alice waits",
-    });
+    deferred.resolvers
+      .get("alice")!
+      .resolve(waitDecision("alice", "Alice waits"));
     await vi.waitFor(() => expect(worker.sent).toHaveLength(1));
     expect(worker.sent[0]).toMatchObject({
       type: "decision_result",
-      result: { agentId: "alice", proposal: { goalOptionId: "alice-wait" } },
+      result: {
+        agentId: "alice",
+        proposal: {
+          body: { taskOptionId: "task-option:alice:wait" },
+        },
+      },
     });
 
     deferred.resolvers.get("bob")!.reject(new Error("Provider unavailable"));

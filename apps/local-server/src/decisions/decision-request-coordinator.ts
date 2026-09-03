@@ -1,9 +1,10 @@
 import {
-  GoalProposalSchema,
   ModelDecisionResultSchema,
+  resolveTaskDecision,
   TechnicalFailureSchema,
   type ModelDecisionRequest,
   type ModelDecisionResult,
+  type TaskDecision,
   type TechnicalFailure,
 } from "@god-sim/protocol";
 import type { DecisionProvider } from "@god-sim/model-gateway";
@@ -35,6 +36,13 @@ export interface DecisionRequestCoordinatorOptions {
   readonly monotonicNow?: () => number;
 }
 
+function validateProposal(
+  request: ModelDecisionRequest,
+  value: TaskDecision,
+): TaskDecision {
+  return resolveTaskDecision(value, request.taskOptions).normalizedDecision;
+}
+
 export class DecisionRequestCoordinator {
   readonly #provider: DecisionProvider;
   readonly #persistence: PersistenceWriter;
@@ -59,14 +67,12 @@ export class DecisionRequestCoordinator {
     this.#controllers.set(request.requestId, controller);
     const startedAt = this.#monotonicNow();
     try {
-      let proposal: ReturnType<typeof GoalProposalSchema.parse>;
+      let proposal: TaskDecision;
       try {
-        proposal = GoalProposalSchema.parse(
+        proposal = validateProposal(
+          request,
           await this.#provider.decide(request, controller.signal),
         );
-        if (!request.goalOptions.some((option) => option.id === proposal.goalOptionId)) {
-          throw new Error(`Goal option ${proposal.goalOptionId} was not offered`);
-        }
       } catch (error) {
         if (controller.signal.aborted) return { type: "cancelled" };
         const message = error instanceof Error ? error.message : String(error);
@@ -91,7 +97,7 @@ export class DecisionRequestCoordinator {
             decisionReasonCode: request.decisionReason.code,
             modelId: this.#modelId,
             status: "failed",
-            goalOptionId: null,
+            taskDecision: null,
             responseReason: failure.message,
             latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
             retryOfRequestId: request.retryOfRequestId ?? null,
@@ -139,7 +145,7 @@ export class DecisionRequestCoordinator {
           decisionReasonCode: request.decisionReason.code,
           modelId: this.#modelId,
           status: "accepted",
-          goalOptionId: proposal.goalOptionId,
+          taskDecision: proposal,
           responseReason: proposal.reason,
           latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
           retryOfRequestId: request.retryOfRequestId ?? null,

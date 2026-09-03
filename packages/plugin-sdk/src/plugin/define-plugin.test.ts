@@ -2,6 +2,7 @@ import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
 import type { ObjectDefinition } from "../object/object-definition";
+import type { InteractionDefinition } from "../object/object-interaction";
 import { definePlugin } from "./define-plugin";
 import { PluginManifestSchema } from "./plugin-manifest";
 
@@ -22,6 +23,35 @@ function objectDefinition(id: string): ObjectDefinition<{ enabled: boolean }> {
     },
     interactions: [],
     observe: () => ({ status: "ready", summary: "Ready", details: {} }),
+  };
+}
+
+function interactionDefinition(): InteractionDefinition<{ enabled: boolean }> {
+  return {
+    id: "use",
+    displayName: "Use",
+    trigger: "active_command",
+    taskSlots: ["BODY"],
+    parametersSchema: z.object({}).strict(),
+    resolveDuration: () => ({ kind: "fixed", totalTicks: 1 }),
+    eventIgnore: [],
+    publicBehavior: { kind: "visible", label: "using the object" },
+    domainFailures: [],
+    resultSchema: z.object({}).strict(),
+    canStart: () => ({ available: true }),
+    complete: () => ({ effects: [] }),
+    fail: () => ({ effects: [] }),
+    cancel: () => ({ effects: [] }),
+    fuse: () => null,
+  };
+}
+
+function objectWithInteraction(
+  interaction: InteractionDefinition<{ enabled: boolean }>,
+): ObjectDefinition<{ enabled: boolean }> {
+  return {
+    ...objectDefinition("test.object"),
+    interactions: [interaction],
   };
 }
 
@@ -76,5 +106,73 @@ describe("definePlugin", () => {
         agents: [],
       }),
     ).toThrow(/automatic traversal interaction open/i);
+  });
+
+  it("accepts a complete operation contract", () => {
+    const interaction = interactionDefinition();
+
+    const plugin = definePlugin(manifest, {
+      objects: [objectWithInteraction(interaction)],
+      agents: [],
+    });
+
+    expect(plugin.objects[0]?.interactions[0]?.taskSlots).toEqual(["BODY"]);
+  });
+
+  it.each([
+    { taskSlots: [], message: /at least one task track/i },
+    { taskSlots: ["BODY", "HEAD"], message: /canonical order/i },
+    { taskSlots: ["BODY", "BODY"], message: /duplicate/i },
+  ])("rejects invalid task slots $taskSlots", ({ taskSlots, message }) => {
+    const interaction = {
+      ...interactionDefinition(),
+      taskSlots,
+    } as unknown as InteractionDefinition<{ enabled: boolean }>;
+
+    expect(() =>
+      definePlugin(manifest, {
+        objects: [objectWithInteraction(interaction)],
+        agents: [],
+      }),
+    ).toThrow(message);
+  });
+
+  it.each([
+    ["publicBehavior", /public behavior/i],
+    ["resolveDuration", /duration resolver/i],
+    ["parametersSchema", /parameter schema/i],
+    ["resultSchema", /result schema/i],
+    ["eventIgnore", /event ignore/i],
+    ["domainFailures", /domain failure/i],
+    ["fail", /failure lifecycle/i],
+    ["cancel", /cancel lifecycle/i],
+    ["fuse", /fuse lifecycle/i],
+  ] as const)("rejects a missing %s declaration", (field, message) => {
+    const interaction = { ...interactionDefinition(), [field]: undefined } as unknown as
+      InteractionDefinition<{ enabled: boolean }>;
+
+    expect(() =>
+      definePlugin(manifest, {
+        objects: [objectWithInteraction(interaction)],
+        agents: [],
+      }),
+    ).toThrow(message);
+  });
+
+  it("rejects duplicate domain failure codes", () => {
+    const interaction = {
+      ...interactionDefinition(),
+      domainFailures: [
+        { code: "occupied", summary: "Occupied" },
+        { code: "occupied", summary: "Still occupied" },
+      ],
+    } satisfies InteractionDefinition<{ enabled: boolean }>;
+
+    expect(() =>
+      definePlugin(manifest, {
+        objects: [objectWithInteraction(interaction)],
+        agents: [],
+      }),
+    ).toThrow(/duplicate domain failure/i);
   });
 });

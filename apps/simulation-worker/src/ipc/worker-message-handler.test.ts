@@ -8,6 +8,7 @@ import { createSimulation } from "@god-sim/simulation";
 
 import starterHome from "../../../../content/worlds/starter-home/world.json" with { type: "json" };
 
+import { testSimulationRulesLock } from "../testing/simulation-rules-test-fixture";
 import { WorkerMessageHandler } from "./worker-message-handler";
 
 const pluginLock: PluginLock = {
@@ -39,6 +40,7 @@ describe("WorkerMessageHandler", () => {
       protocolVersion: 1,
       worldDefinition: JsonValueSchema.parse(starterHome),
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
     });
@@ -86,6 +88,7 @@ describe("WorkerMessageHandler", () => {
       protocolVersion: 1,
       worldDefinition: JsonValueSchema.parse(starterHome),
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
     });
@@ -104,7 +107,10 @@ describe("WorkerMessageHandler", () => {
         message.type === "decision_requested",
     );
     for (const { request } of requests) {
-      const wait = request.goalOptions.find((option) => option.goal.kind === "wait")!;
+      const wait = request.taskOptions.find(
+        (option) =>
+          option.kind === "operation" && option.operationId === "core.wait",
+      )!;
       handler.handle({
         type: "decision_result",
         result: {
@@ -116,8 +122,13 @@ describe("WorkerMessageHandler", () => {
           schemaVersion: request.schemaVersion,
           pluginLockHash: request.pluginLockHash,
           proposal: {
-            schemaVersion: 1,
-            goalOptionId: wait.id,
+            schemaVersion: 2,
+            head: { kind: "continue" },
+            body: {
+              kind: "replace",
+              taskOptionId: wait.id,
+              arguments: { durationTicks: 10 },
+            },
             reason: "Wait",
           },
         },
@@ -172,6 +183,7 @@ describe("WorkerMessageHandler", () => {
       reviewRequired: true,
       seed: 1,
       pluginLockHash: pluginLock.hash,
+      simulationRulesLock: testSimulationRulesLock,
     });
     const failure = {
       id: "failure:persistence:restore",
@@ -195,6 +207,7 @@ describe("WorkerMessageHandler", () => {
       protocolVersion: 1,
       worldDefinition: JsonValueSchema.parse(starterHome),
       pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
       reviewRequired: true,
       deterministicSeed: 1,
       restoredSnapshot: engine.createSnapshot(),

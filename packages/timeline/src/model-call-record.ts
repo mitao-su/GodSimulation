@@ -1,9 +1,9 @@
 import type {
   AgentId,
   DecisionCycleId,
-  GoalOptionId,
   PluginLockHash,
   RequestId,
+  TaskDecision,
   WorldId,
 } from "@god-sim/protocol";
 
@@ -18,7 +18,7 @@ export interface ModelCallRecord {
   readonly decisionReasonCode: string;
   readonly modelId: string;
   readonly status: "accepted" | "failed" | "rejected";
-  readonly goalOptionId: GoalOptionId | null;
+  readonly taskDecision: TaskDecision | null;
   readonly responseReason: string | null;
   readonly latencyMs: number;
   readonly retryOfRequestId: RequestId | null;

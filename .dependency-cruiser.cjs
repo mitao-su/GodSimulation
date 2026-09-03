@@ -133,6 +133,14 @@ module.exports = {
       from: { path: "^(apps|packages|plugins)/" },
       to: { path: "^@god-sim/[^/]+/.+" },
     },
+    {
+      // Inner simulation layers must depend on the narrow operation
+      // runtime registry protocol, never on the engine composition root.
+      name: "simulation-inner-layers-skip-composition-root",
+      severity: "error",
+      from: { path: "^packages/simulation/src/(execution|decision)(?:/|$)" },
+      to: { path: "^packages/simulation/src/engine/simulation-registry" },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },

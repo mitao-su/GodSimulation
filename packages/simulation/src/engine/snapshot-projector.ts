@@ -1,9 +1,9 @@
 import {
   JsonValueSchema,
-  WorldSnapshotV2Schema,
+  WorldSnapshotCurrentSchema,
   type EventId,
   type JsonValue,
-  type WorldSnapshotV2,
+  type WorldSnapshotCurrent,
 } from "@god-sim/protocol";
 
 import type { WorldState } from "../world/world-state";
@@ -14,6 +14,7 @@ import {
 
 function serializeWorldState(world: WorldState): JsonValue {
   return JsonValueSchema.parse({
+    stateSchemaVersion: 3,
     name: world.name,
     mode: world.mode,
     suspendedMode: world.suspendedMode,
@@ -24,6 +25,9 @@ function serializeWorldState(world: WorldState): JsonValue {
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((agent) => ({
         ...agent,
+        activeOperations: [...agent.activeOperations.values()].sort((left, right) =>
+          left.callId.localeCompare(right.callId),
+        ),
         knowledge: {
           zoneId: agent.knowledge.zoneId,
           objects: [...agent.knowledge.objects.values()].sort((left, right) =>
@@ -91,14 +95,15 @@ function collectCausalEventIds(world: WorldState): readonly EventId[] {
     });
 }
 
-export function projectWorldSnapshot(world: WorldState): WorldSnapshotV2 {
-  const snapshot = WorldSnapshotV2Schema.parse({
-    schemaVersion: 2,
+export function projectWorldSnapshot(world: WorldState): WorldSnapshotCurrent {
+  const snapshot = WorldSnapshotCurrentSchema.parse({
+    schemaVersion: 3,
     worldId: world.id,
     worldVersion: world.version,
     worldTick: world.tick,
     lastEventSequence: world.lastEventSequence,
     pluginLockHash: world.pluginLockHash,
+    simulationRulesLock: world.simulationRulesLock,
     history: world.history,
     causalEventIds: collectCausalEventIds(world),
     state: serializeWorldState(world),

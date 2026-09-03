@@ -8,7 +8,38 @@ import {
 import { ObservationContextSchema } from "@god-sim/plugin-sdk";
 
 import type { PluginRegistry } from "../world/plugin-registry";
-import type { AgentState, WorldState } from "../world/world-state";
+import { projectGameTime } from "../world/game-time";
+import type {
+  AgentState,
+  DecisionRequestState,
+  WorldState,
+} from "../world/world-state";
+
+function decisionTrackProposal(
+  request: DecisionRequestState,
+  track: "HEAD" | "BODY",
+): WorldView["pendingDecisions"][number]["headProposal"] {
+  const proposal = request.acceptedProposal;
+  if (!proposal) return null;
+  const selection = track === "HEAD" ? proposal.head : proposal.body;
+  if (selection.kind === "continue") {
+    return { kind: "continue", label: `Continue current ${track} task` };
+  }
+  const option = request.promptInput.taskOptions.find(
+    (candidate) => candidate.id === selection.taskOptionId,
+  );
+  if (!option) {
+    throw new Error(
+      `Accepted decision references missing task option ${selection.taskOptionId}`,
+    );
+  }
+  return {
+    kind: "replace",
+    taskOptionId: selection.taskOptionId,
+    label: option.label,
+    arguments: selection.arguments,
+  };
+}
 
 function pauseReason(world: WorldState): WorldView["pauseReason"] {
   const cycle = world.decisionCycle;
@@ -83,23 +114,24 @@ function decisionStatus(world: WorldState, agentId: AgentId): "none" | "thinking
   return request.acceptedProposal === null ? "thinking" : "ready";
 }
 
-function currentActionLabel(
-  world: WorldState,
-  registry: PluginRegistry,
+function taskView(
   agent: AgentState,
-): string | null {
-  const action = agent.actionPlan?.actions[agent.actionPlan.currentActionIndex];
-  if (!action) return null;
-  if (action.kind !== "interact_object") return action.kind;
-  const object = world.objects.get(action.targetEntityId);
-  const definition = object
-    ? registry.getObject(object.definitionId)?.definition
-    : undefined;
-  return (
-    definition?.interactions.find(
-      (interaction) => interaction.id === action.interactionId,
-    )?.displayName ?? "Interact"
-  );
+  track: "HEAD" | "BODY",
+): WorldView["agents"][number]["headTask"] {
+  const state = agent.taskTracks[track];
+  if (state.kind === "empty") return { kind: "empty", label: null };
+  const operation = agent.activeOperations.get(state.callId);
+  if (!operation) {
+    throw new Error(`${agent.id} ${track} references missing call ${state.callId}`);
+  }
+  return {
+    kind: "operation",
+    callId: operation.callId,
+    operationId: operation.operationId,
+    label: operation.label,
+    duration: operation.duration,
+    progressTicks: operation.progressTicks,
+  };
 }
 
 function renderEntities(world: WorldState, registry: PluginRegistry): WorldView["entities"] {
@@ -127,7 +159,12 @@ function renderEntities(world: WorldState, registry: PluginRegistry): WorldView[
     };
   });
   const agents = [...world.agents.values()].map((agent) => {
-    const action = agent.actionPlan?.actions[agent.actionPlan.currentActionIndex];
+    const activeCallId = [agent.taskTracks.HEAD, agent.taskTracks.BODY]
+      .find((track) => track.kind === "operation")?.callId;
+    const operation = activeCallId
+      ? agent.activeOperations.get(activeCallId)
+      : undefined;
+    const action = operation?.plan.actions[operation.plan.currentActionIndex];
     return {
       entityId: EntityIdSchema.parse(agent.id),
       kind: "agent" as const,
@@ -155,6 +192,7 @@ export function projectWorldView(
     worldName: world.name,
     worldVersion: world.version,
     worldTick: world.tick,
+    gameTime: projectGameTime(world.tick, world.simulationRulesLock.rules.time),
     mode: world.mode,
     reviewRequired: world.reviewRequired,
     pauseReason: pauseReason(world),
@@ -166,8 +204,8 @@ export function projectWorldView(
         return {
           agentId: agent.id,
           displayName: agent.displayName,
-          currentGoalLabel: agent.currentGoal?.label ?? null,
-          actionLabel: currentActionLabel(world, registry, agent),
+          headTask: taskView(agent, "HEAD"),
+          bodyTask: taskView(agent, "BODY"),
           bladderLevel: agent.bladderSensation,
           decisionStatus: decisionStatus(world, agent.id),
           perceivedSummaries: perceivedSummaries(agent),
@@ -185,6 +223,8 @@ export function projectWorldView(
           status: error ? "error" : request.acceptedProposal === null ? "pending" : "ready",
           reason: request.promptInput.decisionReason.summary,
           proposalReason: request.acceptedProposal?.reason ?? null,
+          headProposal: decisionTrackProposal(request, "HEAD"),
+          bodyProposal: decisionTrackProposal(request, "BODY"),
           error,
         };
       }) ?? [],

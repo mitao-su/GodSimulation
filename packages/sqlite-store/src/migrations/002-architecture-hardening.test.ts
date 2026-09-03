@@ -63,7 +63,7 @@ describe("architecture hardening migration", () => {
           "alice",
           "legacy-model",
           "accepted",
-          null,
+          "goal-option:legacy:wait",
           null,
           5,
           null,
@@ -91,7 +91,7 @@ describe("architecture hardening migration", () => {
           .get("event:starter-world:1") as { payload_json: string };
         const modelCall = migrated
           .prepare(
-            "SELECT protocol_schema_version, decision_cycle_id, plugin_lock_hash, decision_reason_code FROM model_calls WHERE request_id = ?",
+            "SELECT protocol_schema_version, decision_cycle_id, plugin_lock_hash, decision_reason_code, goal_option_id, task_decision_json FROM model_calls WHERE request_id = ?",
           )
           .get("request:1") as Record<string, unknown>;
         const indexes = migrated
@@ -108,6 +108,8 @@ describe("architecture hardening migration", () => {
           decision_cycle_id: null,
           plugin_lock_hash: null,
           decision_reason_code: null,
+          goal_option_id: "goal-option:legacy:wait",
+          task_decision_json: null,
         });
         expect(indexes).toContainEqual(
           expect.objectContaining({

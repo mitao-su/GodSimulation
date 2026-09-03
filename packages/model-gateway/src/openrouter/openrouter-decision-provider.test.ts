@@ -12,13 +12,17 @@ const request: ModelDecisionRequest = {
   decisionCycleId: "cycle-1" as never,
   schemaVersion: 1,
   pluginLockHash: "a".repeat(64) as never,
-  decisionReason: { code: "initial_goal", summary: "Choose a goal" },
-  messages: [{ role: "user", content: "Choose one offered goal" }],
-  goalOptions: [
+  decisionReason: { code: "initial_task", summary: "Choose tasks" },
+  messages: [{ role: "user", content: "Choose offered tasks" }],
+  taskOptions: [
     {
-      id: "wait-10" as never,
+      kind: "operation",
+      id: "task-option:alice:wait" as never,
+      operationId: "core.wait" as never,
       label: "Wait",
-      goal: { kind: "wait", durationTicks: 10 },
+      taskSlots: ["BODY"],
+      argumentSchema: {},
+      fixedArguments: {},
     },
   ],
 };
@@ -31,18 +35,21 @@ const config = {
 };
 
 describe("OpenRouterDecisionProvider", () => {
-  it("parses only the returned assistant content as a goal proposal", async () => {
+  it("requires and parses a complete HEAD/BODY task decision", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
-          id: "response-1",
           choices: [
             {
               message: {
-                role: "assistant",
                 content: JSON.stringify({
-                  schemaVersion: 1,
-                  goalOptionId: "wait-10",
+                  schemaVersion: 2,
+                  head: { kind: "continue" },
+                  body: {
+                    kind: "replace",
+                    taskOptionId: "task-option:alice:wait",
+                    arguments: { durationTicks: 10 },
+                  },
                   reason: "Waiting is appropriate",
                 }),
               },
@@ -54,22 +61,67 @@ describe("OpenRouterDecisionProvider", () => {
     );
     const provider = new OpenRouterDecisionProvider(config, fetchImplementation);
 
-    await expect(provider.decide(request, new AbortController().signal)).resolves.toEqual({
-      schemaVersion: 1,
-      goalOptionId: "wait-10",
+    await expect(
+      provider.decide(request, new AbortController().signal),
+    ).resolves.toEqual({
+      schemaVersion: 2,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        taskOptionId: "task-option:alice:wait",
+        arguments: { durationTicks: 10 },
+      },
       reason: "Waiting is appropriate",
     });
-    const init = fetchImplementation.mock.calls[0]?.[1];
-    expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    const body = JSON.parse(
+      String(fetchImplementation.mock.calls[0]?.[1]?.body),
+    );
+    expect(body).toMatchObject({
       model: "openrouter/free",
       messages: request.messages,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          strict: true,
+          schema: {
+            required: ["schemaVersion", "head", "body", "reason"],
+          },
+        },
+      },
     });
+  });
+
+  it("rejects a legacy single-goal assistant response", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  schemaVersion: 1,
+                  goalOptionId: "task-option:alice:wait",
+                  reason: "Legacy response",
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const provider = new OpenRouterDecisionProvider(config, fetchImplementation);
+
+    await expect(
+      provider.decide(request, new AbortController().signal),
+    ).rejects.toThrow();
   });
 
   it("never includes the API key in a provider error", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(`Authorization failed for Bearer ${config.apiKey}`, { status: 401 }),
+      new Response(`Authorization failed for Bearer ${config.apiKey}`, {
+        status: 401,
+      }),
     );
     const provider = new OpenRouterDecisionProvider(config, fetchImplementation);
 
@@ -85,7 +137,9 @@ describe("OpenRouterDecisionProvider", () => {
   it("does not retain an unredacted network error as its cause", async () => {
     const fetchImplementation = vi
       .fn<typeof fetch>()
-      .mockRejectedValue(new Error(`Network failed with Bearer ${config.apiKey}`));
+      .mockRejectedValue(
+        new Error(`Network failed with Bearer ${config.apiKey}`),
+      );
     const provider = new OpenRouterDecisionProvider(config, fetchImplementation);
 
     const error = await provider

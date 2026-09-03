@@ -2,28 +2,50 @@ import { describe, expect, it } from "vitest";
 
 import homePlugin from "@god-sim/home-objects";
 import {
-  createPluginRegistry,
+  createSimulationRegistry,
   loadWorldDefinition,
   refreshAllPerceptions,
+  type ActiveOperation,
 } from "@god-sim/simulation";
 import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 
-const registry = createPluginRegistry([spatialPlugin, homePlugin, agentsPlugin]);
-const fridgeGoal = {
-  id: "goal:alice:fridge",
+const registry = createSimulationRegistry([spatialPlugin, homePlugin, agentsPlugin]);
+const fridgeCall: ActiveOperation = {
+  callId: "operation-call:alice:fridge" as never,
+  operationId: "object.home.refrigerator.use" as never,
+  taskOptionId: "task-option:alice:fridge-1:use" as never,
   label: "Use refrigerator",
-  goal: {
-    kind: "use_object" as const,
-    targetEntityId: "fridge-1" as never,
-    interactionId: "use",
+  taskSlots: ["BODY"],
+  arguments: { targetEntityId: "fridge-1", parameters: {} },
+  duration: { kind: "fixed", totalTicks: 10 },
+  startedAtTick: 0,
+  progressTicks: 0,
+  state: {},
+  plan: {
+    currentActionIndex: 0,
+    actions: [
+      {
+        id: "operation-call:alice:fridge:action:0",
+        kind: "interact_object",
+        purpose: "direct",
+        targetEntityId: "fridge-1" as never,
+        interactionId: "use",
+        durationTicks: 10,
+        progressTicks: 0,
+        started: false,
+      },
+    ],
   },
 };
 
 function occupiedFridgeWorld() {
-  const base = loadWorldDefinition(starterHome, registry).world;
+  const base = loadWorldDefinition(starterHome, registry, {
+    simulationRulesLock: testSimulationRulesLock,
+  }).world;
   const fridge = base.objects.get("fridge-1" as never)!;
   const alice = base.agents.get("alice" as never)!;
   return {
@@ -35,7 +57,11 @@ function occupiedFridgeWorld() {
     }),
     agents: new Map(base.agents).set("alice" as never, {
       ...alice,
-      currentGoal: fridgeGoal,
+      taskTracks: {
+        HEAD: { kind: "empty" as const },
+        BODY: { kind: "operation" as const, callId: fridgeCall.callId },
+      },
+      activeOperations: new Map([[fridgeCall.callId, fridgeCall]]),
     }),
   };
 }
