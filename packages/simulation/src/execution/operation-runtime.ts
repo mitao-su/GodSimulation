@@ -83,8 +83,23 @@ export interface RegisteredOperation {
   readonly publicBehavior: PublicBehaviorDeclaration;
   readonly domainFailures: readonly OperationDomainFailureDefinition[];
   readonly resultSchema: z.ZodType<JsonObject>;
+  /**
+   * Schema of the opaque per-call state owned by this operation. The
+   * shared restoration boundary parses `ActiveOperation.state` against
+   * this schema before delegating plan validation to the runtime.
+   */
+  readonly stateSchema: z.ZodType<JsonObject>;
   argumentsSchema(context: OperationRuntimeContext): z.ZodType<JsonObject>;
   offers(context: OperationRuntimeContext): readonly OperationOffer[];
+  /**
+   * Initial runtime-owned state for a newly created call. Invoked once
+   * when the call is prepared; the value travels with snapshots and is
+   * validated against `stateSchema` on restore.
+   */
+  initialState(
+    context: OperationRuntimeContext,
+    argumentsValue: Readonly<JsonObject>,
+  ): JsonObject;
   canStart(
     context: OperationRuntimeContext,
     argumentsValue: Readonly<JsonObject>,

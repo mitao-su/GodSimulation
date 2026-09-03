@@ -51,8 +51,7 @@ function moveOperation(progressTicks: number): ActiveOperation {
     duration: { kind: "indeterminate" },
     startedAtTick: 0,
     progressTicks,
-    accumulatedObservations: [],
-    observationDeliveryCursor: 0,
+    state: { accumulatedObservations: [], observationDeliveryCursor: 0 },
     plan: {
       currentActionIndex: 0,
       actions: [
@@ -71,14 +70,27 @@ function moveOperation(progressTicks: number): ActiveOperation {
   };
 }
 
+function moveWithObservations(
+  observations: readonly { entityId: string; kind: "object" | "agent"; summary: string }[],
+): ActiveOperation {
+  const operation = moveOperation(0);
+  return {
+    ...operation,
+    state: {
+      accumulatedObservations: observations.map((observation) => ({
+        ...observation,
+        entityId: observation.entityId as never,
+      })),
+      observationDeliveryCursor: 0,
+    },
+  };
+}
+
 describe("operation lifecycle results", () => {
   it("invokes fuse through the registered operation and emits a nonterminal receipt", () => {
-    const operation = {
-      ...moveOperation(0),
-      accumulatedObservations: [
-        { entityId: "wall-1" as never, kind: "object" as const, summary: "Wall" },
-      ],
-    };
+    const operation = moveWithObservations([
+      { entityId: "wall-1", kind: "object", summary: "Wall" },
+    ]);
     const world = withActiveOperation(operation);
 
     const fused = recordFuseResults(
@@ -119,8 +131,7 @@ describe("operation lifecycle results", () => {
       duration: { kind: "fixed", totalTicks: 10 },
       startedAtTick: 0,
       progressTicks: 9,
-      accumulatedObservations: [],
-      observationDeliveryCursor: 0,
+      state: {},
       plan: {
         currentActionIndex: 0,
         actions: [
@@ -163,12 +174,9 @@ describe("operation lifecycle results", () => {
   });
 
   it("acknowledges delivered move observations only after a continued decision releases", () => {
-    const operation = {
-      ...moveOperation(0),
-      accumulatedObservations: [
-        { entityId: "wall-1" as never, kind: "object" as const, summary: "Wall" },
-      ],
-    };
+    const operation = moveWithObservations([
+      { entityId: "wall-1", kind: "object", summary: "Wall" },
+    ]);
     const firstFuse = recordFuseResults(
       withActiveOperation(operation),
       testPluginRegistry,
@@ -204,8 +212,8 @@ describe("operation lifecycle results", () => {
     expect(
       released.agents
         .get("alice" as never)
-        ?.activeOperations.get(operation.callId)?.observationDeliveryCursor,
-    ).toBe(1);
+        ?.activeOperations.get(operation.callId)?.state,
+    ).toMatchObject({ observationDeliveryCursor: 1 });
 
     const observed = accumulateOperationObservations(
       released,
@@ -240,12 +248,9 @@ describe("operation lifecycle results", () => {
   });
 
   it("does not repeat acknowledged move observations in a cancellation result", () => {
-    const operation = {
-      ...moveOperation(0),
-      accumulatedObservations: [
-        { entityId: "wall-1" as never, kind: "object" as const, summary: "Wall" },
-      ],
-    };
+    const operation = moveWithObservations([
+      { entityId: "wall-1", kind: "object", summary: "Wall" },
+    ]);
     const fused = recordFuseResults(
       withActiveOperation(operation),
       testPluginRegistry,
@@ -307,8 +312,7 @@ describe("operation lifecycle results", () => {
       duration: { kind: "fixed", totalTicks: 10 },
       startedAtTick: 0,
       progressTicks: 9,
-      accumulatedObservations: [],
-      observationDeliveryCursor: 0,
+      state: {},
       plan: {
         currentActionIndex: 0,
         actions: [

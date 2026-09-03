@@ -14,7 +14,7 @@ import {
 
 function serializeWorldState(world: WorldState): JsonValue {
   return JsonValueSchema.parse({
-    stateSchemaVersion: 2,
+    stateSchemaVersion: 3,
     name: world.name,
     mode: world.mode,
     suspendedMode: world.suspendedMode,

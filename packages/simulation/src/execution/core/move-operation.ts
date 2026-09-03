@@ -45,6 +45,25 @@ export const MoveOperationResultSchema = z
   .object({ nearby: z.array(OperationObservationSchema) })
   .strict();
 
+/**
+ * Runtime-owned state of a move call: every observation swept during the
+ * move, plus the cursor marking which prefix has already been delivered
+ * to the agent. Kept inside the opaque `ActiveOperation.state` so other
+ * operations never have to know these fields exist.
+ */
+export const MoveOperationStateSchema = z
+  .object({
+    accumulatedObservations: z.array(OperationObservationSchema),
+    observationDeliveryCursor: z.number().int().nonnegative(),
+  })
+  .strict();
+
+type MoveOperationState = z.infer<typeof MoveOperationStateSchema>;
+
+function moveState(operation: ActiveOperation): MoveOperationState {
+  return MoveOperationStateSchema.parse(operation.state);
+}
+
 function automaticTraversalObjectsAt(
   context: OperationRuntimeContext,
   position: Coordinate,
@@ -169,10 +188,9 @@ function routeToTarget(
 }
 
 function undeliveredResult(operation: ActiveOperation): JsonObject {
+  const state = moveState(operation);
   return MoveOperationResultSchema.parse({
-    nearby: operation.accumulatedObservations.slice(
-      operation.observationDeliveryCursor,
-    ),
+    nearby: state.accumulatedObservations.slice(state.observationDeliveryCursor),
   });
 }
 
@@ -184,7 +202,8 @@ function assertRestoredMovePlan(
   if (operation.duration.kind !== "indeterminate") {
     throw new Error(`Snapshot move operation ${operation.callId} has a fixed duration`);
   }
-  if (operation.observationDeliveryCursor > operation.accumulatedObservations.length) {
+  const state = moveState(operation);
+  if (state.observationDeliveryCursor > state.accumulatedObservations.length) {
     throw new Error(
       `Snapshot move operation ${operation.callId} has an invalid observation delivery cursor`,
     );
@@ -230,7 +249,12 @@ export function createMoveOperation(): RegisteredOperation {
       { code: "movement_blocked", summary: "Movement was blocked" },
     ],
     resultSchema: MoveOperationResultSchema,
+    stateSchema: MoveOperationStateSchema,
     argumentsSchema: () => ENTITY_TARGET_ARGUMENTS_SCHEMA,
+    initialState: () => ({
+      accumulatedObservations: [],
+      observationDeliveryCursor: 0,
+    }),
     offers: (context) =>
       knownObjects(context).flatMap((known) => {
         const object = context.world.objects.get(known.entityId);
@@ -284,24 +308,32 @@ export function createMoveOperation(): RegisteredOperation {
           `Operation result for ${operation.callId} does not match its pending observations`,
         );
       }
+      const state = moveState(operation);
       return {
         ...operation,
-        observationDeliveryCursor: operation.accumulatedObservations.length,
+        state: {
+          ...state,
+          observationDeliveryCursor: state.accumulatedObservations.length,
+        },
       };
     },
     terminalResult: (_context, operation) => undeliveredResult(operation),
     validateRestored: assertRestoredMovePlan,
     accumulateObservations: (operation, observations) => {
+      const state = moveState(operation);
       const merged = new Map<EntityId, OperationObservation>();
       for (const observation of [
-        ...operation.accumulatedObservations,
+        ...state.accumulatedObservations,
         ...observations,
       ]) {
         if (!merged.has(observation.entityId)) {
           merged.set(observation.entityId, observation);
         }
       }
-      return { ...operation, accumulatedObservations: [...merged.values()] };
+      return {
+        ...operation,
+        state: { ...state, accumulatedObservations: [...merged.values()] },
+      };
     },
     recover: (context, operation, failure, knowledge) => {
       const knownTraversalBlockers = new Map(knowledge.knownTraversalBlockers);

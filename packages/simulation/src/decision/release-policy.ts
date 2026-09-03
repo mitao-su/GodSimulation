@@ -13,11 +13,13 @@ import {
   recordOperationTermination,
 } from "../execution/operation-lifecycle";
 import { prepareOperationCall } from "../execution/operation-planner";
-import { createOperationRuntimeContext } from "../execution/operation-runtime";
+import {
+  createOperationRuntimeContext,
+  type OperationRuntimeRegistry,
+} from "../execution/operation-runtime";
 import type { ActiveOperation } from "../execution/operation";
 import type { TaskTrackState, TaskTracks } from "../execution/task-tracks";
 import { appendDomainEvent } from "../engine/event-writer";
-import type { SimulationRegistry } from "../engine/simulation-registry";
 import { commitProposal } from "../interaction/effect-committer";
 import type {
   AgentState,
@@ -126,7 +128,7 @@ function analyzeTaskDecision(
 
 function applyAgentDecisionPlan(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   plan: AgentDecisionPlan,
 ): AgentState {
   const cycle = world.decisionCycle;
@@ -204,7 +206,7 @@ function applyAgentDecisionPlan(
 
 function acknowledgeFuseResults(
   worldInput: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentIds: readonly AgentId[],
 ): WorldState {
   let world = worldInput;
@@ -250,7 +252,7 @@ function acknowledgeFuseResults(
 
 export function preflightTaskDecision(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentId: AgentId,
   request: DecisionRequestState,
 ): AgentState {
@@ -263,7 +265,7 @@ export function preflightTaskDecision(
 
 export function releaseDecisionCycle(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
 ): DecisionReleaseTransition {
   const cycle = world.decisionCycle;
   if (!cycle) throw new Error("No decision cycle is active");
@@ -411,7 +413,7 @@ export function releaseDecisionCycle(
 
 export function applyReleasePolicy(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
 ): DecisionReleaseTransition {
   const cycle = world.decisionCycle;
   if (!cycle || !allDecisionResultsAccepted(cycle)) {

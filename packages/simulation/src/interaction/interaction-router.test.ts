@@ -36,6 +36,12 @@ describe("queryObject", () => {
           duration: { kind: "fixed", totalTicks: 10 },
           availability: { available: true },
         },
+        {
+          id: "stock",
+          taskSlots: ["BODY"],
+          duration: { kind: "fixed", totalTicks: 10 },
+          availability: { available: true },
+        },
       ],
     });
   });

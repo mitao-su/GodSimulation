@@ -14,7 +14,7 @@ import {
 } from "@god-sim/protocol";
 
 import {
-  assertNoObservationBuffer,
+  EMPTY_OPERATION_STATE_SCHEMA,
   blocked,
   isAtInteractionPosition,
   knownObjects,
@@ -101,7 +101,9 @@ export function createObjectInteractionOperation<State>(
     publicBehavior: interaction.publicBehavior,
     domainFailures: interaction.domainFailures,
     resultSchema: interaction.resultSchema,
+    stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => argumentsSchema,
+    initialState: () => ({}),
     offers: (context) =>
       knownObjects(context).flatMap((known) => {
         const object = context.world.objects.get(known.entityId);
@@ -208,37 +210,30 @@ export function createObjectInteractionOperation<State>(
         operation.arguments,
       );
       const action = operation.plan.actions[0];
-      const resolvedDuration = binding
-        ? OperationDurationSchema.parse(
-            interaction.resolveDuration(
-              binding.state,
-              binding.interactionContext,
-              binding.parameters,
-            ),
-          )
-        : null;
-      const expectedDuration =
-        resolvedDuration?.kind === "fixed"
-          ? resolvedDuration.totalTicks
+      // The locked duration is resolved exactly once when the call is
+      // created. Restoration never re-evaluates `resolveDuration`, because
+      // resolvers may legitimately depend on object state that `start()`
+      // has already changed (for example occupancy). The saved
+      // `operation.duration` is the only authority here.
+      const expectedActionTicks =
+        operation.duration.kind === "fixed"
+          ? operation.duration.totalTicks
           : Number.MAX_SAFE_INTEGER;
       if (
         !binding ||
-        !resolvedDuration ||
-        JSON.stringify(operation.duration) !== JSON.stringify(resolvedDuration) ||
         operation.plan.actions.length !== 1 ||
         operation.plan.currentActionIndex !== 0 ||
         action?.kind !== "interact_object" ||
         action.purpose !== "direct" ||
         action.targetEntityId !== binding.object.id ||
         action.interactionId !== interaction.id ||
-        action.durationTicks !== expectedDuration ||
+        action.durationTicks !== expectedActionTicks ||
         action.progressTicks !== operation.progressTicks
       ) {
         throw new Error(
           `Snapshot interaction operation ${operation.callId} has an incompatible plan`,
         );
       }
-      assertNoObservationBuffer(operation);
     },
   };
 }

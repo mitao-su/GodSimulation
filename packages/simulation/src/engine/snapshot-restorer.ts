@@ -170,14 +170,6 @@ function restoreAgents(
           `Snapshot operation ${operation.callId} is not referenced by a task track`,
         );
       }
-      if (
-        operation.duration.kind === "fixed" &&
-        operation.progressTicks > operation.duration.totalTicks
-      ) {
-        throw new Error(
-          `Snapshot operation ${operation.callId} exceeds its fixed duration`,
-        );
-      }
     }
     restored.set(agentId, {
       ...agent,

@@ -15,23 +15,17 @@ function operation(
   callId: string,
   value: Omit<
     ActiveOperation,
-    | "callId"
-    | "startedAtTick"
-    | "progressTicks"
-    | "accumulatedObservations"
-    | "observationDeliveryCursor"
+    "callId" | "startedAtTick" | "progressTicks" | "state"
   > & {
     readonly progressTicks?: number;
-    readonly accumulatedObservations?: ActiveOperation["accumulatedObservations"];
-    readonly observationDeliveryCursor?: number;
+    readonly state?: ActiveOperation["state"];
   },
 ): ActiveOperation {
   return {
     callId: callId as OperationCallId,
     startedAtTick: 0,
     progressTicks: value.progressTicks ?? 0,
-    accumulatedObservations: value.accumulatedObservations ?? [],
-    observationDeliveryCursor: value.observationDeliveryCursor ?? 0,
+    state: value.state ?? {},
     ...value,
   };
 }

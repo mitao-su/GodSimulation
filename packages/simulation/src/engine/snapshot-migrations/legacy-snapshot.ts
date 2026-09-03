@@ -603,7 +603,7 @@ function migrateSingleGoalState(
   );
   return SerializedWorldStateSchema.parse({
     ...value,
-    stateSchemaVersion: 2,
+    stateSchemaVersion: 3,
     agents,
     decisionCycle: migrateLegacyDecisionCycle(
       value.decisionCycle,
@@ -613,7 +613,9 @@ function migrateSingleGoalState(
   });
 }
 
-function isJsonArray(value: JsonValue): value is readonly JsonValue[] {
+function isJsonArray(
+  value: JsonValue | undefined,
+): value is readonly JsonValue[] {
   return Array.isArray(value);
 }
 
@@ -633,6 +635,46 @@ function adoptLegacyMapRules(
   return JsonValueSchema.parse({ ...state, map: { ...map, rules } });
 }
 
+/**
+ * State schema V2 stored the move operation's private observation buffer
+ * directly on every serialized active operation. V3 moves that buffer
+ * into the opaque runtime-owned `state` field, so non-move operations no
+ * longer carry fields they never used.
+ */
+function migrateV2ActiveOperationState(state: JsonValue): JsonValue {
+  if (!isJsonObject(state) || state["stateSchemaVersion"] !== 2) return state;
+  const agents = state["agents"];
+  if (!isJsonArray(agents)) return state;
+  const migratedAgents = agents.map((agent) => {
+    if (!isJsonObject(agent)) return agent;
+    const operations = agent["activeOperations"];
+    if (!isJsonArray(operations)) return agent;
+    return {
+      ...agent,
+      activeOperations: operations.map((operation) => {
+        if (!isJsonObject(operation)) return operation;
+        const {
+          accumulatedObservations = [],
+          observationDeliveryCursor = 0,
+          ...stable
+        } = operation;
+        return {
+          ...stable,
+          state:
+            operation["operationId"] === "core.move"
+              ? { accumulatedObservations, observationDeliveryCursor }
+              : {},
+        };
+      }),
+    };
+  });
+  return JsonValueSchema.parse({
+    ...state,
+    stateSchemaVersion: 3,
+    agents: migratedAgents,
+  });
+}
+
 export function parseSerializedState(
   snapshot: WorldSnapshot,
   worldRulesReference: WorldRulesReference,
@@ -644,7 +686,9 @@ export function parseSerializedState(
     snapshot.schemaVersion === 3
       ? snapshot.state
       : adoptLegacyMapRules(snapshot.state, worldRulesReference);
-  const currentState = SerializedWorldStateSchema.safeParse(serializedState);
+  const currentState = SerializedWorldStateSchema.safeParse(
+    migrateV2ActiveOperationState(serializedState),
+  );
   const singleGoalState = currentState.success
     ? null
     : SingleGoalSerializedWorldStateSchema.safeParse(serializedState);

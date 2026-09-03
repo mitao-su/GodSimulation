@@ -24,8 +24,7 @@ const fridgeCall: ActiveOperation = {
   duration: { kind: "fixed", totalTicks: 10 },
   startedAtTick: 0,
   progressTicks: 0,
-  accumulatedObservations: [],
-  observationDeliveryCursor: 0,
+  state: {},
   plan: {
     currentActionIndex: 0,
     actions: [

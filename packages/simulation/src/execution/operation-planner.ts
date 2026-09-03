@@ -9,8 +9,10 @@ import {
 } from "@god-sim/protocol";
 
 import type { ActiveOperation } from "./operation";
-import { createOperationRuntimeContext } from "./operation-runtime";
-import type { SimulationRegistry } from "../engine/simulation-registry";
+import {
+  createOperationRuntimeContext,
+  type OperationRuntimeRegistry,
+} from "./operation-runtime";
 import type { WorldState } from "../world/world-state";
 
 export type PrepareOperationResult =
@@ -30,7 +32,7 @@ function sameTracks(left: readonly string[], right: readonly string[]): boolean 
 
 export function prepareOperationCall(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentId: AgentId,
   optionValue: Extract<TaskOption, { kind: "operation" }>,
   argumentsInput: JsonObject,
@@ -96,8 +98,7 @@ export function prepareOperationCall(
       duration,
       startedAtTick: world.tick,
       progressTicks: 0,
-      accumulatedObservations: [],
-      observationDeliveryCursor: 0,
+      state: runtime.initialState(context, argumentsValue),
       plan: planned.plan,
     },
   };

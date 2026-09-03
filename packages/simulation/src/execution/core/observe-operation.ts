@@ -2,9 +2,9 @@ import { OperationIdSchema } from "@god-sim/protocol";
 
 import {
   AVAILABLE,
+  EMPTY_OPERATION_STATE_SCHEMA,
   EMPTY_RESULT_SCHEMA,
   ENTITY_TARGET_ARGUMENTS_SCHEMA,
-  assertNoObservationBuffer,
   knownObjects,
   targetObject,
 } from "./core-operation-helpers";
@@ -21,7 +21,9 @@ export function createObserveOperation(): RegisteredOperation {
       { code: "target_not_visible", summary: "Observation target is not visible" },
     ],
     resultSchema: EMPTY_RESULT_SCHEMA,
+    stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => ENTITY_TARGET_ARGUMENTS_SCHEMA,
+    initialState: () => ({}),
     offers: (context) => {
       const agent = context.world.agents.get(context.agentId)!;
       return knownObjects(context)
@@ -97,13 +99,13 @@ export function createObserveOperation(): RegisteredOperation {
         operation.plan.currentActionIndex !== 0 ||
         action?.kind !== "observe" ||
         action.targetEntityId !== parsed.targetEntityId ||
-        action.durationTicks !== expectedTicks
+        action.durationTicks !== expectedTicks ||
+        action.progressTicks !== operation.progressTicks
       ) {
         throw new Error(
           `Snapshot observe operation ${operation.callId} has an incompatible plan`,
         );
       }
-      assertNoObservationBuffer(operation);
     },
   };
 }

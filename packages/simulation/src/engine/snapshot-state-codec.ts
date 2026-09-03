@@ -103,18 +103,12 @@ export const SerializedActiveOperationSchema = z
     duration: OperationDurationSchema,
     startedAtTick: z.number().int().nonnegative(),
     progressTicks: z.number().int().nonnegative(),
-    accumulatedObservations: z
-      .array(
-        z
-          .object({
-            entityId: EntityIdSchema,
-            kind: z.enum(["object", "agent"]),
-            summary: z.string().min(1).max(500),
-          })
-          .strict(),
-      )
-      .default([]),
-    observationDeliveryCursor: z.number().int().nonnegative().default(0),
+    /**
+     * Opaque runtime-owned state. The codec deliberately does not know
+     * what each operation stores here; the operation runtime's
+     * `stateSchema` validates it at the restoration boundary.
+     */
+    state: JsonObjectSchema.default({}),
     plan: OperationPlanSchema,
   })
   .strict();
@@ -259,7 +253,7 @@ export const SerializedWorldStateCommonShape = {
 export const SerializedWorldStateSchema = z
   .object({
     ...SerializedWorldStateCommonShape,
-    stateSchemaVersion: z.literal(2),
+    stateSchemaVersion: z.literal(3),
     agents: z.array(SerializedAgentSchema).min(1),
     decisionCycle: SerializedDecisionCycleSchema.nullable(),
   })

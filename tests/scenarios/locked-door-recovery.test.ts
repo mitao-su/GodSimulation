@@ -9,10 +9,14 @@ import {
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
 import {
+  acceptDecisionResult,
+  buildTaskOptions,
   createSimulationRegistry,
   loadWorldDefinition,
   prepareOperationCall,
   recoverBlockedOperation,
+  releaseDecisionCycle,
+  requestDecisions,
   runTickPipeline,
 } from "@god-sim/simulation";
 import { wallDefinition } from "@god-sim/spatial-objects";
@@ -160,6 +164,43 @@ const inertPassagePlugin = definePlugin(
   { objects: [wallDefinition, inertPassageDefinition], agents: [] },
 );
 
+/**
+ * A traversal whose lifecycle speaks a non-empty result protocol. Its
+ * result shape is valid for the interaction itself but incompatible with
+ * the enclosing move operation's result schema, which is exactly the
+ * protocol confusion the engine must prevent.
+ */
+const PassageResultSchema = EmptyOperationResultSchema.passthrough() as unknown as ObjectDefinition<PassageState>["interactions"][number]["resultSchema"];
+
+const resultingPassageDefinition: ObjectDefinition<PassageState> = {
+  ...passageDefinition,
+  id: "test.resulting-passage",
+  displayName: "Resulting passage",
+  resourceId: "test.resulting-passage",
+  interactions: [
+    {
+      ...passageDefinition.interactions[0]!,
+      resultSchema: PassageResultSchema,
+      fail: () => ({ effects: [], result: { status: "failed" } }),
+      cancel: () => ({ effects: [], result: { status: "cancelled" } }),
+    },
+  ],
+};
+
+const resultingPassagePlugin = definePlugin(
+  PluginManifestSchema.parse({
+    schemaVersion: 1,
+    id: "test.resulting-navigation",
+    version: "0.1.0",
+    stateVersion: 1,
+    engineApiVersion: 1,
+    entry: "./dist/index.js",
+    objectDefinitionIds: ["spatial.wall", "test.resulting-passage"],
+    agentDefinitionIds: [],
+  }),
+  { objects: [wallDefinition, resultingPassageDefinition], agents: [] },
+);
+
 const anonymousPassageWorld = {
   ...starterHome,
   plugins: starterHome.plugins.map((plugin) =>
@@ -192,9 +233,28 @@ const inertPassageWorld = {
   ),
 };
 
+const resultingPassageWorld = {
+  ...anonymousPassageWorld,
+  plugins: anonymousPassageWorld.plugins.map((plugin) =>
+    plugin.id === "test.navigation"
+      ? { id: "test.resulting-navigation", version: "0.1.0" }
+      : plugin,
+  ),
+  objects: anonymousPassageWorld.objects.map((object) =>
+    object.definitionId === "test.passage"
+      ? { ...object, definitionId: "test.resulting-passage" }
+      : object,
+  ),
+};
+
 const registry = createSimulationRegistry([passagePlugin, homePlugin, agentsPlugin]);
 const inertRegistry = createSimulationRegistry([
   inertPassagePlugin,
+  homePlugin,
+  agentsPlugin,
+]);
+const resultingRegistry = createSimulationRegistry([
+  resultingPassagePlugin,
   homePlugin,
   agentsPlugin,
 ]);
@@ -216,6 +276,12 @@ function world() {
 
 function inertWorld() {
   return loadWorldDefinition(inertPassageWorld, inertRegistry, {
+    simulationRulesLock: testSimulationRulesLock,
+  }).world;
+}
+
+function resultingWorld() {
+  return loadWorldDefinition(resultingPassageWorld, resultingRegistry, {
     simulationRulesLock: testSimulationRulesLock,
   }).world;
 }
@@ -512,5 +578,101 @@ describe("capability-based traversal recovery", () => {
 
     expect(result.events.some((event) => event.type === "action_failed")).toBe(false);
     expect(currentAction?.kind).toBe("move");
+  });
+
+  it("keeps the traversal failure result out of the exhausted move terminal result", () => {
+    const active = activateTraversal(resultingWorld(), resultingRegistry, false);
+    const alice = active.agents.get("alice" as never)!;
+    const passage = active.objects.get("door-living-kitchen" as never)!;
+    const exhausted = {
+      ...active,
+      agents: new Map(active.agents).set(alice.id, {
+        ...alice,
+        knowledge: {
+          ...alice.knowledge,
+          knownTraversalBlockers: new Map([
+            [
+              "door-bedroom-bathroom" as never,
+              blocker("door-bedroom-bathroom"),
+            ],
+          ]),
+        },
+      }),
+      objects: new Map(active.objects).set(passage.id, {
+        ...passage,
+        state: { raised: false, sealed: true },
+      }),
+    };
+
+    const result = runTickPipeline(exhausted, resultingRegistry);
+
+    // The traversal interaction's `{ status: "failed" }` result must not be
+    // validated against the move operation's `{ nearby: [...] }` schema; the
+    // move produces its own terminal result after consuming the failure.
+    expect(
+      result.events.filter((event) => event.type === "operation_result"),
+    ).toEqual([
+      expect.objectContaining({
+        type: "operation_result",
+        agentId: "alice",
+        operationId: "core.move",
+        terminal: true,
+        outcome: "failed",
+        reasonCode: "no_known_route",
+        result: { nearby: expect.any(Array) },
+      }),
+    ]);
+    expect(result.decisionNeeds).toEqual([
+      {
+        agentId: "alice",
+        reason: { code: "no_known_route", summary: "Passage is sealed" },
+      },
+    ]);
+  });
+
+  it("keeps the traversal cancel result out of a cancelled move terminal result", () => {
+    const active = activateTraversal(resultingWorld(), resultingRegistry, true);
+    const taskOptions = buildTaskOptions(active, resultingRegistry, "alice" as never);
+    const emptyBody = taskOptions.find(
+      (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
+    )!;
+    const thinking = requestDecisions(active, [
+      {
+        agentId: "alice" as never,
+        reason: { code: "test_cancel", summary: "Stop movement" },
+        taskOptions,
+      },
+    ]).world;
+    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
+    const accepted = acceptDecisionResult(thinking, {
+      ...request.identity,
+      proposal: {
+        schemaVersion: 2,
+        head: { kind: "continue" },
+        body: {
+          kind: "replace",
+          taskOptionId: emptyBody.id,
+          arguments: {},
+        },
+        reason: "Stop moving",
+      },
+    });
+    expect(accepted.accepted).toBe(true);
+
+    const released = releaseDecisionCycle(accepted.world, resultingRegistry);
+
+    expect(
+      released.events.filter((event) => event.type === "operation_result"),
+    ).toEqual([
+      expect.objectContaining({
+        type: "operation_result",
+        agentId: "alice",
+        operationId: "core.move",
+        terminal: true,
+        outcome: "cancelled",
+        reasonCode: "task_replaced",
+        result: { nearby: expect.any(Array) },
+      }),
+    ]);
   });
 });

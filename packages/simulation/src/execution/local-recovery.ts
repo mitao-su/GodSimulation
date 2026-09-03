@@ -4,9 +4,9 @@ import {
   createOperationRuntimeContext,
   type OperationRecoveryFailure,
   type OperationRecoveryResult,
+  type OperationRuntimeRegistry,
 } from "./operation-runtime";
 import type { AgentNavigationKnowledge } from "./path-planner";
-import type { SimulationRegistry } from "../engine/simulation-registry";
 import type { WorldState } from "../world/world-state";
 
 export type TraversalFailure = OperationRecoveryFailure;
@@ -14,7 +14,7 @@ export type RecoveryResult = OperationRecoveryResult;
 
 export function recoverBlockedOperation(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentId: AgentId,
   failure: TraversalFailure,
   knowledge: AgentNavigationKnowledge,

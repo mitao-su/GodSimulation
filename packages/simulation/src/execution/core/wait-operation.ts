@@ -4,8 +4,8 @@ import { OperationIdSchema } from "@god-sim/protocol";
 
 import {
   AVAILABLE,
+  EMPTY_OPERATION_STATE_SCHEMA,
   EMPTY_RESULT_SCHEMA,
-  assertNoObservationBuffer,
 } from "./core-operation-helpers";
 import type {
   OperationRuntimeContext,
@@ -45,7 +45,9 @@ export function createWaitOperation(): RegisteredOperation {
       },
     ],
     resultSchema: EMPTY_RESULT_SCHEMA,
+    stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema,
+    initialState: () => ({}),
     offers: (context) => [
       {
         id: `task-option:${context.agentId}:wait`,
@@ -97,11 +99,11 @@ export function createWaitOperation(): RegisteredOperation {
         operation.plan.actions.length !== 1 ||
         operation.plan.currentActionIndex !== 0 ||
         action?.kind !== "wait" ||
-        action.durationTicks !== parsed.durationTicks
+        action.durationTicks !== parsed.durationTicks ||
+        action.progressTicks !== operation.progressTicks
       ) {
         throw new Error(`Snapshot wait operation ${operation.callId} has an incompatible plan`);
       }
-      assertNoObservationBuffer(operation);
     },
   };
 }

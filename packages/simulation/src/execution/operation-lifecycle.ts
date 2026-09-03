@@ -8,9 +8,11 @@ import {
 import type { EffectProposal } from "@god-sim/plugin-sdk";
 
 import type { ActiveOperation, OperationObservation } from "./operation";
-import { createOperationRuntimeContext } from "./operation-runtime";
+import {
+  createOperationRuntimeContext,
+  type OperationRuntimeRegistry,
+} from "./operation-runtime";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
-import type { SimulationRegistry } from "../engine/simulation-registry";
 import { proposeInteraction } from "../interaction/interaction-router";
 import type { WorldState } from "../world/world-state";
 
@@ -25,7 +27,7 @@ function operationParameters(operation: ActiveOperation): JsonObject {
 
 export function operationInteractionLifecycleProposal(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentId: AgentId,
   operation: ActiveOperation,
   phase: "cancel" | "fail",
@@ -53,7 +55,16 @@ export function operationInteractionLifecycleProposal(
       `Operation ${phase} lifecycle ${operation.callId} was rejected: ${proposed.reasonCode}: ${proposed.summary}`,
     );
   }
-  return { effects: proposed.proposal.effects, result: proposed.result };
+  // Only a direct interaction — where the interaction IS the top-level
+  // operation — may contribute its lifecycle result to the terminal
+  // operation_result. Automatic traversal is a private micro-step of the
+  // enclosing operation (move); the traversal interaction speaks a
+  // different result protocol, so the enclosing operation explicitly
+  // ignores it and produces its own terminal result instead.
+  return {
+    effects: proposed.proposal.effects,
+    result: action.purpose === "direct" ? proposed.result : null,
+  };
 }
 
 function appendResult(
@@ -105,7 +116,7 @@ function appendResult(
 
 export function recordOperationTermination(
   worldInput: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentId: AgentId,
   operation: ActiveOperation,
   outcome: "completed" | "failed" | "cancelled",
@@ -156,7 +167,7 @@ export function recordOperationTermination(
 
 export function recordFuseResults(
   worldInput: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentIds: readonly AgentId[],
   metadata: EventMetadata,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
@@ -197,7 +208,7 @@ export function recordFuseResults(
 
 export function accumulateOperationObservations(
   world: WorldState,
-  registry: SimulationRegistry,
+  registry: OperationRuntimeRegistry,
   agentId: AgentId,
   observations: readonly OperationObservation[],
 ): WorldState {

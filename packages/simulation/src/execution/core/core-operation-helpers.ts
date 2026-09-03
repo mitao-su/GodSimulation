@@ -17,6 +17,11 @@ export const ENTITY_TARGET_ARGUMENTS_SCHEMA = z
   .object({ targetEntityId: EntityIdSchema })
   .strict();
 export const EMPTY_RESULT_SCHEMA = z.object({}).strict();
+/**
+ * State schema for operations that own no per-call private state. Their
+ * opaque `ActiveOperation.state` must always be the empty object.
+ */
+export const EMPTY_OPERATION_STATE_SCHEMA = z.object({}).strict();
 export const AVAILABLE = { available: true } as const;
 
 export function knownObjects(context: OperationRuntimeContext) {
@@ -64,21 +69,4 @@ export function blocked(
   summary: string,
 ): OperationPlanResult {
   return { kind: "blocked", reasonCode, summary };
-}
-
-export function assertNoObservationBuffer(
-  operation: {
-    readonly callId: string;
-    readonly accumulatedObservations: readonly unknown[];
-    readonly observationDeliveryCursor: number;
-  },
-): void {
-  if (
-    operation.accumulatedObservations.length !== 0 ||
-    operation.observationDeliveryCursor !== 0
-  ) {
-    throw new Error(
-      `Snapshot operation ${operation.callId} has an unexpected observation buffer`,
-    );
-  }
 }

@@ -475,7 +475,7 @@ describe("simulation snapshot restoration", () => {
       }>;
     };
     const restoredAlice = nextState.agents.find((agent) => agent.id === "alice")!;
-    expect(nextState.stateSchemaVersion).toBe(2);
+    expect(nextState.stateSchemaVersion).toBe(3);
     expect(restoredAlice.taskTracks.BODY.kind).toBe("operation");
     expect(restoredAlice.activeOperations).toEqual([
       expect.objectContaining({

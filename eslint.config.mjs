@@ -39,4 +39,27 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
+  {
+    // Inner simulation layers must depend on the narrow operation runtime
+    // registry protocol, never on the engine composition root. ESLint
+    // covers type-only imports, which dependency-cruiser cannot see.
+    files: [
+      "packages/simulation/src/execution/**/*.ts",
+      "packages/simulation/src/decision/**/*.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/engine/simulation-registry"],
+              message:
+                "Depend on the narrow OperationRuntimeRegistry protocol from execution/operation-runtime instead of the engine composition root.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

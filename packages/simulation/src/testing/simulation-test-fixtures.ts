@@ -124,6 +124,52 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       }),
       fuse: () => null,
     },
+    {
+      id: "stock",
+      displayName: "Stock fridge",
+      trigger: "active_command",
+      taskSlots: ["BODY"],
+      parametersSchema: z.object({}).strict(),
+      // Deliberately state-dependent: starting the interaction reserves
+      // occupancy, which changes `state.holder` and therefore what this
+      // resolver returns. Restoration must trust the duration locked at
+      // call creation instead of re-evaluating this resolver.
+      resolveDuration: (state) => ({
+        kind: "fixed",
+        totalTicks: state.holder === null ? 10 : 20,
+      }),
+      eventIgnore: [],
+      publicBehavior: { kind: "visible", label: "stocking the fridge" },
+      domainFailures: [{ code: "occupied", summary: "Fridge occupied" }],
+      resultSchema: z.object({}).strict(),
+      canStart: (state, context) =>
+        state.holder === null || state.holder === context.actor.agentId
+          ? { available: true }
+          : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
+      start: (_state, context) => ({
+        effects: [
+          {
+            type: "reserve_occupancy",
+            entityId: context.object.entityId,
+            agentId: context.actor.agentId,
+            expectedObjectVersion: context.object.version,
+          },
+        ],
+      }),
+      complete: (_state, context) => ({
+        effects: [
+          {
+            type: "release_occupancy",
+            entityId: context.object.entityId,
+            agentId: context.actor.agentId,
+            expectedObjectVersion: context.object.version,
+          },
+        ],
+      }),
+      fail: () => ({ effects: [] }),
+      cancel: () => ({ effects: [] }),
+      fuse: () => null,
+    },
   ],
   observe: (state, context) => ({
     status: state.holder === null ? "available" : "occupied",
@@ -186,8 +232,10 @@ const synchronizedWaitOperation: RegisteredOperation = {
   publicBehavior: { kind: "visible", label: "waiting" },
   domainFailures: [],
   resultSchema: z.object({}).strict(),
+  stateSchema: z.object({}).strict(),
   argumentsSchema: () =>
     z.object({ durationTicks: z.number().int().positive() }).strict(),
+  initialState: () => ({}),
   offers: () => [],
   canStart: () => ({ available: true }),
   resolveDuration: (_context, value) => ({

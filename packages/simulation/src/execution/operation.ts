@@ -50,11 +50,11 @@ export interface OperationPlan {
   readonly currentActionIndex: number;
 }
 
-export interface OperationObservation {
+export type OperationObservation = {
   readonly entityId: EntityId;
   readonly kind: "object" | "agent";
   readonly summary: string;
-}
+};
 
 export interface ActiveOperation {
   readonly callId: OperationCallId;
@@ -66,7 +66,13 @@ export interface ActiveOperation {
   readonly duration: OperationDuration;
   readonly startedAtTick: number;
   readonly progressTicks: number;
-  readonly accumulatedObservations: readonly OperationObservation[];
-  readonly observationDeliveryCursor: number;
+  /**
+   * Opaque runtime-owned state. The generic engine never reads or
+   * interprets this value; only the owning `RegisteredOperation` defines
+   * its schema, initial value and restoration rules. For example, the
+   * move operation keeps its accumulated observations and delivery
+   * cursor here instead of leaking them into the shared shape.
+   */
+  readonly state: JsonObject;
   readonly plan: OperationPlan;
 }

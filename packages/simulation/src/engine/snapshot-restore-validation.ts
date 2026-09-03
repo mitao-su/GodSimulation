@@ -137,6 +137,44 @@ export function validateRestoredOperations(
           { cause: parsedArguments.error },
         );
       }
+      const parsedState = runtime.stateSchema.safeParse(operation.state);
+      if (!parsedState.success) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} has an incompatible state`,
+          { cause: parsedState.error },
+        );
+      }
+      // Generic progress and duration invariants. They hold for every
+      // operation regardless of runtime: individual actions never exceed
+      // their own duration, the call-level cumulative progress never
+      // trails the current action, and fixed-duration calls never exceed
+      // the total locked at creation time. Runtime-specific structure
+      // (including stricter per-runtime progress relations) is validated
+      // by `validateRestored` below.
+      for (const action of operation.plan.actions) {
+        if (action.progressTicks > action.durationTicks) {
+          throw new Error(
+            `Snapshot operation ${operation.callId} has invalid action progress`,
+          );
+        }
+      }
+      const currentAction = operation.plan.actions[operation.plan.currentActionIndex];
+      if (
+        currentAction !== undefined &&
+        operation.progressTicks < currentAction.progressTicks
+      ) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} has invalid action progress`,
+        );
+      }
+      if (
+        operation.duration.kind === "fixed" &&
+        operation.progressTicks > operation.duration.totalTicks
+      ) {
+        throw new Error(
+          `Snapshot operation ${operation.callId} exceeds its fixed duration`,
+        );
+      }
       try {
         runtime.validateRestored(context, operation);
       } catch (error) {
