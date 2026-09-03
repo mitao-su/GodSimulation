@@ -33,17 +33,105 @@ describe("queryObject", () => {
         {
           id: "use",
           taskSlots: ["BODY"],
+          requiresParameters: false,
           duration: { kind: "fixed", totalTicks: 10 },
           availability: { available: true },
         },
         {
           id: "stock",
           taskSlots: ["BODY"],
+          requiresParameters: false,
           duration: { kind: "fixed", totalTicks: 10 },
           availability: { available: true },
         },
+        {
+          id: "configure",
+          taskSlots: ["BODY"],
+          requiresParameters: true,
+          duration: null,
+          availability: null,
+        },
       ],
     });
+  });
+
+  it("marks required-parameter interactions instead of throwing", () => {
+    const world = simulationTestWorld();
+
+    const query = () =>
+      queryObject(world, testPluginRegistry, {
+        type: "available_interactions",
+        entityId: "fridge-1" as never,
+        agentId: "alice" as never,
+      });
+
+    expect(query).not.toThrow();
+    const result = query();
+    if (result.type !== "available_interactions") {
+      throw new Error("Expected an available_interactions result");
+    }
+    const configure = result.interactions.find(
+      (interaction) => interaction.id === "configure",
+    );
+    // A required-parameter interaction cannot be previewed with empty
+    // arguments; the query must surface it explicitly rather than failing
+    // or silently dropping it.
+    expect(configure).toEqual({
+      id: "configure",
+      displayName: "Configure fridge",
+      taskSlots: ["BODY"],
+      requiresParameters: true,
+      duration: null,
+      availability: null,
+    });
+    // Interactions whose schema accepts empty arguments still preview.
+    const use = result.interactions.find(
+      (interaction) => interaction.id === "use",
+    );
+    expect(use?.requiresParameters).toBe(false);
+    expect(use?.duration).toEqual({ kind: "fixed", totalTicks: 10 });
+  });
+
+  it("does not re-resolve the locked duration during lifecycle phases", () => {
+    const base = simulationTestWorld();
+    // Starting a stock call resolves the duration exactly once, while the
+    // fridge is still free (10 ticks).
+    const started = proposeInteraction(base, testPluginRegistry, {
+      agentId: "bob" as never,
+      entityId: "fridge-1" as never,
+      interactionId: "stock",
+      parameters: {},
+      phase: "start",
+    });
+    expect(started).toMatchObject({
+      accepted: true,
+      duration: { kind: "fixed", totalTicks: 10 },
+    });
+
+    // Applying the start effects reserves occupancy. The state-dependent
+    // resolver would now return 20 ticks if any lifecycle phase evaluated
+    // it again, so a null duration proves the locked-duration boundary.
+    const fridge = base.objects.get("fridge-1" as never)!;
+    const world = {
+      ...base,
+      objects: new Map(base.objects).set(fridge.id, {
+        ...fridge,
+        version: 1,
+        state: { holder: "bob" },
+      }),
+    };
+
+    for (const phase of ["complete", "cancel", "fail"] as const) {
+      const result = proposeInteraction(world, testPluginRegistry, {
+        agentId: "bob" as never,
+        entityId: "fridge-1" as never,
+        interactionId: "stock",
+        parameters: {},
+        phase,
+        ...(phase === "fail" ? { failureCode: "occupied" } : {}),
+      });
+      expect(result).toMatchObject({ accepted: true, duration: null });
+    }
   });
 
   it("turns a valid interaction start into a proposal without applying it", () => {

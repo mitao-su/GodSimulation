@@ -4,12 +4,14 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   {
     ignores: [
+      ".workbuddy/**",
       ".worktrees/**",
       "**/dist/**",
       "**/dist-types/**",
       "**/coverage/**",
       "data/**",
       "playwright-report/**",
+      "private/**",
       "test-results/**",
       "workspace/**",
     ],

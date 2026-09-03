@@ -170,6 +170,30 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       cancel: () => ({ effects: [] }),
       fuse: () => null,
     },
+    {
+      id: "configure",
+      displayName: "Configure fridge",
+      trigger: "active_command",
+      taskSlots: ["BODY"],
+      // Deliberately parameter-requiring: `available_interactions` queries
+      // cannot preview this interaction with empty arguments and must
+      // surface it as parameter-requiring instead of throwing.
+      parametersSchema: z.object({ mode: z.enum(["eco", "turbo"]) }).strict(),
+      resolveDuration: (_state, _context, parameters) => ({
+        kind: "fixed",
+        totalTicks: parameters.mode === "turbo" ? 4 : 8,
+      }),
+      eventIgnore: [],
+      publicBehavior: { kind: "visible", label: "configuring the fridge" },
+      domainFailures: [],
+      resultSchema: z.object({}).strict(),
+      canStart: () => ({ available: true }),
+      start: () => ({ effects: [] }),
+      complete: () => ({ effects: [] }),
+      fail: () => ({ effects: [] }),
+      cancel: () => ({ effects: [] }),
+      fuse: () => null,
+    },
   ],
   observe: (state, context) => ({
     status: state.holder === null ? "available" : "occupied",

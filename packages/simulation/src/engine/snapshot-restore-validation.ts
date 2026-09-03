@@ -159,10 +159,28 @@ export function validateRestoredOperations(
         }
       }
       const currentAction = operation.plan.actions[operation.plan.currentActionIndex];
-      if (
-        currentAction !== undefined &&
-        operation.progressTicks < currentAction.progressTicks
-      ) {
+      // The call-level cumulative progress must cover every completed
+      // prefix action in full plus the current action's own progress.
+      // Replanned operations (for example a rerouted move) legitimately
+      // exceed this floor because their cumulative progress retains ticks
+      // spent on the replaced plan, hence `>=` rather than equality. The
+      // sum saturates so a pathological MAX_SAFE_INTEGER duration cannot
+      // overflow into an acceptance.
+      let completedPrefixTicks = 0;
+      for (const action of operation.plan.actions.slice(
+        0,
+        operation.plan.currentActionIndex,
+      )) {
+        completedPrefixTicks = Math.min(
+          completedPrefixTicks + action.durationTicks,
+          Number.MAX_SAFE_INTEGER,
+        );
+      }
+      const progressFloor = Math.min(
+        completedPrefixTicks + (currentAction?.progressTicks ?? 0),
+        Number.MAX_SAFE_INTEGER,
+      );
+      if (operation.progressTicks < progressFloor) {
         throw new Error(
           `Snapshot operation ${operation.callId} has invalid action progress`,
         );

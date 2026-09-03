@@ -36,9 +36,16 @@ export type ObjectQuery =
 export interface InteractionQueryView {
   readonly id: string;
   readonly displayName: string;
-  readonly duration: OperationDuration;
   readonly taskSlots: readonly TaskTrack[];
-  readonly availability: InteractionAvailability;
+  /**
+   * True when the interaction's parameters schema rejects an empty object,
+   * meaning duration and availability cannot be previewed without concrete
+   * parameters. In that case `duration` and `availability` are `null` and
+   * callers must supply real parameters through the proposal path instead.
+   */
+  readonly requiresParameters: boolean;
+  readonly duration: OperationDuration | null;
+  readonly availability: InteractionAvailability | null;
 }
 
 export type ObjectQueryResult =
@@ -142,13 +149,31 @@ export function queryObject(
       return {
         type: "available_interactions",
         interactions: definition.interactions.map((interaction) => {
-          const parameters = interaction.parametersSchema.parse({});
+          // Interactions with required parameters cannot be previewed with
+          // an empty argument object; surface them as parameter-requiring
+          // entries instead of letting the schema error escape the query.
+          const parameters = interaction.parametersSchema.safeParse({});
+          if (!parameters.success) {
+            return {
+              id: interaction.id,
+              displayName: interaction.displayName,
+              taskSlots: interaction.taskSlots,
+              requiresParameters: true,
+              duration: null,
+              availability: null,
+            };
+          }
           return {
             id: interaction.id,
             displayName: interaction.displayName,
-            duration: interaction.resolveDuration(state, context, parameters),
             taskSlots: interaction.taskSlots,
-            availability: interaction.canStart(state, context, parameters),
+            requiresParameters: false,
+            duration: interaction.resolveDuration(
+              state,
+              context,
+              parameters.data,
+            ),
+            availability: interaction.canStart(state, context, parameters.data),
           };
         }),
       };
@@ -170,7 +195,16 @@ export type InteractionProposalResult =
       readonly accepted: true;
       readonly proposal: EffectProposal;
       readonly result: JsonObject | null;
-      readonly duration: OperationDuration;
+      /**
+       * Resolved only for `start` proposals, where the caller is creating a
+       * new interaction call. Lifecycle phases (complete/cancel/fail) never
+       * re-resolve a duration: the duration locked at call creation is the
+       * only authority, and resolvers may legitimately depend on state that
+       * `start()` has already changed (for example occupancy), so evaluating
+       * them again would breach the locked-duration boundary. Always `null`
+       * for non-start phases.
+       */
+      readonly duration: OperationDuration | null;
       readonly taskSlots: readonly TaskTrack[];
     }
   | {
@@ -278,7 +312,10 @@ export function proposeInteraction(
     accepted: true,
     proposal,
     result,
-    duration: interaction.resolveDuration(state, context, parameters),
+    duration:
+      request.phase === "start"
+        ? interaction.resolveDuration(state, context, parameters)
+        : null,
     taskSlots: interaction.taskSlots,
   };
 }

@@ -3,6 +3,13 @@
 workspace/
 free_model.local
 
+# 私有文档与本地工作区数据，一律不入库
+private/
+.workbuddy/
+/VISION.md
+/PROJECT_DIRECTION.md
+/AGENT.md
+
 node_modules/
 dist/
 dist-types/

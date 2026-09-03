@@ -348,6 +348,91 @@ describe("active operation snapshot state", () => {
     },
   );
 
+  it("rejects a multi-action plan whose call-level progress trails the completed prefix", () => {
+    const base = simulationTestWorld();
+    const aliceId = "alice" as never;
+    const alice = base.agents.get(aliceId)!;
+    const callId = OperationCallIdSchema.parse("operation-call:test:forged-move");
+    const makeOperation = (progressTicks: number): ActiveOperation => ({
+      callId,
+      operationId: OperationIdSchema.parse("core.move"),
+      taskOptionId: TaskOptionIdSchema.parse("task-option:alice:forged-move"),
+      label: "Move",
+      taskSlots: ["BODY"],
+      arguments: { targetEntityId: "fridge-1" },
+      duration: { kind: "indeterminate" },
+      startedAtTick: 0,
+      progressTicks,
+      state: { accumulatedObservations: [], observationDeliveryCursor: 0 },
+      plan: {
+        currentActionIndex: 1,
+        actions: [
+          {
+            id: "operation-call:test:forged-move:action:0",
+            kind: "move",
+            path: [
+              { x: 3, y: 2 },
+              { x: 3, y: 1 },
+              { x: 3, y: 0 },
+            ],
+            durationTicks: 4,
+            progressTicks: 4,
+          },
+          {
+            id: "operation-call:test:forged-move:action:1",
+            kind: "move",
+            path: [
+              { x: 3, y: 0 },
+              { x: 4, y: 0 },
+            ],
+            durationTicks: 2,
+            progressTicks: 1,
+          },
+        ],
+      },
+    });
+    const snapshotFor = (progressTicks: number) =>
+      projectWorldSnapshot({
+        ...base,
+        tick: 5,
+        mode: "RUNNING",
+        agents: new Map(base.agents).set(aliceId, {
+          ...alice,
+          taskTracks: {
+            HEAD: { kind: "empty" },
+            BODY: { kind: "operation", callId },
+          },
+          activeOperations: new Map([[callId, makeOperation(progressTicks)]]),
+        }),
+      });
+
+    // The first action finished (4/4) and the second has 1/2, so any real
+    // execution has at least 5 cumulative ticks. A saved progress of 1 is
+    // forged even though it still matches the current action's own
+    // progress, which is all the previous check looked at.
+    expect(() =>
+      restoreWorldSnapshot(
+        snapshotFor(1),
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/invalid action progress/i);
+
+    // Replanned operations legitimately exceed the floor: a rerouted move
+    // keeps the ticks spent on the replaced plan in its cumulative
+    // progress, so the invariant is a lower bound, not equality.
+    const restored = restoreWorldSnapshot(
+      snapshotFor(6),
+      testPluginRegistry,
+      base.map,
+      testSimulationRulesLock,
+    );
+    expect(
+      restored.agents.get(aliceId)!.activeOperations.get(callId)?.progressTicks,
+    ).toBe(6);
+  });
+
   it("restores a running call whose duration resolver depends on state changed by start()", () => {
     const base = simulationTestWorld();
     const aliceId = "alice" as never;
