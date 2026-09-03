@@ -14,9 +14,11 @@ import {
   createSimulationRegistry,
   loadWorldDefinition,
   prepareOperationCall,
+  projectWorldSnapshot,
   recoverBlockedOperation,
   releaseDecisionCycle,
   requestDecisions,
+  restoreWorldSnapshot,
   runTickPipeline,
 } from "@god-sim/simulation";
 import { wallDefinition } from "@god-sim/spatial-objects";
@@ -578,6 +580,86 @@ describe("capability-based traversal recovery", () => {
 
     expect(result.events.some((event) => event.type === "action_failed")).toBe(false);
     expect(currentAction?.kind).toBe("move");
+  });
+
+  it("restores a snapshot containing a stale traversal skipped without progress", () => {
+    const baseWorld = world();
+    const prepared = prepareOperationCall(
+      baseWorld,
+      registry,
+      "alice" as never,
+      moveToFridge,
+      {},
+      "operation-call:alice:move-fridge" as never,
+    );
+    if (prepared.kind !== "prepared") throw new Error(prepared.summary);
+    const traversalIndex = prepared.operation.plan.actions.findIndex(
+      (action) =>
+        action.kind === "interact_object" &&
+        action.purpose === "automatic_traversal" &&
+        action.targetEntityId === "door-living-kitchen",
+    );
+    const currentAction = prepared.operation.plan.actions[traversalIndex + 1];
+    if (traversalIndex < 1 || currentAction?.kind !== "move") {
+      throw new Error("Fixture route has no movement around the traversal");
+    }
+    // The exact state a real stale-traversal skip leaves behind: every
+    // preceding movement finished, the traversal itself was never started
+    // and spent no ticks, and the plan cursor has already advanced past
+    // it. The cumulative call progress therefore covers only the finished
+    // prefix, not the skipped traversal's nominal duration.
+    const actions = prepared.operation.plan.actions.map((action, index) => {
+      if (index < traversalIndex) {
+        return { ...action, progressTicks: action.durationTicks };
+      }
+      if (index === traversalIndex) {
+        if (action.kind !== "interact_object") {
+          throw new Error("Fixture route has no traversal at the cursor");
+        }
+        return { ...action, progressTicks: 0, started: false };
+      }
+      return action;
+    });
+    const elapsedTicks = prepared.operation.plan.actions
+      .slice(0, traversalIndex)
+      .reduce((total, action) => total + action.durationTicks, 0);
+    const operation = {
+      ...prepared.operation,
+      progressTicks: elapsedTicks,
+      plan: {
+        ...prepared.operation.plan,
+        actions,
+        currentActionIndex: traversalIndex + 1,
+      },
+    };
+    const agent = baseWorld.agents.get("alice" as never)!;
+    const snapshot = projectWorldSnapshot({
+      ...baseWorld,
+      mode: "RUNNING" as const,
+      tick: elapsedTicks,
+      agents: new Map(baseWorld.agents).set(agent.id, {
+        ...agent,
+        position: currentAction.path[0]!,
+        taskTracks: {
+          HEAD: { kind: "empty" as const },
+          BODY: { kind: "operation" as const, callId: operation.callId },
+        },
+        activeOperations: new Map([[operation.callId, operation]]),
+      }),
+    });
+
+    const restored = restoreWorldSnapshot(
+      snapshot,
+      registry,
+      baseWorld.map,
+      testSimulationRulesLock,
+    );
+    const restoredOperation = restored.agents
+      .get("alice" as never)!
+      .activeOperations.get(operation.callId);
+
+    expect(restoredOperation?.plan.currentActionIndex).toBe(traversalIndex + 1);
+    expect(restoredOperation?.progressTicks).toBe(elapsedTicks);
   });
 
   it("keeps the traversal failure result out of the exhausted move terminal result", () => {

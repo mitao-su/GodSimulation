@@ -353,7 +353,10 @@ describe("active operation snapshot state", () => {
     const aliceId = "alice" as never;
     const alice = base.agents.get(aliceId)!;
     const callId = OperationCallIdSchema.parse("operation-call:test:forged-move");
-    const makeOperation = (progressTicks: number): ActiveOperation => ({
+    const makeOperation = (
+      progressTicks: number,
+      prefixProgressTicks = 4,
+    ): ActiveOperation => ({
       callId,
       operationId: OperationIdSchema.parse("core.move"),
       taskOptionId: TaskOptionIdSchema.parse("task-option:alice:forged-move"),
@@ -376,7 +379,7 @@ describe("active operation snapshot state", () => {
               { x: 3, y: 0 },
             ],
             durationTicks: 4,
-            progressTicks: 4,
+            progressTicks: prefixProgressTicks,
           },
           {
             id: "operation-call:test:forged-move:action:1",
@@ -391,7 +394,7 @@ describe("active operation snapshot state", () => {
         ],
       },
     });
-    const snapshotFor = (progressTicks: number) =>
+    const snapshotFor = (progressTicks: number, prefixProgressTicks = 4) =>
       projectWorldSnapshot({
         ...base,
         tick: 5,
@@ -402,7 +405,9 @@ describe("active operation snapshot state", () => {
             HEAD: { kind: "empty" },
             BODY: { kind: "operation", callId },
           },
-          activeOperations: new Map([[callId, makeOperation(progressTicks)]]),
+          activeOperations: new Map([
+            [callId, makeOperation(progressTicks, prefixProgressTicks)],
+          ]),
         }),
       });
 
@@ -418,6 +423,18 @@ describe("active operation snapshot state", () => {
         testSimulationRulesLock,
       ),
     ).toThrow(/invalid action progress/i);
+
+    // An unfinished prefix action (0/4) before the cursor means the
+    // snapshot skipped work that never happened, even when the cumulative
+    // progress (6) clears the completed-prefix floor.
+    expect(() =>
+      restoreWorldSnapshot(
+        snapshotFor(6, 0),
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/unfinished prefix action/i);
 
     // Replanned operations legitimately exceed the floor: a rerouted move
     // keeps the ticks spent on the replaced plan in its cumulative

@@ -195,16 +195,6 @@ export type InteractionProposalResult =
       readonly accepted: true;
       readonly proposal: EffectProposal;
       readonly result: JsonObject | null;
-      /**
-       * Resolved only for `start` proposals, where the caller is creating a
-       * new interaction call. Lifecycle phases (complete/cancel/fail) never
-       * re-resolve a duration: the duration locked at call creation is the
-       * only authority, and resolvers may legitimately depend on state that
-       * `start()` has already changed (for example occupancy), so evaluating
-       * them again would breach the locked-duration boundary. Always `null`
-       * for non-start phases.
-       */
-      readonly duration: OperationDuration | null;
       readonly taskSlots: readonly TaskTrack[];
     }
   | {
@@ -308,14 +298,16 @@ export function proposeInteraction(
     }
   }
 
+  // The router's execution lifecycle never resolves a duration. Durations
+  // are owned by the operation planner, which locks them once at call
+  // creation into `ActiveOperation.duration`; by the time any phase here
+  // runs (including `start` of an already-prepared call) the world may
+  // have moved on, and re-evaluating a state-dependent resolver could
+  // drift the locked value or throw mid-tick.
   return {
     accepted: true,
     proposal,
     result,
-    duration:
-      request.phase === "start"
-        ? interaction.resolveDuration(state, context, parameters)
-        : null,
     taskSlots: interaction.taskSlots,
   };
 }

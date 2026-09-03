@@ -171,10 +171,30 @@ export function validateRestoredOperations(
         0,
         operation.plan.currentActionIndex,
       )) {
-        completedPrefixTicks = Math.min(
-          completedPrefixTicks + action.durationTicks,
-          Number.MAX_SAFE_INTEGER,
-        );
+        if (action.progressTicks === action.durationTicks) {
+          // Finished normally: contributes its full duration to the floor.
+          completedPrefixTicks = Math.min(
+            completedPrefixTicks + action.durationTicks,
+            Number.MAX_SAFE_INTEGER,
+          );
+          continue;
+        }
+        // The runner advances `currentActionIndex` only after an action
+        // completes, with one exception: a traversal action that was
+        // never started is skipped when its object no longer blocks
+        // movement (a stale traversal). Such an action spent no ticks
+        // and contributes nothing to the floor. Anything else before
+        // the cursor is work the snapshot claims was done but wasn't.
+        const skippedStaleTraversal =
+          action.kind === "interact_object" &&
+          action.purpose === "automatic_traversal" &&
+          action.progressTicks === 0 &&
+          action.started !== true;
+        if (!skippedStaleTraversal) {
+          throw new Error(
+            `Snapshot operation ${operation.callId} has an unfinished prefix action`,
+          );
+        }
       }
       const progressFloor = Math.min(
         completedPrefixTicks + (currentAction?.progressTicks ?? 0),
