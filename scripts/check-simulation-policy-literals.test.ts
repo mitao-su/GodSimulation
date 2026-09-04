@@ -21,14 +21,30 @@ describe("simulation policy literal gate", () => {
     ).toEqual([expect.objectContaining({ policyName })]);
   });
 
+  it.each([
+    ["const rules = { attenuationPerWall: 1 + 1 };", 2],
+    ["const rules = { secondsPerGameTick: Number(1) };", 1],
+  ])("rejects policy units hidden in an expression: %s", (source, count) => {
+    const violations = findPolicyLiteralViolations(
+      source,
+      "packages/simulation/src/example.ts",
+    );
+
+    expect(violations).toHaveLength(count);
+    expect(violations.every(({ value }) => value === "1")).toBe(true);
+  });
+
   it("allows protocol versions, indexes, and pure conversion constants", () => {
     const source = [
       "const schema = { schemaVersion: z.literal(1) };",
       "const first = values[0];",
+      "const durationTicks = durations[0];",
       "const SECONDS_PER_MINUTE = 60;",
       "const HOURS_PER_DAY = 24;",
       "const next = index + 1;",
       "const action = { durationTicks: (path.length - 1) * ticksPerCell };",
+      "if (nextProgress % ticksPerCell === 0) advance();",
+      "if (!Number.isFinite(rules.deletionThreshold) || rules.deletionThreshold <= 0) throw new Error();",
     ].join("\n");
 
     expect(

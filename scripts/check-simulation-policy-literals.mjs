@@ -86,12 +86,97 @@ function declarationName(node) {
   return propertyName(node.name);
 }
 
-function isDirectDeclarationLiteral(node, declaration) {
-  const initializer = declaration.initializer;
-  if (initializer === undefined) return false;
-  if (initializer === node) return true;
+function containsFiniteCheck(node, checkedExpressionText, source) {
+  let found = false;
+  const visit = (current) => {
+    if (
+      ts.isPrefixUnaryExpression(current) &&
+      current.operator === ts.SyntaxKind.ExclamationToken &&
+      ts.isCallExpression(current.operand) &&
+      ts.isPropertyAccessExpression(current.operand.expression) &&
+      current.operand.expression.expression.getText(source) === "Number" &&
+      current.operand.expression.name.text === "isFinite" &&
+      current.operand.arguments.length === 1 &&
+      current.operand.arguments[0]?.getText(source) === checkedExpressionText
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
+}
+
+function isFiniteValidationBoundary(node, source) {
+  if (node.text !== "0" || !ts.isBinaryExpression(node.parent)) return false;
+  const comparison = node.parent;
+  const boundaryTokens = new Set([
+    ts.SyntaxKind.GreaterThanEqualsToken,
+    ts.SyntaxKind.GreaterThanToken,
+    ts.SyntaxKind.LessThanEqualsToken,
+    ts.SyntaxKind.LessThanToken,
+  ]);
+  if (!boundaryTokens.has(comparison.operatorToken.kind)) return false;
+  const checkedExpression = comparison.left === node
+    ? comparison.right
+    : comparison.left;
+  let condition = comparison;
+  while (
+    ts.isBinaryExpression(condition.parent) ||
+    ts.isParenthesizedExpression(condition.parent)
+  ) {
+    condition = condition.parent;
+  }
+  if (
+    !ts.isIfStatement(condition.parent) ||
+    condition.parent.expression !== condition
+  ) {
+    return false;
+  }
+  const ifStatement = condition.parent;
+  const throws =
+    ts.isThrowStatement(ifStatement.thenStatement) ||
+    (ts.isBlock(ifStatement.thenStatement) &&
+      ifStatement.thenStatement.statements.some(ts.isThrowStatement));
+  return throws && containsFiniteCheck(
+    ifStatement.expression,
+    checkedExpression.getText(source),
+    source,
+  );
+}
+
+function isStructuralNumericLiteral(node, source) {
+  const parent = node.parent;
+  if (
+    ts.isElementAccessExpression(parent) &&
+    parent.argumentExpression === node
+  ) {
+    return true;
+  }
+  if (
+    node.text === "0" &&
+    ts.isBinaryExpression(parent) &&
+    parent.right === node &&
+    [
+      ts.SyntaxKind.EqualsEqualsEqualsToken,
+      ts.SyntaxKind.EqualsEqualsToken,
+      ts.SyntaxKind.ExclamationEqualsEqualsToken,
+      ts.SyntaxKind.ExclamationEqualsToken,
+    ].includes(parent.operatorToken.kind) &&
+    ts.isBinaryExpression(parent.left) &&
+    parent.left.operatorToken.kind === ts.SyntaxKind.PercentToken
+  ) {
+    return true;
+  }
+  if (isFiniteValidationBoundary(node, source)) return true;
   return (
-    ts.isPrefixUnaryExpression(initializer) && initializer.operand === node
+    node.text === "1" &&
+    ts.isBinaryExpression(parent) &&
+    parent.operatorToken.kind === ts.SyntaxKind.MinusToken &&
+    parent.right === node &&
+    ts.isPropertyAccessExpression(parent.left) &&
+    parent.left.name.text === "length"
   );
 }
 
@@ -183,20 +268,20 @@ export function findPolicyLiteralViolations(sourceText, filename) {
 
   const visit = (node) => {
     if (ts.isNumericLiteral(node)) {
+      if (isStructuralNumericLiteral(node, source)) {
+        ts.forEachChild(node, visit);
+        return;
+      }
       const declaration = nearestNamedDeclaration(node);
       const name = declaration === null ? null : declarationName(declaration);
-      const structuralUnit =
-        (node.text === "0" || node.text === "1") &&
-        declaration !== null &&
-        !isDirectDeclarationLiteral(node, declaration);
       const policyName =
-        (structuralUnit || name === null
+        (name === null
           ? null
           : matchingPolicyName(name) ?? matchingDurationName(name)) ??
-        (structuralUnit || declaration === null
+        (declaration === null
           ? null
           : matchingPolicyPath(propertyPath(declaration))) ??
-        (node.text === "0" || node.text === "1" ? null : comparisonPolicyName(node));
+        comparisonPolicyName(node);
 
       if (
         policyName !== null &&

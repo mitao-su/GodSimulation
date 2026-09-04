@@ -1,4 +1,5 @@
 const DEFAULT_TICK_INTERVAL_MS = 100;
+const MAX_TICK_INTERVAL_MS = 2_147_483_647;
 
 export interface TickScheduleConfig {
   readonly intervalMs: number;
@@ -11,8 +12,14 @@ export function loadTickScheduleConfig(
   if (configured === undefined) return { intervalMs: DEFAULT_TICK_INTERVAL_MS };
 
   const intervalMs = Number(configured);
-  if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {
-    throw new Error("GOD_SIM_TICK_INTERVAL_MS must be a positive safe integer");
+  if (
+    !Number.isSafeInteger(intervalMs) ||
+    intervalMs <= 0 ||
+    intervalMs > MAX_TICK_INTERVAL_MS
+  ) {
+    throw new Error(
+      `GOD_SIM_TICK_INTERVAL_MS must be an integer between 1 and ${MAX_TICK_INTERVAL_MS}`,
+    );
   }
   return { intervalMs };
 }
