@@ -14,10 +14,23 @@ import {
   type WorldId,
 } from "@god-sim/protocol";
 import type {
+  ArchivedMemory,
+  ArchiveMemoryCollectionScope,
+  ArchiveMemoryIndexState,
+  ArchiveMemoryScope,
+  ArchiveMemoryStore,
+  ArchiveMemoryVectorIndexInput,
+  ArchiveTimelineStore,
   ModelCallRecord,
   PluginLockRecord,
+  PrepareArchiveMemoryVectorIndexRequest,
+  PruneArchivedMemoriesRequest,
+  PruneArchivedMemoriesResult,
+  RankedArchiveMemory,
+  RebuildArchiveMemoryVectorIndexRequest,
   RestoredTimeline,
-  TimelineStore,
+  SaveArchivedMemoriesRequest,
+  SearchArchivedMemoriesRequest,
   WorldCheckpoint,
 } from "@god-sim/timeline";
 
@@ -25,6 +38,8 @@ import type { DatabaseSchema, EventRow, SnapshotRow } from "./database-schema";
 import { migrateInitialSchema } from "./migrations/001-initial";
 import { migrateArchitectureHardening } from "./migrations/002-architecture-hardening";
 import { migrateTaskDecisions } from "./migrations/003-task-decisions";
+import { migrateArchiveMemorySchema } from "./migrations/004-archive-memory";
+import { SqliteArchiveMemoryStore } from "./sqlite-archive-memory-store";
 
 export interface SqliteTimelineStoreOptions {
   readonly filename: string;
@@ -122,8 +137,9 @@ async function assertCausalEventsExist(
   }
 }
 
-class SqliteTimelineStore implements TimelineStore {
+class SqliteTimelineStore implements ArchiveTimelineStore {
   readonly #db: Kysely<DatabaseSchema>;
+  readonly #archiveMemoryStore: ArchiveMemoryStore;
   readonly #checkpointFailpoint:
     | ((phase: "after_events_before_snapshot") => void | Promise<void>)
     | undefined;
@@ -136,7 +152,56 @@ class SqliteTimelineStore implements TimelineStore {
       | undefined,
   ) {
     this.#db = db;
+    this.#archiveMemoryStore = new SqliteArchiveMemoryStore(db);
     this.#checkpointFailpoint = checkpointFailpoint;
+  }
+
+  saveArchivedMemories(
+    request: SaveArchivedMemoriesRequest,
+  ): Promise<ArchiveMemoryIndexState> {
+    return this.#archiveMemoryStore.saveArchivedMemories(request);
+  }
+
+  loadArchivedMemories(
+    scope: ArchiveMemoryCollectionScope,
+  ): Promise<readonly ArchivedMemory[]> {
+    return this.#archiveMemoryStore.loadArchivedMemories(scope);
+  }
+
+  loadArchiveMemoryVectorIndexInput(
+    scope: ArchiveMemoryScope,
+  ): Promise<ArchiveMemoryVectorIndexInput | null> {
+    return this.#archiveMemoryStore.loadArchiveMemoryVectorIndexInput(scope);
+  }
+
+  pruneArchivedMemories(
+    request: PruneArchivedMemoriesRequest,
+  ): Promise<PruneArchivedMemoriesResult> {
+    return this.#archiveMemoryStore.pruneArchivedMemories(request);
+  }
+
+  getArchiveMemoryIndexState(
+    scope: ArchiveMemoryScope,
+  ): Promise<ArchiveMemoryIndexState | null> {
+    return this.#archiveMemoryStore.getArchiveMemoryIndexState(scope);
+  }
+
+  prepareArchiveMemoryVectorIndex(
+    request: PrepareArchiveMemoryVectorIndexRequest,
+  ): Promise<ArchiveMemoryIndexState> {
+    return this.#archiveMemoryStore.prepareArchiveMemoryVectorIndex(request);
+  }
+
+  rebuildArchiveMemoryVectorIndex(
+    request: RebuildArchiveMemoryVectorIndexRequest,
+  ): Promise<ArchiveMemoryIndexState> {
+    return this.#archiveMemoryStore.rebuildArchiveMemoryVectorIndex(request);
+  }
+
+  searchArchivedMemories(
+    request: SearchArchivedMemoriesRequest,
+  ): Promise<readonly RankedArchiveMemory[]> {
+    return this.#archiveMemoryStore.searchArchivedMemories(request);
   }
 
   async commitCheckpoint(checkpointValue: WorldCheckpoint): Promise<void> {
@@ -422,7 +487,7 @@ class SqliteTimelineStore implements TimelineStore {
 
 export async function createSqliteTimelineStore(
   options: SqliteTimelineStoreOptions,
-): Promise<TimelineStore> {
+): Promise<ArchiveTimelineStore> {
   if (options.filename.length === 0) throw new Error("SQLite filename is required");
   const sqlite = new BetterSqlite3(options.filename);
   sqlite.pragma("journal_mode = WAL");
@@ -433,5 +498,6 @@ export async function createSqliteTimelineStore(
   await migrateInitialSchema(db);
   await migrateArchitectureHardening(db);
   await migrateTaskDecisions(db);
+  await migrateArchiveMemorySchema(db);
   return new SqliteTimelineStore(db, options.checkpointFailpoint);
 }

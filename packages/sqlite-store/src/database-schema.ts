@@ -61,6 +61,51 @@ export interface TechnicalFailureRow {
   occurred_at: string;
 }
 
+export interface ArchiveMemoryCollectionRow {
+  world_id: string;
+  branch_id: string;
+  agent_id: string;
+  archive_version: number;
+  full_text_index_version: number;
+  vector_index_version: number;
+  vector_status: string;
+  vector_archive_version: number | null;
+  encoder_id: string | null;
+  encoder_version: string | null;
+  encoder_dimension: number | null;
+  encoder_normalization: string | null;
+  encoder_model_file_identity: string | null;
+}
+
+export interface ArchivedMemoryRow {
+  row_id: Generated<number>;
+  world_id: string;
+  branch_id: string;
+  agent_id: string;
+  consolidation_cycle_id: string;
+  memory_id: string;
+  content: string;
+  search_text: string;
+  source_event_ids_json: string;
+  formed_at_tick: number;
+  archived_at_tick: number;
+  importance: string;
+  importance_reason: string;
+}
+
+export interface ArchiveMemoryVectorRow {
+  world_id: string;
+  branch_id: string;
+  agent_id: string;
+  memory_id: string;
+  encoder_id: string;
+  encoder_version: string;
+  encoder_dimension: number;
+  encoder_normalization: string;
+  encoder_model_file_identity: string;
+  vector_json: string;
+}
+
 export interface DatabaseSchema {
   worlds: WorldRow;
   plugin_locks: PluginLockRow;
@@ -68,4 +113,7 @@ export interface DatabaseSchema {
   snapshots: SnapshotRow;
   model_calls: ModelCallRow;
   technical_failures: TechnicalFailureRow;
+  archive_memory_collections: ArchiveMemoryCollectionRow;
+  archived_memories: ArchivedMemoryRow;
+  archive_memory_vectors: ArchiveMemoryVectorRow;
 }
