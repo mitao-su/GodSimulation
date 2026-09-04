@@ -16,7 +16,11 @@ import {
   type OperationTickResult,
 } from "@god-sim/plugin-sdk";
 
-import { advanceHostedOperation } from "./action-runner";
+import {
+  advanceHostedOperation,
+  advanceHostedOperationBatch,
+  resumeHostedOperationTermination,
+} from "./action-runner";
 import {
   cancelOperationLifecycle,
   completeOperationLifecycle,
@@ -741,12 +745,12 @@ describe("hosted operation lifecycle runner", () => {
     const world = runningWorld();
     const beforeBladder = world.agents.get(agentId)?.bladder;
 
-    const result = advanceHostedOperation(
-      world,
-      fixture.registry,
-      agentId,
-      runtimeCall({ duration: { kind: "fixed", totalTicks: 1 } }),
-    );
+    const result = advanceHostedOperationBatch(world, fixture.registry, [
+      {
+        agentId,
+        operation: runtimeCall({ duration: { kind: "fixed", totalTicks: 1 } }),
+      },
+    ]).results[0]!.result;
 
     expect(result).toMatchObject({
       kind: "termination_ready",
@@ -799,12 +803,11 @@ describe("hosted operation lifecycle runner", () => {
       agentId,
       operation,
     );
-    const badEffectResult = advanceHostedOperation(
+    const badEffectResult = advanceHostedOperationBatch(
       world,
       invalidEffect.registry,
-      agentId,
-      operation,
-    );
+      [{ agentId, operation }],
+    ).results[0]!.result;
 
     expect(badStateResult).toMatchObject({
       kind: "technical_failure",
@@ -933,5 +936,75 @@ describe("hosted operation lifecycle runner", () => {
       failure: { code: "operation_tick_before_start" },
     });
     expect(fixture.calls.tick).not.toHaveBeenCalled();
+  });
+
+  it("arbitrates same-tick hosted start proposals independently of input order", () => {
+    const fixture = fixtureRuntime({
+      start: vi.fn(
+        (context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
+          kind: "started",
+          proposal: {
+            effects: [
+              {
+                type: "reserve_occupancy",
+                entityId: fridgeId,
+                agentId: context.agentId,
+                expectedObjectVersion: 0,
+              },
+            ],
+          },
+          nextState: operation.state,
+        }),
+      ),
+    });
+    const world = runningWorld();
+    const aliceCall = runtimeCall({ callId: OperationCallIdSchema.parse("operation-call:alice") });
+    const bobCall = runtimeCall({ callId: OperationCallIdSchema.parse("operation-call:bob") });
+    const aliceEntry = { agentId, operation: aliceCall };
+    const bobEntry = { agentId: AgentIdSchema.parse("bob"), operation: bobCall };
+
+    const forward = advanceHostedOperationBatch(world, fixture.registry, [aliceEntry, bobEntry]);
+    const reverse = advanceHostedOperationBatch(world, fixture.registry, [bobEntry, aliceEntry]);
+
+    expect(forward.world.objects.get(fridgeId)).toEqual(reverse.world.objects.get(fridgeId));
+    expect(forward.world.randomState).toBe(reverse.world.randomState);
+    expect(forward.results.filter(({ result }) => result.kind === "running")).toHaveLength(1);
+    expect(forward.results.filter(({ result }) => result.kind === "technical_failure")).toHaveLength(1);
+  });
+
+  it("keeps a completed tick pending when complete fails, then retries only complete", () => {
+    const complete = vi
+      .fn<HostedOperationRuntime["complete"]>()
+      .mockImplementationOnce(() => {
+        throw new Error("temporary completion failure");
+      })
+      .mockImplementation(() => ({ effects: [], result: { status: "completed" } }));
+    const tick = vi.fn(
+      (_context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationTickResult => ({
+        kind: "complete",
+        nextState: { ticks: z.number().parse(operation.state["ticks"]) + 1 },
+      }),
+    );
+    const fixture = fixtureRuntime({ duration: { kind: "indeterminate" }, tick, complete });
+    const world = runningWorld();
+    const started = advanceHostedOperation(
+      world,
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "indeterminate" } }),
+    );
+    if (started.kind !== "running") throw new Error("Fixture did not start");
+
+    const pending = advanceHostedOperation(world, fixture.registry, agentId, started.operation);
+    expect(pending).toMatchObject({
+      kind: "termination_pending",
+      pending: { source: "operation_signalled_completion", operation: { progressTicks: 2, state: { ticks: 1 } } },
+    });
+    if (pending.kind !== "termination_pending") throw new Error("Completion was not pending");
+
+    const resumed = resumeHostedOperationTermination(world, fixture.registry, agentId, pending.pending);
+    expect(resumed).toMatchObject({ kind: "termination_ready", operation: { progressTicks: 2, state: { ticks: 1 } } });
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(2);
   });
 });

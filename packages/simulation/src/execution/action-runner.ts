@@ -26,7 +26,10 @@ import type {
   OperationTerminationTransaction,
 } from "./operation-runtime";
 import { operationCallIdsInTrackOrder } from "./task-tracks";
-import type { InteractionIntent } from "../interaction/effect-arbiter";
+import {
+  arbitrateInteractionBatch,
+  type InteractionIntent,
+} from "../interaction/effect-arbiter";
 import { commitProposal } from "../interaction/effect-committer";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
@@ -420,7 +423,34 @@ interface HostedOperationAdvanceBase {
 
 type HostedOperationRunningResult = HostedOperationAdvanceBase & {
   readonly kind: "running";
+  /** 生命周期提议等待批量仲裁/提交；单调用推进不会直接写世界。 */
+  readonly proposal?: OperationLifecycleTransitionResult["proposal"];
+  readonly phase?: "start" | "tick";
 };
+
+type HostedOperationTerminationReadyResult = HostedOperationAdvanceBase & {
+  readonly kind: "termination_ready";
+  readonly transaction: OperationTerminationTransaction;
+  readonly preTerminationProposal?: {
+    readonly proposal: OperationLifecycleTransitionResult["proposal"];
+    readonly phase: "start" | "tick";
+  };
+};
+
+export interface HostedOperationTerminationPendingResult
+  extends HostedOperationAdvanceBase {
+  readonly kind: "termination_pending";
+  readonly pending: {
+    readonly outcome: "completed";
+    readonly source: "duration_elapsed" | "operation_signalled_completion";
+    readonly operation: OperationRuntimeCall;
+    readonly preTerminationProposal?: {
+      readonly proposal: OperationLifecycleTransitionResult["proposal"];
+      readonly phase: "start" | "tick";
+    };
+  };
+  readonly failure: OperationTechnicalFailure;
+}
 
 type HostedOperationTechnicalFailureResult = HostedOperationAdvanceBase & {
   readonly kind: "technical_failure";
@@ -430,10 +460,8 @@ type HostedOperationTechnicalFailureResult = HostedOperationAdvanceBase & {
 export type HostedOperationAdvanceResult =
   | (HostedOperationAdvanceBase & { readonly kind: "not_advanced" })
   | HostedOperationRunningResult
-  | (HostedOperationAdvanceBase & {
-      readonly kind: "termination_ready";
-      readonly transaction: OperationTerminationTransaction;
-    })
+  | HostedOperationTerminationReadyResult
+  | HostedOperationTerminationPendingResult
   | HostedOperationTechnicalFailureResult;
 
 function hostedTechnicalFailure(
@@ -449,14 +477,17 @@ function commitLifecycleTransition(
   world: WorldState,
   registry: HostedOperationRuntimeRegistry,
   previousOperation: OperationRuntimeCall,
-  transition: OperationLifecycleTransitionResult,
+  proposal: OperationLifecycleTransitionResult["proposal"],
+  callId: OperationCallId,
   phase: "start" | "tick",
-): HostedOperationRunningResult | HostedOperationTechnicalFailureResult {
+):
+  | { readonly kind: "committed"; readonly world: WorldState; readonly events: readonly DomainEvent[] }
+  | HostedOperationTechnicalFailureResult {
   let committed;
   try {
-    committed = commitProposal(world, registry, transition.proposal, {
-      causationId: `${transition.operation.callId}:${phase}:${world.tick}`,
-      correlationId: transition.operation.callId,
+    committed = commitProposal(world, registry, proposal, {
+      causationId: `${callId}:${phase}:${world.tick}`,
+      correlationId: callId,
     });
   } catch (error) {
     const description = error instanceof Error ? error.message : String(error);
@@ -483,12 +514,7 @@ function commitLifecycleTransition(
       ),
     );
   }
-  return {
-    kind: "running",
-    world: committed.world,
-    operation: transition.operation,
-    events: committed.events,
-  };
+  return { kind: "committed", world: committed.world, events: committed.events };
 }
 
 function completeHostedOperation(
@@ -498,18 +524,26 @@ function completeHostedOperation(
   operation: OperationRuntimeCall,
   events: readonly DomainEvent[],
   source: "duration_elapsed" | "operation_signalled_completion",
+  preTerminationProposal?: HostedOperationTerminationReadyResult["preTerminationProposal"],
 ): HostedOperationAdvanceResult {
   const completed = completeOperationLifecycle(
     { world, registry, agentId, operation },
     source,
   );
   if (completed.kind === "technical_failure") {
-    return hostedTechnicalFailure(
+    return {
       world,
-      completed.operation,
-      completed.failure,
+      operation: completed.operation,
       events,
-    );
+      kind: "termination_pending",
+      pending: {
+        outcome: "completed",
+        source,
+        operation: completed.operation,
+        ...(preTerminationProposal === undefined ? {} : { preTerminationProposal }),
+      },
+      failure: completed.failure,
+    };
   }
   return {
     kind: "termination_ready",
@@ -517,6 +551,200 @@ function completeHostedOperation(
     operation: completed.operation,
     events,
     transaction: completed.transaction,
+    ...(preTerminationProposal === undefined ? {} : { preTerminationProposal }),
+  };
+}
+
+/**
+ * 重试此前已经收到完成信号、但 complete 阶段技术失败的调用。
+ * 该入口只重试 complete，不会再次消费 tick 的完成信号。
+ */
+export function resumeHostedOperationTermination(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  agentId: AgentId,
+  pending: HostedOperationTerminationPendingResult["pending"],
+): HostedOperationAdvanceResult {
+  const completed = completeOperationLifecycle(
+    { world, registry, agentId, operation: pending.operation },
+    pending.source,
+  );
+  if (completed.kind === "technical_failure") {
+    return {
+      kind: "termination_pending",
+      world,
+      operation: pending.operation,
+      events: [],
+      pending,
+      failure: completed.failure,
+    };
+  }
+  return {
+    kind: "termination_ready",
+    world,
+    operation: completed.operation,
+    events: [],
+    transaction: completed.transaction,
+    ...(pending.preTerminationProposal === undefined
+      ? {}
+      : { preTerminationProposal: pending.preTerminationProposal }),
+  };
+}
+
+export interface HostedOperationBatchEntry {
+  readonly agentId: AgentId;
+  readonly operation: OperationRuntimeCall;
+}
+
+export interface HostedOperationBatchResult {
+  readonly world: WorldState;
+  readonly events: readonly DomainEvent[];
+  readonly results: readonly {
+    readonly agentId: AgentId;
+    readonly callId: OperationCallId;
+    readonly result: HostedOperationAdvanceResult;
+  }[];
+}
+
+function transitionIntent(
+  entry: HostedOperationBatchEntry,
+  proposal: OperationLifecycleTransitionResult["proposal"],
+  phase: "start" | "tick",
+): InteractionIntent[] {
+  return proposal.effects.flatMap((effect, effectIndex) =>
+    effect.type === "reserve_occupancy"
+      ? [
+          {
+            intentId: `${entry.agentId}|${entry.operation.callId}|${phase}|${effectIndex}`,
+            agentId: entry.agentId,
+            entityId: effect.entityId,
+            interactionId: entry.operation.operationId,
+            arrivalTick: entry.operation.startedAtTick,
+          },
+        ]
+      : [],
+  );
+}
+
+function proposalForResult(
+  result: HostedOperationAdvanceResult,
+):
+  | {
+      readonly proposal: OperationLifecycleTransitionResult["proposal"];
+      readonly phase: "start" | "tick";
+    }
+  | undefined {
+  if (result.kind === "running" && result.proposal && result.phase) {
+    return { proposal: result.proposal, phase: result.phase };
+  }
+  if (result.kind === "termination_ready" && result.preTerminationProposal) {
+    return result.preTerminationProposal;
+  }
+  if (result.kind === "termination_pending" && result.pending.preTerminationProposal) {
+    return result.pending.preTerminationProposal;
+  }
+  return undefined;
+}
+
+/**
+ * 在同一 Tick 收集所有 hosted operation 生命周期提议，再以稳定顺序仲裁
+ * 资源争用并提交。输入遍历顺序不会决定同 Tick 的占用赢家。
+ */
+export function advanceHostedOperationBatch(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  entries: readonly HostedOperationBatchEntry[],
+): HostedOperationBatchResult {
+  const ordered = [...entries].sort(
+    (left, right) =>
+      left.agentId.localeCompare(right.agentId) ||
+      left.operation.callId.localeCompare(right.operation.callId),
+  );
+  const results = ordered.map((entry) => ({
+    entry,
+    result: advanceHostedOperation(world, registry, entry.agentId, entry.operation),
+  }));
+  const intents = results.flatMap(({ entry, result }) => {
+    const proposal = proposalForResult(result);
+    return proposal
+      ? transitionIntent(entry, proposal.proposal, proposal.phase)
+      : [];
+  });
+  const arbitration = arbitrateInteractionBatch(world, intents);
+  const rejectedIntentIds = new Set(
+    arbitration.decisions
+      .filter((decision) => !decision.accepted)
+      .map((decision) => decision.intentId),
+  );
+  let nextWorld =
+    arbitration.randomState === world.randomState
+      ? world
+      : { ...world, randomState: arbitration.randomState };
+  const events: DomainEvent[] = [];
+  const processed = new Map<OperationCallId, HostedOperationAdvanceResult>();
+
+  for (const { entry, result } of results) {
+    const proposal = proposalForResult(result);
+    if (!proposal) {
+      processed.set(entry.operation.callId, { ...result, world: nextWorld });
+      continue;
+    }
+    const proposalIntents = transitionIntent(entry, proposal.proposal, proposal.phase);
+    if (proposalIntents.some((intent) => rejectedIntentIds.has(intent.intentId))) {
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(
+          world,
+          entry.operation,
+          operationTechnicalFailure(
+            "plugin",
+            "operation_lifecycle_effect_arbitrated",
+            `Operation ${entry.operation.callId} lost same-tick effect arbitration.`,
+            true,
+          ),
+        ),
+      );
+      continue;
+    }
+    const committed = commitLifecycleTransition(
+      nextWorld,
+      registry,
+      entry.operation,
+      proposal.proposal,
+      entry.operation.callId,
+      proposal.phase,
+    );
+    if (committed.kind === "technical_failure") {
+      processed.set(entry.operation.callId, committed);
+      continue;
+    }
+    nextWorld = committed.world;
+    events.push(...committed.events);
+    processed.set(entry.operation.callId, {
+      ...result,
+      world: nextWorld,
+      events: committed.events,
+    });
+  }
+  return {
+    world: nextWorld,
+    events,
+    results: entries.map((entry) => ({
+      agentId: entry.agentId,
+      callId: entry.operation.callId,
+      result:
+        processed.get(entry.operation.callId) ??
+        hostedTechnicalFailure(
+          world,
+          entry.operation,
+          operationTechnicalFailure(
+            "protocol",
+            "operation_batch_result_missing",
+            `Operation ${entry.operation.callId} did not produce a batch result.`,
+            false,
+          ),
+        ),
+    })),
   };
 }
 
@@ -640,22 +868,13 @@ export function advanceHostedOperation(
     };
   }
 
-  let advancedWorld = world;
-  let advancedOperation = step.operation;
-  let events: readonly DomainEvent[] = [];
+  const advancedOperation = step.operation;
+  const events: readonly DomainEvent[] = [];
+  let transitionProposal: HostedOperationRunningResult["proposal"];
+  let transitionPhase: HostedOperationRunningResult["phase"];
   if (step.kind === "transition") {
-    const phase = operation.firstStepState === "pending" ? "start" : "tick";
-    const committed = commitLifecycleTransition(
-      world,
-      registry,
-      operation,
-      step,
-      phase,
-    );
-    if (committed.kind === "technical_failure") return committed;
-    advancedWorld = committed.world;
-    advancedOperation = committed.operation;
-    events = committed.events;
+    transitionProposal = step.proposal;
+    transitionPhase = operation.firstStepState === "pending" ? "start" : "tick";
   }
 
   const progressed = { ...advancedOperation, progressTicks: nextProgress };
@@ -676,36 +895,47 @@ export function advanceHostedOperation(
         ),
       );
     }
-    return completeHostedOperation(
-      advancedWorld,
+    const completed = completeHostedOperation(
+      world,
       registry,
       agentId,
       progressed,
-      events,
+      [],
       progressed.duration.kind === "fixed"
         ? "duration_elapsed"
         : "operation_signalled_completion",
+      transitionProposal === undefined || transitionPhase === undefined
+        ? undefined
+        : { proposal: transitionProposal, phase: transitionPhase },
     );
+    return { ...completed, world, events: [] };
   }
 
   if (
     progressed.duration.kind === "fixed" &&
     progressed.progressTicks === progressed.duration.totalTicks
   ) {
-    return completeHostedOperation(
-      advancedWorld,
+    const completed = completeHostedOperation(
+      world,
       registry,
       agentId,
       progressed,
-      events,
+      [],
       "duration_elapsed",
+      transitionProposal === undefined || transitionPhase === undefined
+        ? undefined
+        : { proposal: transitionProposal, phase: transitionPhase },
     );
+    return { ...completed, world, events: [] };
   }
 
   return {
     kind: "running",
-    world: advancedWorld,
+    world,
     operation: progressed,
     events,
+    ...(transitionProposal === undefined || transitionPhase === undefined
+      ? {}
+      : { proposal: transitionProposal, phase: transitionPhase }),
   };
 }
