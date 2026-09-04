@@ -136,6 +136,7 @@ git worktree add ../GodSimulation-wt/w2a-items -b wave2/w2a-item-appearance orig
 ## 6. 代码规范
 
 - **语言/模块**：TypeScript 严格模式，全 ESM；导入类型用 inline type import（`import { type Foo }`），ESLint `consistent-type-imports` 强制；`no-explicit-any` 是 error，不存在"先 any 一下"。
+- **兼容策略**：当前处于快速开发阶段，默认不要求向下兼容；旧事件、快照、协议、插件或数据库格式可按当前设计直接变更，只有任务明确要求迁移时才保留兼容路径。
 - **数值与配置**：会改变模拟行为的数值只能来自 `content/rules/default.json`（世界锁定的版本化规则集）；协议版本、数组下标、纯算法常量不是规则。业务代码和 Schema 都不得以数字字面量静默补默认值。
 - **错误分类**：游戏内 `domain_failure` 只能来自 operation 预注册的封闭失败码目录；插件异常、Schema 错误、不变量破坏一律 `technical_failure`。**禁止按错误消息字符串分类。**
 - **提交信息**：Conventional Commits 前缀（`feat:` / `fix:` / `refactor:` / `test:` / `docs:` / `chore:`）。
