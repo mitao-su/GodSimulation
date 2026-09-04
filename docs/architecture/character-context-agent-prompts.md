@@ -2,14 +2,14 @@
 
 > 使用方式：每次派发时，把“公共前缀”和一个“任务块”一起发送给 agent。
 >
-> 当前只允许派发 L1-L4。W1-IF 与 W2-C 已完成，相关提示词保留作范围审计，不再重复派发；L5 有讨论门禁，W6 依赖 L5，因此两者暂不提供施工提示词。
+> 当前只允许派发 L1-L4。W1-IF、W1-D 与 W2-C 已完成，相关提示词保留作范围审计，不再重复派发；L5 有讨论门禁，W6 依赖 L5，因此两者暂不提供施工提示词。
 
 ## 派发顺序
 
 TODO、Wave、AGENTS.md 和提示词文档基线已合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
 
-1. 当前可并行派 W1-A-P1、W1-B-P1、W1-D；W1-A-P1 与 W1-B-P1 各自在合入后继续 P2。
-2. W1-A-P2、W1-B-P2 都合入后派 W1-C；W1-C 与 W1-D 合入后再派 W1-B-P3，最后派 W1-X。
+1. W1-D 已合入；当前继续推进 W1-A-P1、W1-B-P1，两者各自在合入后继续 P2。
+2. W1-A-P2、W1-B-P2 都合入后派 W1-C；W1-C 合入后即可派 W1-B-P3，最后派 W1-X。W1-D 对这两项的前置已经满足。
 3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
 4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。
 5. 派 W4-IF；随后优先派 W4-A1、A2、B1、C，按前置滚动派 A3、B2；所有 L4 实现合入后派 W4-X。W3-B 与 L4 所有在施工轨合计不得超过四条，名额不足时优先 L4 主线。
@@ -106,14 +106,14 @@ W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-I
 主写 simulation/decision、cognition 当前决策请求与提示词、model-gateway、protocol/model 与必要 IPC、simulation-worker 决策接线、local-server 决策协调、web 决策审查。停止生成和发送动态 taskOptions，只通过 W1-IF/W1-A execution 窄接口建立或取消调用；旧快照读取所需 Schema 留给 P3 迁移，运行时死代码留 W1-X 删除。GoalUpdateValidator 只实现接口与挂点，不伪造目标状态；实际实现留 W4-A2。测试空任务、全员 READY、乱序返回、单人纠错、整批最终预检失败和无提前生效。
 ```
 
-### W1-D 规则与 Tick 时间
+### W1-D 规则与 Tick 时间（已合入 PR #5）
 
 ```text
-任务：W1-D，完成 L1-L4 已确认的规则收尾和阶段 2 时间基础。前置：W1-IF 已合入。分支建议 wave1/w1d-rules-time。
+审计记录：W1-D 已于 2026-09-05 通过 PR #5 合入 main，merge commit 为 d44a7930638f44af8332362ddf028ad895c07a31；无需再次派发。
 
-补齐声音墙/门遮挡系数、当前已确认 operation 所需规则字段、部署参数分离和策略字面量静态门禁；所有可调数值必须由世界锁定规则或版本化内容定义唯一持有。完成角色时间投影 API、最后醒来/入睡/整理开始 Tick 锚点与倍速只影响现实调度的测试；不要创建第二套时钟。perception_now 尚未存在，本轨只提供接口和锚点，实际时间接线由 W3-A3 完成。L5 睡眠曲线和其他门禁内数值不得猜定，相应 TODO 保持未勾选。
+已实现且已合入的范围：世界锁定规则新增墙、开门和关门声音衰减并严格校验；Worker 现实 Tick 间隔迁入 GOD_SIM_TICK_INTERVAL_MS 且校验 Node 定时器边界；策略字面量 AST 扫描接入 pnpm lint；新增 projectCharacterTime、CharacterTimeAnchors 和清醒/睡眠/整理时长纯派生 API，并验证倍速不改变同一 Tick 的游戏时间。
 
-主写 content/rules、protocol/rules、simulation/world 时间模块、scripts 和必要本地配置。不要改 operation/decision 或快照 codec；序列化形状由 W1-IF/W1-B 负责。
+实际变更边界：没有接入 perception_now、角色生命周期锚点写入或线上快照，没有实现声音传播场景，也没有猜定 L5 睡眠曲线和其他待定数值。前述接线仍由 W3-A3、指定保存格式 owner、W2-D 与 L5 后续轨线负责。
 ```
 
 ### W1-X 协议集成
