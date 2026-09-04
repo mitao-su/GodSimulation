@@ -10,6 +10,7 @@ export const doorDefinition: ObjectDefinition<DoorState> = {
   stateVersion: 1,
   displayName: "Door",
   tags: ["structure", "door", "lockable"],
+  capabilities: ["approachable", "observable"],
   stateSchema: DoorStateSchema,
   initialState: () => ({ open: false, locked: false }),
   resourceId: "pixel-16-interiors.door",

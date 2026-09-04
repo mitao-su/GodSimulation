@@ -10,6 +10,7 @@ export const refrigeratorDefinition: ObjectDefinition<RefrigeratorState> = {
   stateVersion: 1,
   displayName: "Refrigerator",
   tags: ["home", "food", "occupiable"],
+  capabilities: ["approachable", "observable"],
   stateSchema: RefrigeratorStateSchema,
   initialState: () => ({ occupiedBy: null }),
   resourceId: "pixel-16-interiors.refrigerator",

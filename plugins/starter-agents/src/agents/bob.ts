@@ -1,5 +1,7 @@
 import type { AgentDefinition } from "@god-sim/plugin-sdk";
 
+import { starterAgentOperations } from "../operations";
+
 export const bobDefinition: AgentDefinition = {
   id: "starter.bob",
   version: "0.1.0",
@@ -17,4 +19,5 @@ export const bobDefinition: AgentDefinition = {
   ],
   resourceId: "starter-agents.memao.bob",
   animationSetId: "starter-agents.memao.humanoid",
+  operations: starterAgentOperations,
 };

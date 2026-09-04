@@ -10,6 +10,7 @@ export const toiletDefinition: ObjectDefinition<ToiletState> = {
   stateVersion: 1,
   displayName: "Toilet",
   tags: ["home", "bathroom", "occupiable", "need-effect-provider"],
+  capabilities: ["approachable", "observable"],
   stateSchema: ToiletStateSchema,
   initialState: () => ({ occupiedBy: null }),
   resourceId: "pixel-16-interiors.toilet",

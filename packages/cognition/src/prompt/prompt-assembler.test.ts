@@ -76,6 +76,7 @@ const alice: AgentDefinition = {
   initialMemories: [],
   resourceId: "alice",
   animationSetId: "humanoid",
+  operations: [],
 };
 
 describe("assembleDecisionRequest", () => {

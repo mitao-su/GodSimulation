@@ -1,8 +1,10 @@
 import { z } from "zod";
 
-import type {
-  InteractionDefinition,
-  ObjectDefinition,
+import {
+  assertHostedOperationContract,
+  bindHostedInteractionDefinition,
+  type InteractionDefinition,
+  type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
 import {
   EntityIdSchema,
@@ -20,6 +22,7 @@ import {
   knownObjects,
 } from "./core/core-operation-helpers";
 import type {
+  HostedOperationRuntime,
   OperationRuntimeContext,
   RegisteredOperation,
 } from "./operation-runtime";
@@ -236,4 +239,166 @@ export function createObjectInteractionOperation<State>(
       }
     },
   };
+}
+
+export function createHostedObjectInteractionOperation<State>(
+  ownerPluginId: string,
+  definition: ObjectDefinition<State>,
+  interaction: InteractionDefinition<State, JsonObject>,
+): HostedOperationRuntime {
+  const hosted = bindHostedInteractionDefinition(interaction);
+  const expectedId = objectInteractionOperationId(definition.id, interaction.id);
+  const operationState = (value: Readonly<JsonObject>) =>
+    hosted.stateSchema.parse(value);
+
+  const binding = (
+    context: OperationRuntimeContext,
+    host: Parameters<HostedOperationRuntime["initialState"]>[1],
+    argumentsValue: Readonly<JsonObject>,
+  ) => {
+    if (host.kind !== "furniture") {
+      throw new Error(
+        `Operation ${expectedId} requires a furniture host instance`,
+      );
+    }
+    const object = context.world.objects.get(host.hostEntityId);
+    if (!object || object.definitionId !== definition.id) {
+      throw new Error(
+        `Operation ${expectedId} is not bound to a ${definition.id} instance`,
+      );
+    }
+    return {
+      state: definition.stateSchema.parse(object.state),
+      parameters: hosted.parametersSchema.parse(argumentsValue),
+      context: createInteractionContext(
+        context.world,
+        context.registry,
+        object.id,
+        context.agentId,
+      ),
+    };
+  };
+  const callBinding = (
+    context: OperationRuntimeContext,
+    operation: Parameters<HostedOperationRuntime["start"]>[1],
+  ) => {
+    if (
+      operation.operationId !== expectedId ||
+      operation.hostDefinition.kind !== "furniture" ||
+      operation.hostDefinition.hostDefinitionId !== definition.id
+    ) {
+      throw new Error(
+        `Object operation call is not bound to ${definition.id}:${expectedId}`,
+      );
+    }
+    return binding(context, operation.host, operation.arguments);
+  };
+
+  const runtime: HostedOperationRuntime = {
+    id: expectedId,
+    displayName: hosted.displayName,
+    trigger: hosted.trigger,
+    ownerPluginId,
+    host: { kind: "furniture", hostDefinitionId: definition.id },
+    manual: hosted.manual,
+    target: hosted.target,
+    duration: hosted.duration,
+    taskSlots: hosted.taskSlots,
+    eventIgnore: hosted.eventIgnore,
+    publicBehavior: hosted.publicBehavior,
+    domainFailures: hosted.domainFailures,
+    resultSchema: hosted.resultSchema,
+    stateSchema: hosted.stateSchema,
+    parametersSchema: hosted.parametersSchema,
+    initialState: (context, host, argumentsValue) => {
+      const bound = binding(context, host, argumentsValue);
+      return hosted.initialState(
+        bound.state,
+        bound.context,
+        bound.parameters,
+      );
+    },
+    resolveDuration: (context, host, argumentsValue) => {
+      const bound = binding(context, host, argumentsValue);
+      return hosted.resolveDuration(
+        bound.state,
+        bound.context,
+        bound.parameters,
+      );
+    },
+    start: (context, operation) => {
+      const bound = callBinding(context, operation);
+      return hosted.start(
+        bound.state,
+        bound.context,
+        bound.parameters,
+        operationState(operation.state),
+      );
+    },
+    ...(hosted.tick
+      ? {
+          tick: (context, operation) => {
+            const bound = callBinding(context, operation);
+            return hosted.tick!(
+              bound.state,
+              bound.context,
+              bound.parameters,
+              operationState(operation.state),
+            );
+          },
+        }
+      : {}),
+    complete: (context, operation) => {
+      const bound = callBinding(context, operation);
+      return hosted.complete(
+        bound.state,
+        bound.context,
+        bound.parameters,
+        operationState(operation.state),
+      );
+    },
+    fail: (context, operation, failure) => {
+      const bound = callBinding(context, operation);
+      return hosted.fail(
+        bound.state,
+        bound.context,
+        bound.parameters,
+        operationState(operation.state),
+        failure,
+      );
+    },
+    cancel: (context, operation) => {
+      const bound = callBinding(context, operation);
+      return hosted.cancel(
+        bound.state,
+        bound.context,
+        bound.parameters,
+        operationState(operation.state),
+      );
+    },
+    fuse: (context, operation) => {
+      const bound = callBinding(context, operation);
+      return hosted.fuse(
+        bound.state,
+        bound.context,
+        bound.parameters,
+        operationState(operation.state),
+      );
+    },
+    acknowledgeFuseResult: (context, operation, result) => {
+      const bound = callBinding(context, operation);
+      return hosted.acknowledgeFuseResult(
+        bound.state,
+        bound.context,
+        bound.parameters,
+        operationState(operation.state),
+        result,
+      );
+    },
+  };
+  assertHostedOperationContract(
+    `Object ${definition.id} interaction ${interaction.id}`,
+    runtime,
+  );
+  return Object.freeze(runtime);
 }

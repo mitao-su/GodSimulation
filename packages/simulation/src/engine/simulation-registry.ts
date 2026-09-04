@@ -1,7 +1,10 @@
 import type { GamePlugin } from "@god-sim/plugin-sdk";
 
 import { createOperationRegistry } from "../execution/operation-registry";
-import type { OperationRegistry } from "../execution/operation-runtime";
+import type {
+  HostedOperationRegistry,
+  OperationRegistry,
+} from "../execution/operation-runtime";
 import {
   createPluginRegistry,
   type PluginRegistry,
@@ -9,7 +12,8 @@ import {
 
 export interface SimulationRegistry
   extends PluginRegistry,
-    OperationRegistry {}
+    OperationRegistry,
+    HostedOperationRegistry {}
 
 export function createSimulationRegistry(
   plugins: readonly GamePlugin[],

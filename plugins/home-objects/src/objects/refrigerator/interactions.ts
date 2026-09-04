@@ -1,11 +1,15 @@
 import { z } from "zod";
 
-import type { InteractionDefinition } from "@god-sim/plugin-sdk";
+import {
+  operationParametersJsonSchema,
+  type InteractionDefinition,
+} from "@god-sim/plugin-sdk";
 
 import type { RefrigeratorState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
+const failureDetailsSchema = z.object({ summary: z.string() }).strict();
 
 function releaseIfHeld(
   state: Readonly<RefrigeratorState>,
@@ -30,13 +34,35 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
   id: "use",
   displayName: "Use refrigerator",
   trigger: "active_command",
+  manual: {
+    operationId: "object.home.refrigerator.use" as never,
+    displayName: "Use refrigerator",
+    summary: "Open and use this refrigerator.",
+    taskSlots: ["BODY"],
+    parametersSchema: operationParametersJsonSchema(noArgumentsSchema),
+    target: { kind: "none" },
+    duration: { kind: "fixed" },
+    worldPreconditions: [
+      {
+        failureCode: "occupied",
+        description: "Another character may already be using the refrigerator.",
+      },
+    ],
+  },
+  target: { kind: "none" },
+  duration: { kind: "fixed" },
   taskSlots: ["BODY"],
   parametersSchema: noArgumentsSchema,
   resolveDuration: () => ({ kind: "fixed", totalTicks: 30 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "using the refrigerator" },
   domainFailures: [
-    { code: "occupied", summary: "The refrigerator is occupied" },
+    {
+      code: "occupied",
+      summary: "The refrigerator is occupied",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
   ],
   resultSchema: emptyResultSchema,
   canStart(state, context) {

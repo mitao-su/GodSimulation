@@ -1,11 +1,15 @@
 import { z } from "zod";
 
-import type { InteractionDefinition } from "@god-sim/plugin-sdk";
+import {
+  operationParametersJsonSchema,
+  type InteractionDefinition,
+} from "@god-sim/plugin-sdk";
 
 import type { ToiletState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
+const failureDetailsSchema = z.object({ summary: z.string() }).strict();
 
 function releaseIfHeld(
   state: Readonly<ToiletState>,
@@ -28,12 +32,36 @@ export const useToiletInteraction: InteractionDefinition<ToiletState> = {
   id: "use",
   displayName: "Use toilet",
   trigger: "active_command",
+  manual: {
+    operationId: "object.home.toilet.use" as never,
+    displayName: "Use toilet",
+    summary: "Use this toilet to relieve bladder pressure.",
+    taskSlots: ["BODY"],
+    parametersSchema: operationParametersJsonSchema(noArgumentsSchema),
+    target: { kind: "none" },
+    duration: { kind: "fixed" },
+    worldPreconditions: [
+      {
+        failureCode: "occupied",
+        description: "Another character may already be using the toilet.",
+      },
+    ],
+  },
+  target: { kind: "none" },
+  duration: { kind: "fixed" },
   taskSlots: ["BODY"],
   parametersSchema: noArgumentsSchema,
   resolveDuration: () => ({ kind: "fixed", totalTicks: 40 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "using the toilet" },
-  domainFailures: [{ code: "occupied", summary: "The toilet is occupied" }],
+  domainFailures: [
+    {
+      code: "occupied",
+      summary: "The toilet is occupied",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
+  ],
   resultSchema: emptyResultSchema,
   canStart(state, context) {
     if (state.occupiedBy === null || state.occupiedBy === context.actor.agentId) {
