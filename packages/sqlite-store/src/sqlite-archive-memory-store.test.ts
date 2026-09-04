@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { SimulationRulesLockSchema } from "@god-sim/protocol";
 import {
   ArchiveMemoryIndexLockConflictError,
   lockArchiveMemoryIndex,
@@ -13,6 +14,7 @@ import {
   type ArchiveMemoryEncoderLock,
   type ArchiveMemoryScope,
   type ArchiveMemoryStore,
+  type ArchiveTimelineStore,
 } from "@god-sim/timeline";
 
 import { createSqliteTimelineStore } from "./sqlite-timeline-store";
@@ -33,6 +35,43 @@ const rankingWeights = {
   keywordMatch: 0.25,
   currentStrength: 0.2,
 } as const;
+
+const simulationRulesLock = SimulationRulesLockSchema.parse({
+  hash: "c".repeat(64),
+  rules: {
+    schemaVersion: 1,
+    id: "default",
+    version: 1,
+    time: { secondsPerGameTick: 6, epoch: { day: 1, hour: 8, minute: 0 } },
+    context: { attentionBudgetTokens: 200_000, technicalHardLimitTokens: 200_000 },
+    fatigue: {
+      timeWeight: 0.6,
+      tokenWeight: 0.4,
+      forcedSleepThreshold: 0.6,
+      timePressureFullAtTicks: 43_200,
+    },
+    inventory: { capacityUnits: 9 },
+    operations: {
+      move: { ticksPerCell: 2 },
+      wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
+      observe: { durationTicks: 1 },
+    },
+    memory: {
+      importance: decay.importance,
+      deletionThreshold: decay.deletionThreshold,
+      recall: {
+        maxReturnTokensPerOperation: 8_000,
+        rankingWeights,
+      },
+    },
+    sound: {
+      speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
+      attenuationPerTile: 0.25,
+      fullContentThreshold: 1,
+      unclearContentThreshold: 0.25,
+    },
+  },
+});
 
 const encoderA: ArchiveMemoryEncoderLock = {
   encoderId: "test-encoder",
@@ -77,6 +116,88 @@ function memory(
   };
 }
 
+interface SeededWorldEvents {
+  tail: number;
+  readonly eventIds: Set<string>;
+}
+
+const seededEventsByStore = new WeakMap<
+  ArchiveTimelineStore,
+  Map<string, SeededWorldEvents>
+>();
+
+async function seedSourceEvents(
+  store: ArchiveTimelineStore,
+  archiveScope: ArchiveMemoryScope,
+  memories: readonly ArchivedMemoryDraft[],
+): Promise<void> {
+  let worlds = seededEventsByStore.get(store);
+  if (!worlds) {
+    worlds = new Map();
+    seededEventsByStore.set(store, worlds);
+  }
+  let world = worlds.get(archiveScope.worldId);
+  if (!world) {
+    world = { tail: 0, eventIds: new Set() };
+    worlds.set(archiveScope.worldId, world);
+  }
+  const newEventIds = [
+    ...new Set(memories.flatMap((draft) => draft.sourceEventIds)),
+  ]
+    .filter((eventId) => !world.eventIds.has(eventId))
+    .sort();
+  if (newEventIds.length === 0) return;
+
+  const firstSequence = world.tail + 1;
+  const tail = world.tail + newEventIds.length;
+  const allEventIds = [...world.eventIds, ...newEventIds];
+  await store.commitCheckpoint({
+    checkpointId: `checkpoint:${archiveScope.worldId}:${tail}:${tail}` as never,
+    events: newEventIds.map((eventId, index) => {
+      const sequence = firstSequence + index;
+      return {
+        schemaVersion: 1,
+        eventId,
+        worldId: archiveScope.worldId,
+        worldVersion: sequence,
+        worldTick: sequence,
+        sequence,
+        parentSequence: sequence === 1 ? null : sequence - 1,
+        causationId: `cause:archive-source:${sequence}`,
+        correlationId: `cycle:archive-source:${sequence}`,
+        type: "decision_requested",
+        agentId: archiveScope.agentId,
+        requestId: `request:archive-source:${sequence}`,
+        decisionCycleId: `cycle:archive-source:${sequence}`,
+        reasonCode: "archive_memory_test_source",
+      } as never;
+    }),
+    snapshot: {
+      schemaVersion: 3,
+      worldId: archiveScope.worldId,
+      worldVersion: tail,
+      worldTick: tail,
+      lastEventSequence: tail,
+      pluginLockHash: "a".repeat(64),
+      simulationRulesLock,
+      history: { mode: "strict", causalFromSequence: 1 },
+      causalEventIds: allEventIds,
+      state: {},
+    } as never,
+  });
+  world.tail = tail;
+  for (const eventId of newEventIds) world.eventIds.add(eventId);
+}
+
+async function saveMemories(
+  store: ArchiveTimelineStore,
+  archiveScope: ArchiveMemoryScope,
+  memories: readonly ArchivedMemoryDraft[],
+) {
+  await seedSourceEvents(store, archiveScope, memories);
+  return store.saveArchivedMemories({ scope: archiveScope, memories });
+}
+
 async function rebuildIndex(
   store: ArchiveMemoryStore,
   archiveScope: ArchiveMemoryScope,
@@ -104,10 +225,9 @@ describe("SQLite archive memory store", () => {
       const firstOpen = await createSqliteTimelineStore({ filename });
       let ready;
       try {
-        await firstOpen.saveArchivedMemories({
-          scope: archiveScope,
-          memories: [memory("memory-a", { content: "persisted apple memory" })],
-        });
+        await saveMemories(firstOpen, archiveScope, [
+          memory("memory-a", { content: "persisted apple memory" }),
+        ]);
         ready = await rebuildIndex(firstOpen, archiveScope, encoderA, [
           { memoryId: "memory-a", values: [1, 0] },
         ]);
@@ -148,6 +268,119 @@ describe("SQLite archive memory store", () => {
     }
   });
 
+  it("reloads every archive cycle needed to rebuild a stale index after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "god-sim-archive-rebuild-"));
+    const filename = join(directory, "timeline.sqlite");
+    const archiveScope = scope();
+    let staleArchiveVersion = -1;
+    try {
+      const firstOpen = await createSqliteTimelineStore({ filename });
+      try {
+        await saveMemories(firstOpen, archiveScope, [
+          memory("memory-a", {
+            consolidationCycleId: "cycle-1",
+            content: "first archive cycle",
+          }),
+        ]);
+        await rebuildIndex(firstOpen, archiveScope, encoderA, [
+          { memoryId: "memory-a", values: [1, 0] },
+        ]);
+        const stale = await saveMemories(firstOpen, archiveScope, [
+          memory("memory-b", {
+            consolidationCycleId: "cycle-2",
+            content: "second archive cycle",
+          }),
+        ]);
+        expect(stale.vectorStatus).toBe("stale");
+        staleArchiveVersion = stale.archiveVersion;
+      } finally {
+        await firstOpen.close();
+      }
+
+      const reopened = await createSqliteTimelineStore({ filename });
+      try {
+        const input = await reopened.loadArchiveMemoryVectorIndexInput(archiveScope);
+        expect(input).toEqual({
+          ...archiveScope,
+          archiveVersion: staleArchiveVersion,
+          documents: [
+            { memoryId: "memory-a", content: "first archive cycle" },
+            { memoryId: "memory-b", content: "second archive cycle" },
+          ],
+        });
+        const ready = await reopened.rebuildArchiveMemoryVectorIndex({
+          scope: archiveScope,
+          encoder: encoderA,
+          expectedArchiveVersion: input!.archiveVersion,
+          embeddings: input!.documents.map((document, index) => ({
+            memoryId: document.memoryId,
+            values: index === 0 ? [1, 0] : [0, 1],
+          })),
+        });
+        expect(ready).toMatchObject({
+          vectorStatus: "ready",
+          archiveVersion: staleArchiveVersion,
+          indexedArchiveVersion: staleArchiveVersion,
+        });
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back the whole archive batch when a source Event is missing", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const archiveScope = scope();
+    const durableMemory = memory("durable-source");
+    try {
+      await seedSourceEvents(store, archiveScope, [durableMemory]);
+      await expect(
+        store.saveArchivedMemories({
+          scope: archiveScope,
+          memories: [durableMemory, memory("missing-source")],
+        }),
+      ).rejects.toThrow(/missing Event event:missing-source/);
+      await expect(store.getArchiveMemoryIndexState(archiveScope)).resolves.toBeNull();
+      await expect(
+        store.loadArchivedMemories({
+          ...archiveScope,
+          consolidationCycleId: "cycle-1",
+        }),
+      ).resolves.toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("rolls back the whole archive batch when a source Event belongs to another world", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const archiveScope = scope("world-1");
+    const otherWorldScope = scope("world-2");
+    const durableMemory = memory("durable-source");
+    const foreignMemory = memory("foreign-source");
+    try {
+      await seedSourceEvents(store, archiveScope, [durableMemory]);
+      await seedSourceEvents(store, otherWorldScope, [foreignMemory]);
+      await expect(
+        store.saveArchivedMemories({
+          scope: archiveScope,
+          memories: [durableMemory, foreignMemory],
+        }),
+      ).rejects.toThrow(/belongs to world world-2, not world-1/);
+      await expect(store.getArchiveMemoryIndexState(archiveScope)).resolves.toBeNull();
+      await expect(
+        store.loadArchivedMemories({
+          ...archiveScope,
+          consolidationCycleId: "cycle-1",
+        }),
+      ).resolves.toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("isolates records by world, branch, agent, and consolidation cycle", async () => {
     const store = await createSqliteTimelineStore({ filename: ":memory:" });
     const scopes = [
@@ -158,24 +391,18 @@ describe("SQLite archive memory store", () => {
     ];
     try {
       for (const [index, archiveScope] of scopes.entries()) {
-        await store.saveArchivedMemories({
-          scope: archiveScope,
-          memories: [
-            memory("shared-id", {
-              content: `scope ${index}`,
-              sourceEventIds: [`event:scope:${index}` as never],
-            }),
-          ],
-        });
-      }
-      await store.saveArchivedMemories({
-        scope: scopes[0]!,
-        memories: [
-          memory("cycle-2-memory", {
-            consolidationCycleId: "cycle-2",
+        await saveMemories(store, archiveScope, [
+          memory("shared-id", {
+            content: `scope ${index}`,
+            sourceEventIds: [`event:scope:${index}` as never],
           }),
-        ],
-      });
+        ]);
+      }
+      await saveMemories(store, scopes[0]!, [
+        memory("cycle-2-memory", {
+          consolidationCycleId: "cycle-2",
+        }),
+      ]);
 
       for (const [index, archiveScope] of scopes.entries()) {
         const records = await store.loadArchivedMemories({
@@ -193,6 +420,15 @@ describe("SQLite archive memory store", () => {
       ).resolves.toEqual([
         expect.objectContaining({ memoryId: "cycle-2-memory" }),
       ]);
+      await expect(
+        store.loadArchiveMemoryVectorIndexInput(scopes[0]!),
+      ).resolves.toMatchObject({
+        ...scopes[0]!,
+        documents: [
+          { memoryId: "cycle-2-memory", content: "remembered cycle-2-memory" },
+          { memoryId: "shared-id", content: "scope 0" },
+        ],
+      });
     } finally {
       await store.close();
     }
@@ -202,14 +438,11 @@ describe("SQLite archive memory store", () => {
     const store = await createSqliteTimelineStore({ filename: ":memory:" });
     const archiveScope = scope();
     try {
-      await store.saveArchivedMemories({
-        scope: archiveScope,
-        memories: [
-          memory("memory-a", { content: "red apple picnic" }),
-          memory("memory-b", { content: "red apple picnic" }),
-          memory("memory-c", { content: "distant sea" }),
-        ],
-      });
+      await saveMemories(store, archiveScope, [
+        memory("memory-a", { content: "red apple picnic" }),
+        memory("memory-b", { content: "red apple picnic" }),
+        memory("memory-c", { content: "distant sea" }),
+      ]);
       const ready = await rebuildIndex(store, archiveScope, encoderA, [
         { memoryId: "memory-a", values: [1, 0] },
         { memoryId: "memory-b", values: [0.8, 0.6] },
@@ -244,19 +477,51 @@ describe("SQLite archive memory store", () => {
     }
   });
 
+  it("matches a Chinese phrase inside unsegmented Chinese archive content", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const archiveScope = scope();
+    try {
+      await saveMemories(store, archiveScope, [
+        memory("park-memory", { content: "今天去了公园散步" }),
+        memory("home-memory", { content: "今天留在家里读书" }),
+      ]);
+      const ready = await rebuildIndex(store, archiveScope, encoderA, [
+        { memoryId: "park-memory", values: [0, 1] },
+        { memoryId: "home-memory", values: [0, 1] },
+      ]);
+
+      const results = await store.searchArchivedMemories({
+        scope: archiveScope,
+        query: "公园",
+        queryEmbedding: { encoder: encoderA, values: [1, 0] },
+        indexLock: lockArchiveMemoryIndex(ready),
+        atTick: 0,
+        decay,
+        rankingWeights,
+      });
+
+      expect(
+        results.find((result) => result.memory.memoryId === "park-memory"),
+      ).toMatchObject({ keywordMatch: 1 });
+      expect(
+        results.find((result) => result.memory.memoryId === "home-memory"),
+      ).toMatchObject({ keywordMatch: 0 });
+    } finally {
+      await store.close();
+    }
+  });
+
   it("never returns another agent's archive through either retrieval route", async () => {
     const store = await createSqliteTimelineStore({ filename: ":memory:" });
     const aliceScope = scope("world-1", "branch-1", "alice");
     const bobScope = scope("world-1", "branch-1", "bob");
     try {
-      await store.saveArchivedMemories({
-        scope: aliceScope,
-        memories: [memory("alice-memory", { content: "shared keyword" })],
-      });
-      await store.saveArchivedMemories({
-        scope: bobScope,
-        memories: [memory("bob-secret", { content: "shared keyword secret" })],
-      });
+      await saveMemories(store, aliceScope, [
+        memory("alice-memory", { content: "shared keyword" }),
+      ]);
+      await saveMemories(store, bobScope, [
+        memory("bob-secret", { content: "shared keyword secret" }),
+      ]);
       const aliceIndex = await rebuildIndex(store, aliceScope, encoderA, [
         { memoryId: "alice-memory", values: [1, 0] },
       ]);
@@ -295,8 +560,8 @@ describe("SQLite archive memory store", () => {
       { memoryId: "critical-memory", values: [0, 1] },
     ] as const;
     try {
-      await oneShot.saveArchivedMemories({ scope: archiveScope, memories });
-      await daily.saveArchivedMemories({ scope: archiveScope, memories });
+      await saveMemories(oneShot, archiveScope, memories);
+      await saveMemories(daily, archiveScope, memories);
       await rebuildIndex(oneShot, archiveScope, encoderA, embeddings);
       await rebuildIndex(daily, archiveScope, encoderA, embeddings);
 
@@ -341,10 +606,7 @@ describe("SQLite archive memory store", () => {
     const store = await createSqliteTimelineStore({ filename: ":memory:" });
     const archiveScope = scope();
     try {
-      await store.saveArchivedMemories({
-        scope: archiveScope,
-        memories: [memory("memory-a")],
-      });
+      await saveMemories(store, archiveScope, [memory("memory-a")]);
       const readyA = await rebuildIndex(store, archiveScope, encoderA, [
         { memoryId: "memory-a", values: [1, 0] },
       ]);
@@ -397,10 +659,7 @@ describe("SQLite archive memory store", () => {
         embeddings: [{ memoryId: "memory-a", values: [0, 1] }],
       });
       expect(readyB.vectorStatus).toBe("ready");
-      await store.saveArchivedMemories({
-        scope: archiveScope,
-        memories: [memory("memory-b")],
-      });
+      await saveMemories(store, archiveScope, [memory("memory-b")]);
       const invalidated = await store.getArchiveMemoryIndexState(archiveScope);
       expect(invalidated?.vectorStatus).toBe("stale");
       await expect(
@@ -423,10 +682,9 @@ describe("SQLite archive memory store", () => {
     const store = await createSqliteTimelineStore({ filename: ":memory:" });
     const archiveScope = scope();
     try {
-      await store.saveArchivedMemories({
-        scope: archiveScope,
-        memories: [memory("memory-a", { content: "apple memory" })],
-      });
+      await saveMemories(store, archiveScope, [
+        memory("memory-a", { content: "apple memory" }),
+      ]);
       const ready = await rebuildIndex(store, archiveScope, encoderA, [
         { memoryId: "memory-a", values: [1, 0] },
       ]);

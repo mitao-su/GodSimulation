@@ -19,6 +19,7 @@ import type {
   ArchiveMemoryIndexState,
   ArchiveMemoryScope,
   ArchiveMemoryStore,
+  ArchiveMemoryVectorIndexInput,
   ArchiveTimelineStore,
   ModelCallRecord,
   PluginLockRecord,
@@ -165,6 +166,12 @@ class SqliteTimelineStore implements ArchiveTimelineStore {
     scope: ArchiveMemoryCollectionScope,
   ): Promise<readonly ArchivedMemory[]> {
     return this.#archiveMemoryStore.loadArchivedMemories(scope);
+  }
+
+  loadArchiveMemoryVectorIndexInput(
+    scope: ArchiveMemoryScope,
+  ): Promise<ArchiveMemoryVectorIndexInput | null> {
+    return this.#archiveMemoryStore.loadArchiveMemoryVectorIndexInput(scope);
   }
 
   pruneArchivedMemories(

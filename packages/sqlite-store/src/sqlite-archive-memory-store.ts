@@ -22,6 +22,7 @@ import {
   type ArchiveMemoryIndexState,
   type ArchiveMemoryScope,
   type ArchiveMemoryStore,
+  type ArchiveMemoryVectorIndexInput,
   type ArchiveMemoryVectorHit,
   type PrepareArchiveMemoryVectorIndexRequest,
   type PruneArchivedMemoriesRequest,
@@ -32,6 +33,7 @@ import {
   type SearchArchivedMemoriesRequest,
 } from "@god-sim/timeline";
 
+import { createArchiveMemoryFullTextDocument } from "./archive-memory-full-text";
 import type {
   ArchivedMemoryRow,
   ArchiveMemoryCollectionRow,
@@ -177,6 +179,7 @@ function memoryRowMatches(row: MemoryRow, memory: ArchivedMemoryDraft): boolean 
   return (
     row.consolidation_cycle_id === memory.consolidationCycleId &&
     row.content === memory.content &&
+    row.search_text === createArchiveMemoryFullTextDocument(memory.content) &&
     row.source_event_ids_json === JSON.stringify(memory.sourceEventIds) &&
     row.formed_at_tick === memory.formedAtTick &&
     row.archived_at_tick === memory.archivedAtTick &&
@@ -293,6 +296,33 @@ async function ensureCollection(
     )
     .execute();
   return selectCollection(db, scope).then((row) => row!);
+}
+
+async function assertSourceEventsExist(
+  db: DatabaseExecutor,
+  scope: ArchiveMemoryScope,
+  memories: readonly ArchivedMemoryDraft[],
+): Promise<void> {
+  const sourceEventIds = [
+    ...new Set(memories.flatMap((memory) => memory.sourceEventIds)),
+  ].sort(compareStableIds);
+  const rows = await db
+    .selectFrom("events")
+    .select(["event_id", "world_id"])
+    .where("event_id", "in", sourceEventIds)
+    .execute();
+  const eventWorlds = new Map(rows.map((row) => [row.event_id, row.world_id] as const));
+  const invalidEventId = sourceEventIds.find(
+    (eventId) => eventWorlds.get(eventId) !== scope.worldId,
+  );
+  if (!invalidEventId) return;
+  const eventWorldId = eventWorlds.get(invalidEventId);
+  if (eventWorldId === undefined) {
+    throw new Error(`Archived memory references missing Event ${invalidEventId}`);
+  }
+  throw new Error(
+    `Archived memory Event ${invalidEventId} belongs to world ${eventWorldId}, not ${scope.worldId}`,
+  );
 }
 
 async function selectCollection(
@@ -454,6 +484,7 @@ export class SqliteArchiveMemoryStore implements ArchiveMemoryStore {
     }
 
     return this.#db.transaction().execute(async (transaction) => {
+      await assertSourceEventsExist(transaction, scope, memories);
       let collection = await ensureCollection(transaction, scope);
       let inserted = 0;
       for (const memory of memories) {
@@ -480,6 +511,7 @@ export class SqliteArchiveMemoryStore implements ArchiveMemoryStore {
             consolidation_cycle_id: memory.consolidationCycleId,
             memory_id: memory.memoryId,
             content: memory.content,
+            search_text: createArchiveMemoryFullTextDocument(memory.content),
             source_event_ids_json: JSON.stringify(memory.sourceEventIds),
             formed_at_tick: memory.formedAtTick,
             archived_at_tick: memory.archivedAtTick,
@@ -520,6 +552,32 @@ export class SqliteArchiveMemoryStore implements ArchiveMemoryStore {
       .orderBy("memory_id", "asc")
       .execute();
     return rows.map(memoryFromRow);
+  }
+
+  async loadArchiveMemoryVectorIndexInput(
+    scopeValue: ArchiveMemoryScope,
+  ): Promise<ArchiveMemoryVectorIndexInput | null> {
+    const scope = validateScope(scopeValue);
+    return this.#db.transaction().execute(async (transaction) => {
+      const collection = await selectCollection(transaction, scope);
+      if (!collection) return null;
+      const rows = await transaction
+        .selectFrom("archived_memories")
+        .select(["memory_id", "content"])
+        .where("world_id", "=", scope.worldId)
+        .where("branch_id", "=", scope.branchId)
+        .where("agent_id", "=", scope.agentId)
+        .orderBy("memory_id", "asc")
+        .execute();
+      return {
+        ...scope,
+        archiveVersion: collection.archive_version,
+        documents: rows.map((row) => ({
+          memoryId: row.memory_id,
+          content: row.content,
+        })),
+      };
+    });
   }
 
   async pruneArchivedMemories(
@@ -712,7 +770,8 @@ export class SqliteArchiveMemoryStore implements ArchiveMemoryStore {
       const terms = extractFullTextTerms(request.query);
       const keywordHitCounts = new Map<string, number>();
       for (const term of terms) {
-        const expression = `"${term.replaceAll('"', '""')}"`;
+        const searchTerm = createArchiveMemoryFullTextDocument(term);
+        const expression = `"${searchTerm.replaceAll('"', '""')}"`;
         const hits = await sql<{ readonly memory_id: string }>`
           SELECT memory.memory_id
           FROM archived_memories_fts

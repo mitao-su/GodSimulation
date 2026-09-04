@@ -67,6 +67,16 @@ export interface ArchiveMemoryEmbedding {
   readonly values: readonly number[];
 }
 
+export interface ArchiveMemoryVectorIndexDocument {
+  readonly memoryId: string;
+  readonly content: string;
+}
+
+export interface ArchiveMemoryVectorIndexInput extends ArchiveMemoryScope {
+  readonly archiveVersion: number;
+  readonly documents: readonly ArchiveMemoryVectorIndexDocument[];
+}
+
 interface ArchiveMemoryIndexStateBase extends ArchiveMemoryScope {
   readonly archiveVersion: number;
   readonly fullTextIndexVersion: number;
@@ -175,6 +185,9 @@ export interface ArchiveMemoryStore {
   loadArchivedMemories(
     scope: ArchiveMemoryCollectionScope,
   ): Promise<readonly ArchivedMemory[]>;
+  loadArchiveMemoryVectorIndexInput(
+    scope: ArchiveMemoryScope,
+  ): Promise<ArchiveMemoryVectorIndexInput | null>;
   pruneArchivedMemories(
     request: PruneArchivedMemoriesRequest,
   ): Promise<PruneArchivedMemoriesResult>;

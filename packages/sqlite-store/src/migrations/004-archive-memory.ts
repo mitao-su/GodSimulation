@@ -1,5 +1,6 @@
 import { sql, type Kysely } from "kysely";
 
+import { createArchiveMemoryFullTextDocument } from "../archive-memory-full-text";
 import type { DatabaseSchema } from "../database-schema";
 
 export async function migrateArchiveMemorySchema(
@@ -81,6 +82,7 @@ export async function migrateArchiveMemorySchema(
     .addColumn("consolidation_cycle_id", "text", (column) => column.notNull())
     .addColumn("memory_id", "text", (column) => column.notNull())
     .addColumn("content", "text", (column) => column.notNull())
+    .addColumn("search_text", "text", (column) => column.notNull())
     .addColumn("source_event_ids_json", "text", (column) => column.notNull())
     .addColumn("formed_at_tick", "integer", (column) => column.notNull())
     .addColumn("archived_at_tick", "integer", (column) => column.notNull())
@@ -190,8 +192,21 @@ export async function migrateArchiveMemorySchema(
     ])
     .execute();
 
-  const ftsObjects = await sql<{ readonly name: string }>`
-    SELECT name FROM sqlite_master
+  const memoryColumns = await sql<{ readonly name: string }>`
+    PRAGMA table_info(archived_memories)
+  `.execute(db);
+  if (!memoryColumns.rows.some((column) => column.name === "search_text")) {
+    await sql`
+      ALTER TABLE archived_memories
+      ADD COLUMN search_text TEXT NOT NULL DEFAULT ''
+    `.execute(db);
+  }
+
+  const ftsObjects = await sql<{
+    readonly name: string;
+    readonly sql: string | null;
+  }>`
+    SELECT name, sql FROM sqlite_master
     WHERE name IN (
       'archived_memories_fts',
       'archived_memories_fts_insert',
@@ -200,14 +215,38 @@ export async function migrateArchiveMemorySchema(
     )
   `.execute(db);
   const existingFtsObjects = new Set(ftsObjects.rows.map((row) => row.name));
+  const ftsTableDefinition = ftsObjects.rows.find(
+    (row) => row.name === "archived_memories_fts",
+  )?.sql;
   const rebuildFts =
     !existingFtsObjects.has("archived_memories_fts") ||
     !existingFtsObjects.has("archived_memories_fts_insert") ||
     !existingFtsObjects.has("archived_memories_fts_delete") ||
-    !existingFtsObjects.has("archived_memories_fts_update");
+    !existingFtsObjects.has("archived_memories_fts_update") ||
+    !ftsTableDefinition?.includes("search_text");
+
+  if (rebuildFts) {
+    await sql`DROP TRIGGER IF EXISTS archived_memories_fts_insert`.execute(db);
+    await sql`DROP TRIGGER IF EXISTS archived_memories_fts_delete`.execute(db);
+    await sql`DROP TRIGGER IF EXISTS archived_memories_fts_update`.execute(db);
+    await sql`DROP TABLE IF EXISTS archived_memories_fts`.execute(db);
+
+    const rows = await db
+      .selectFrom("archived_memories")
+      .select(["row_id", "content"])
+      .execute();
+    for (const row of rows) {
+      await db
+        .updateTable("archived_memories")
+        .set({ search_text: createArchiveMemoryFullTextDocument(row.content) })
+        .where("row_id", "=", row.row_id)
+        .executeTakeFirstOrThrow();
+    }
+  }
+
   await sql`
     CREATE VIRTUAL TABLE IF NOT EXISTS archived_memories_fts USING fts5(
-      content,
+      search_text,
       content = 'archived_memories',
       content_rowid = 'row_id',
       tokenize = 'unicode61 remove_diacritics 2'
@@ -217,24 +256,24 @@ export async function migrateArchiveMemorySchema(
   await sql`
     CREATE TRIGGER IF NOT EXISTS archived_memories_fts_insert
     AFTER INSERT ON archived_memories BEGIN
-      INSERT INTO archived_memories_fts(rowid, content)
-      VALUES (new.row_id, new.content);
+      INSERT INTO archived_memories_fts(rowid, search_text)
+      VALUES (new.row_id, new.search_text);
     END
   `.execute(db);
   await sql`
     CREATE TRIGGER IF NOT EXISTS archived_memories_fts_delete
     AFTER DELETE ON archived_memories BEGIN
-      INSERT INTO archived_memories_fts(archived_memories_fts, rowid, content)
-      VALUES ('delete', old.row_id, old.content);
+      INSERT INTO archived_memories_fts(archived_memories_fts, rowid, search_text)
+      VALUES ('delete', old.row_id, old.search_text);
     END
   `.execute(db);
   await sql`
     CREATE TRIGGER IF NOT EXISTS archived_memories_fts_update
-    AFTER UPDATE OF content ON archived_memories BEGIN
-      INSERT INTO archived_memories_fts(archived_memories_fts, rowid, content)
-      VALUES ('delete', old.row_id, old.content);
-      INSERT INTO archived_memories_fts(rowid, content)
-      VALUES (new.row_id, new.content);
+    AFTER UPDATE OF search_text ON archived_memories BEGIN
+      INSERT INTO archived_memories_fts(archived_memories_fts, rowid, search_text)
+      VALUES ('delete', old.row_id, old.search_text);
+      INSERT INTO archived_memories_fts(rowid, search_text)
+      VALUES (new.row_id, new.search_text);
     END
   `.execute(db);
 

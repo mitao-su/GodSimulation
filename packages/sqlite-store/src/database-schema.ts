@@ -85,6 +85,7 @@ export interface ArchivedMemoryRow {
   consolidation_cycle_id: string;
   memory_id: string;
   content: string;
+  search_text: string;
   source_event_ids_json: string;
   formed_at_tick: number;
   archived_at_tick: number;

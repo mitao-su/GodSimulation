@@ -59,6 +59,7 @@ describe("archive memory migration", () => {
             "consolidation_cycle_id",
             "memory_id",
             "content",
+            "search_text",
             "source_event_ids_json",
             "formed_at_tick",
             "archived_at_tick",
