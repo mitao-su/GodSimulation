@@ -364,6 +364,7 @@ const OperationParametersDocumentSchema = z
     type: z.literal("object"),
     properties: z.record(z.string(), z.unknown()),
     required: z.array(z.string()).optional(),
+    additionalProperties: z.unknown().optional(),
   })
   .passthrough();
 
@@ -387,6 +388,9 @@ function assertTargetParameterContract(
   );
   if (!parameters.success) {
     throw new Error(label + " parameter schema must describe an object");
+  }
+  if (parameters.data.additionalProperties !== false) {
+    throw new Error(label + " parameter schema must reject unknown properties");
   }
 
   const targetParameterNames = [

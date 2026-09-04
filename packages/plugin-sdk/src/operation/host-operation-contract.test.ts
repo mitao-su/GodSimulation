@@ -383,6 +383,36 @@ describe("hosted operation SDK contract", () => {
     ).toThrow();
   });
 
+  it("rejects parameter schemas that retain undeclared target IDs", () => {
+    const passthroughNoneParameters = z.object({}).passthrough();
+    const catchallNoneParameters = z.object({}).catchall(z.string());
+    const passthroughCharacterParameters = z
+      .object({ targetCharacterId: AgentIdSchema })
+      .passthrough();
+    const catchallObjectParameters = z
+      .object({ targetEntityId: EntityIdSchema })
+      .catchall(z.string());
+
+    const permissiveDefinitions = [
+      hostedDefinitionWithTarget({ kind: "none" }, passthroughNoneParameters),
+      hostedDefinitionWithTarget({ kind: "none" }, catchallNoneParameters),
+      hostedDefinitionWithTarget(
+        { kind: "character" },
+        passthroughCharacterParameters,
+      ),
+      hostedDefinitionWithTarget(
+        { kind: "object", requiredCapabilities: ["container"] },
+        catchallObjectParameters,
+      ),
+    ];
+
+    for (const definition of permissiveDefinitions) {
+      expect(() =>
+        assertHostedOperationContract("Permissive parameters", definition),
+      ).toThrow("parameter schema must reject unknown properties");
+    }
+  });
+
   it("ties each domain failure code to details and visible result schemas", () => {
     expect(
       validateOperationDomainFailureOutcome(
