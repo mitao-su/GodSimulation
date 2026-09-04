@@ -6,7 +6,7 @@ import {
   OperationCallIdSchema,
   OperationIdSchema,
 } from "../identity/ids";
-import { JsonObjectSchema } from "../json/json-value";
+import { JsonObjectSchema, type JsonObject } from "../json/json-value";
 import { TechnicalFailureCategorySchema } from "../world/technical-failure";
 import { CanonicalTaskTracksSchema } from "./task-contract";
 
@@ -156,6 +156,17 @@ export const OperationManualPreconditionSchema = z
   })
   .strict();
 
+export const OperationDurationDeclarationSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({ kind: z.literal("fixed") }).strict(),
+    z.object({ kind: z.literal("indeterminate") }).strict(),
+  ],
+);
+export type OperationDurationDeclaration = z.infer<
+  typeof OperationDurationDeclarationSchema
+>;
+
 export const OperationManualSchema = z
   .object({
     operationId: OperationIdSchema,
@@ -164,10 +175,7 @@ export const OperationManualSchema = z
     taskSlots: CanonicalTaskTracksSchema,
     parametersSchema: JsonObjectSchema,
     target: OperationTargetRequirementSchema,
-    duration: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("fixed") }).strict(),
-      z.object({ kind: z.literal("indeterminate") }).strict(),
-    ]),
+    duration: OperationDurationDeclarationSchema,
     worldPreconditions: z.array(OperationManualPreconditionSchema),
   })
   .strict();
@@ -209,14 +217,27 @@ export const DirectTaskSelectionSchema = z.discriminatedUnion("kind", [
 ]);
 export type DirectTaskSelection = z.infer<typeof DirectTaskSelectionSchema>;
 
-export const DirectTaskDecisionSchema = z
-  .object({
-    schemaVersion: z.literal(3),
-    head: DirectTaskSelectionSchema,
-    body: DirectTaskSelectionSchema,
-    reason: z.string().min(1).max(500),
-  })
-  .strict();
+const DirectTaskDecisionShape = {
+  schemaVersion: z.literal(3),
+  head: DirectTaskSelectionSchema,
+  body: DirectTaskSelectionSchema,
+  reason: z.string().min(1).max(500),
+};
+
+export function createDirectTaskDecisionSchema<
+  GoalUpdatesSchema extends z.ZodType<JsonObject>,
+>(goalUpdatesSchema: GoalUpdatesSchema) {
+  return z
+    .object({
+      ...DirectTaskDecisionShape,
+      goalUpdates: goalUpdatesSchema.optional(),
+    })
+    .strict();
+}
+
+/** W4-IF 会提供严格目标补丁 Schema；此前必须无损保存结构化扩展载荷。 */
+export const DirectTaskDecisionSchema =
+  createDirectTaskDecisionSchema(JsonObjectSchema);
 export type DirectTaskDecision = z.infer<typeof DirectTaskDecisionSchema>;
 
 export const OperationDomainFailureSchema = z

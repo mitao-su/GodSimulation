@@ -12,6 +12,10 @@ const activeOperation = {
   callId: "operation-call:1",
   operationId: "furniture.home.stove.cook",
   host: { kind: "furniture", hostEntityId: "stove-1" },
+  hostDefinition: {
+    kind: "furniture",
+    hostDefinitionId: "home.stove",
+  },
   target: { kind: "none" },
   taskSlots: ["BODY"],
   arguments: { recipeId: "tomato-eggs" },
@@ -23,7 +27,7 @@ const activeOperation = {
 } as const;
 
 describe("L1 operation snapshot fragments", () => {
-  it("serializes locked host, target, timing, first-step state, and opaque state", () => {
+  it("serializes locked host definition, target, timing, and opaque state", () => {
     expect(L1ActiveOperationSnapshotFieldsSchema.parse(activeOperation)).toEqual(
       activeOperation,
     );
@@ -34,6 +38,12 @@ describe("L1 operation snapshot fragments", () => {
     expect(host.kind).toBe("furniture");
     expect(
       L1ActiveOperationSnapshotFieldsSchema.safeParse(withoutHost).success,
+    ).toBe(false);
+    const { hostDefinition, ...withoutHostDefinition } = activeOperation;
+    expect(hostDefinition.hostDefinitionId).toBe("home.stove");
+    expect(
+      L1ActiveOperationSnapshotFieldsSchema.safeParse(withoutHostDefinition)
+        .success,
     ).toBe(false);
     expect(
       L1ActiveOperationSnapshotFieldsSchema.safeParse({
@@ -55,6 +65,9 @@ describe("L1 operation snapshot fragments", () => {
             operationId: "core.wait",
             arguments: {},
           },
+        },
+        goalUpdates: {
+          updates: [{ kind: "complete", goalId: "goal:wait" }],
         },
         reason: "Wait.",
       },

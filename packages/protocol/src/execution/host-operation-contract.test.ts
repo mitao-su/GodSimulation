@@ -1,7 +1,9 @@
+import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
 import {
   CapabilityListSchema,
+  createDirectTaskDecisionSchema,
   DirectTaskDecisionSchema,
   OperationFailureSchema,
   OperationHostDefinitionReferenceSchema,
@@ -201,6 +203,43 @@ describe("host operation contract", () => {
           },
         },
         reason: "Wait.",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("round-trips goal updates through a schema that later layers can tighten", () => {
+    const decision = {
+      schemaVersion: 3,
+      head: { kind: "continue" },
+      body: { kind: "continue" },
+      goalUpdates: {
+        updates: [{ kind: "complete", goalId: "goal:breakfast" }],
+      },
+      reason: "Breakfast is ready.",
+    } as const;
+    expect(DirectTaskDecisionSchema.parse(decision)).toEqual(decision);
+
+    const strictGoalUpdates = createDirectTaskDecisionSchema(
+      z
+        .object({
+          updates: z
+            .array(
+              z
+                .object({
+                  kind: z.literal("complete"),
+                  goalId: z.string().min(1),
+                })
+                .strict(),
+            )
+            .min(1),
+        })
+        .strict(),
+    );
+    expect(strictGoalUpdates.parse(decision)).toEqual(decision);
+    expect(
+      strictGoalUpdates.safeParse({
+        ...decision,
+        goalUpdates: { updates: [{ kind: "delete", goalId: "goal:breakfast" }] },
       }).success,
     ).toBe(false);
   });

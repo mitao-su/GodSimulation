@@ -1,6 +1,7 @@
 import type { z } from "zod";
 
 import type {
+  HostedOperationDomainFailureDefinition,
   InteractionAvailability,
   OperationDomainFailureDefinition,
   OperationEventIgnoreRule,
@@ -21,6 +22,7 @@ import type {
   OperationHostReference,
   OperationCallId,
   OperationDuration,
+  OperationDurationDeclaration,
   OperationFirstStepState,
   OperationId,
   OperationManual,
@@ -68,6 +70,7 @@ export interface OperationRuntimeCall {
   readonly callId: OperationCallId;
   readonly operationId: OperationId;
   readonly host: OperationHostReference;
+  readonly hostDefinition: OperationHostDefinitionReference;
   readonly target: OperationTargetReference;
   readonly taskSlots: readonly TaskTrack[];
   readonly arguments: JsonObject;
@@ -80,14 +83,17 @@ export interface OperationRuntimeCall {
 
 export interface HostedOperationRuntime {
   readonly id: OperationId;
+  readonly displayName: string;
+  readonly trigger: "active_command";
   readonly ownerPluginId: string | null;
   readonly host: OperationHostDefinitionReference;
   readonly manual: OperationManual;
   readonly target: OperationTargetRequirement;
+  readonly duration: OperationDurationDeclaration;
   readonly taskSlots: readonly TaskTrack[];
   readonly eventIgnore: readonly OperationEventIgnoreRule[];
   readonly publicBehavior: PublicBehaviorDeclaration;
-  readonly domainFailures: readonly OperationDomainFailureDefinition[];
+  readonly domainFailures: readonly HostedOperationDomainFailureDefinition[];
   readonly resultSchema: z.ZodType<JsonObject>;
   readonly stateSchema: z.ZodType<JsonObject>;
   readonly parametersSchema: z.ZodType<JsonObject>;
@@ -126,6 +132,11 @@ export interface HostedOperationRuntime {
     context: OperationRuntimeContext,
     operation: OperationRuntimeCall,
   ): JsonObject | null;
+  acknowledgeFuseResult(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+    result: Readonly<JsonObject>,
+  ): JsonObject;
 }
 
 export interface ResolvedOperationReference {
@@ -154,8 +165,16 @@ export interface DirectOperationReferenceResolver {
   ): ResolveOperationReferenceResult;
 }
 
+export interface HostedOperationRegistry {
+  getHostedOperation(
+    operationId: OperationId | string,
+    host: OperationHostDefinitionReference,
+  ): HostedOperationRuntime | undefined;
+}
+
 export type HostedOperationRuntimeRegistry = OperationRuntimeRegistry &
-  DirectOperationReferenceResolver;
+  DirectOperationReferenceResolver &
+  HostedOperationRegistry;
 
 interface OperationTerminationTransactionBase {
   readonly agentId: AgentId;
@@ -193,7 +212,7 @@ export type OperationTerminationCommitResult =
 export interface AtomicOperationTerminationPort {
   commitTermination(
     world: WorldState,
-    registry: OperationRuntimeRegistry,
+    registry: HostedOperationRuntimeRegistry,
     transaction: OperationTerminationTransaction,
   ): OperationTerminationCommitResult;
 }

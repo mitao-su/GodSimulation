@@ -9,7 +9,7 @@ import {
 
 import type { EffectProposal } from "../effect/effect-proposal";
 import type {
-  HostOperationContract,
+  HostedOperationDefinition,
   OperationContract,
 } from "../operation/operation-contract";
 import { TriggerSourceSchema } from "../trigger/trigger-source";
@@ -89,14 +89,16 @@ export interface InteractionDefinition<
   ): InteractionLifecycleProposal;
 }
 
-export interface HostedInteractionDefinition<
+export type HostedInteractionDefinition<
   State,
   Arguments extends JsonObject = Record<string, never>,
-> extends HostOperationContract<State, InteractionContext, Arguments> {
-  readonly id: string;
-  readonly displayName: string;
-  readonly trigger: "active_command";
-}
+  OperationState extends JsonObject = JsonObject,
+> = HostedOperationDefinition<
+  State,
+  InteractionContext,
+  Arguments,
+  OperationState
+>;
 
 export const InteractionMetadataSchema = z
   .object({
