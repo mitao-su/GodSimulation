@@ -141,6 +141,9 @@ const SoundRulesSchema = z
       })
       .strict(),
     attenuationPerTile: PositiveFiniteNumberSchema,
+    attenuationPerWall: PositiveFiniteNumberSchema,
+    attenuationPerOpenDoor: PositiveFiniteNumberSchema,
+    attenuationPerClosedDoor: PositiveFiniteNumberSchema,
     fullContentThreshold: PositiveFiniteNumberSchema,
     unclearContentThreshold: PositiveFiniteNumberSchema,
   })
@@ -153,7 +156,14 @@ const SoundRulesSchema = z
   )
   .refine((value) => value.fullContentThreshold > value.unclearContentThreshold, {
     message: "Full-content threshold must exceed unclear-content threshold",
-  });
+  })
+  .refine(
+    (value) =>
+      value.attenuationPerClosedDoor > value.attenuationPerOpenDoor,
+    {
+      message: "Closed-door attenuation must exceed open-door attenuation",
+    },
+  );
 
 export const SimulationRulesSchema = z
   .object({

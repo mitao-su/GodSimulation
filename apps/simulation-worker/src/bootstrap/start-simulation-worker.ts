@@ -3,11 +3,10 @@ import {
   type WorkerToHostMessage,
 } from "@god-sim/protocol";
 
+import { loadTickScheduleConfig } from "../config/tick-schedule";
 import { WorkerMessageHandler } from "../ipc/worker-message-handler";
 import { loadPluginSet } from "../runtime/plugin-loader";
 import type { PluginDescriptor } from "../runtime/plugin-lock";
-
-const FIXED_TICK_INTERVAL_MS = 100;
 
 function parsePluginDescriptors(value: string | undefined): readonly PluginDescriptor[] {
   if (!value) throw new Error("GOD_SIM_PLUGIN_DESCRIPTORS is required");
@@ -34,6 +33,7 @@ export async function startSimulationWorker(): Promise<void> {
   const sendToParent = process.send.bind(process);
   const disconnectFromParent = process.disconnect.bind(process);
   const descriptors = parsePluginDescriptors(process.env.GOD_SIM_PLUGIN_DESCRIPTORS);
+  const tickSchedule = loadTickScheduleConfig();
   const loaded = await loadPluginSet(descriptors);
   const pendingSends = new Set<Promise<void>>();
   let timer: NodeJS.Timeout | null = null;
@@ -61,6 +61,6 @@ export async function startSimulationWorker(): Promise<void> {
     onShutdown: shutdown,
   });
   process.on("message", (message) => handler.handle(message));
-  timer = setInterval(() => handler.tick(), FIXED_TICK_INTERVAL_MS);
+  timer = setInterval(() => handler.tick(), tickSchedule.intervalMs);
   timer.unref();
 }
