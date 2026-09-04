@@ -5,6 +5,7 @@ import {
   OperationCallIdSchema,
   OperationIdSchema,
 } from "../identity/ids";
+import { OperationTerminationSourceSchema } from "../execution/host-operation-contract";
 import { EventEnvelopeSchema } from "./event-envelope";
 
 export const OperationTerminationOutcomeSchema = z.enum([
@@ -22,7 +23,7 @@ export const OperationTerminatedEventSchema = EventEnvelopeSchema.extend({
   callId: OperationCallIdSchema,
   operationId: OperationIdSchema,
   outcome: OperationTerminationOutcomeSchema,
-  reasonCode: z.string().min(1).max(120),
+  reasonCode: OperationTerminationSourceSchema,
 }).strict();
 
 export type OperationTerminatedEvent = z.infer<

@@ -1,8 +1,10 @@
 import type {
   AgentId,
+  DomainEvent,
   EntityId,
   JsonObject,
   OperationCallId,
+  OperationTechnicalFailure,
 } from "@god-sim/protocol";
 
 import type {
@@ -11,8 +13,21 @@ import type {
   OperationInteractionPurpose,
   OperationObjectInteractionAction,
 } from "./operation";
+import { operationTechnicalFailure } from "./operation-failure-classifier";
+import {
+  completeOperationLifecycle,
+  startOperationLifecycle,
+  tickOperationLifecycle,
+  type OperationLifecycleTransitionResult,
+} from "./operation-lifecycle-runner";
+import type {
+  HostedOperationRuntimeRegistry,
+  OperationRuntimeCall,
+  OperationTerminationTransaction,
+} from "./operation-runtime";
 import { operationCallIdsInTrackOrder } from "./task-tracks";
 import type { InteractionIntent } from "../interaction/effect-arbiter";
+import { commitProposal } from "../interaction/effect-committer";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
 import type { AgentState, WorldState } from "../world/world-state";
@@ -394,5 +409,303 @@ export function replaceActiveOperation(
       agentId,
       replaceOperation(agent, operation),
     ),
+  };
+}
+
+interface HostedOperationAdvanceBase {
+  readonly world: WorldState;
+  readonly operation: OperationRuntimeCall;
+  readonly events: readonly DomainEvent[];
+}
+
+type HostedOperationRunningResult = HostedOperationAdvanceBase & {
+  readonly kind: "running";
+};
+
+type HostedOperationTechnicalFailureResult = HostedOperationAdvanceBase & {
+  readonly kind: "technical_failure";
+  readonly failure: OperationTechnicalFailure;
+};
+
+export type HostedOperationAdvanceResult =
+  | (HostedOperationAdvanceBase & { readonly kind: "not_advanced" })
+  | HostedOperationRunningResult
+  | (HostedOperationAdvanceBase & {
+      readonly kind: "termination_ready";
+      readonly transaction: OperationTerminationTransaction;
+    })
+  | HostedOperationTechnicalFailureResult;
+
+function hostedTechnicalFailure(
+  world: WorldState,
+  operation: OperationRuntimeCall,
+  failure: OperationTechnicalFailure,
+  events: readonly DomainEvent[] = [],
+): HostedOperationTechnicalFailureResult {
+  return { kind: "technical_failure", world, operation, events, failure };
+}
+
+function commitLifecycleTransition(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  previousOperation: OperationRuntimeCall,
+  transition: OperationLifecycleTransitionResult,
+  phase: "start" | "tick",
+): HostedOperationRunningResult | HostedOperationTechnicalFailureResult {
+  let committed;
+  try {
+    committed = commitProposal(world, registry, transition.proposal, {
+      causationId: `${transition.operation.callId}:${phase}:${world.tick}`,
+      correlationId: transition.operation.callId,
+    });
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error);
+    return hostedTechnicalFailure(
+      world,
+      previousOperation,
+      operationTechnicalFailure(
+        "plugin",
+        "operation_lifecycle_effect_exception",
+        `Operation ${phase} effect commit threw: ${description}`,
+        true,
+      ),
+    );
+  }
+  if (!committed.accepted) {
+    return hostedTechnicalFailure(
+      world,
+      previousOperation,
+      operationTechnicalFailure(
+        "plugin",
+        "operation_lifecycle_effect_rejected",
+        `Operation ${phase} effect was rejected (${committed.reason.code}): ${committed.reason.message}`,
+        true,
+      ),
+    );
+  }
+  return {
+    kind: "running",
+    world: committed.world,
+    operation: transition.operation,
+    events: committed.events,
+  };
+}
+
+function completeHostedOperation(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  agentId: AgentId,
+  operation: OperationRuntimeCall,
+  events: readonly DomainEvent[],
+  source: "duration_elapsed" | "operation_signalled_completion",
+): HostedOperationAdvanceResult {
+  const completed = completeOperationLifecycle(
+    { world, registry, agentId, operation },
+    source,
+  );
+  if (completed.kind === "technical_failure") {
+    return hostedTechnicalFailure(
+      world,
+      completed.operation,
+      completed.failure,
+      events,
+    );
+  }
+  return {
+    kind: "termination_ready",
+    world,
+    operation: completed.operation,
+    events,
+    transaction: completed.transaction,
+  };
+}
+
+/**
+ * 推进一个已经绑定宿主并锁定时长的 W1-IF operation 调用。
+ * 终态只返回待提交事务；P2 负责把清理、效果和结果原子提交。
+ */
+export function advanceHostedOperation(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  agentId: AgentId,
+  operation: OperationRuntimeCall,
+): HostedOperationAdvanceResult {
+  if (world.mode !== "RUNNING") {
+    return { kind: "not_advanced", world, operation, events: [] };
+  }
+  if (
+    !Number.isSafeInteger(operation.progressTicks) ||
+    operation.progressTicks < 0
+  ) {
+    return hostedTechnicalFailure(
+      world,
+      operation,
+      operationTechnicalFailure(
+        "protocol",
+        "operation_progress_invalid",
+        `Operation ${operation.callId} has invalid progress.`,
+        false,
+      ),
+    );
+  }
+  if (
+    operation.duration.kind === "fixed" &&
+    (!Number.isSafeInteger(operation.duration.totalTicks) ||
+      operation.duration.totalTicks <= 0)
+  ) {
+    return hostedTechnicalFailure(
+      world,
+      operation,
+      operationTechnicalFailure(
+        "protocol",
+        "operation_duration_invalid",
+        `Operation ${operation.callId} has an invalid locked duration.`,
+        false,
+      ),
+    );
+  }
+  if (
+    operation.firstStepState === "pending" &&
+    operation.progressTicks !== 0
+  ) {
+    return hostedTechnicalFailure(
+      world,
+      operation,
+      operationTechnicalFailure(
+        "protocol",
+        "operation_pending_with_progress",
+        `Operation ${operation.callId} has progress before its first step.`,
+        false,
+      ),
+    );
+  }
+  if (
+    operation.duration.kind === "fixed" &&
+    operation.progressTicks > operation.duration.totalTicks
+  ) {
+    return hostedTechnicalFailure(
+      world,
+      operation,
+      operationTechnicalFailure(
+        "protocol",
+        "operation_progress_exceeds_duration",
+        `Operation ${operation.callId} exceeds its locked duration.`,
+        false,
+      ),
+    );
+  }
+  if (
+    operation.duration.kind === "fixed" &&
+    operation.progressTicks === operation.duration.totalTicks
+  ) {
+    return completeHostedOperation(
+      world,
+      registry,
+      agentId,
+      operation,
+      [],
+      "duration_elapsed",
+    );
+  }
+
+  const nextProgress = operation.progressTicks + 1;
+  if (!Number.isSafeInteger(nextProgress)) {
+    return hostedTechnicalFailure(
+      world,
+      operation,
+      operationTechnicalFailure(
+        "protocol",
+        "operation_progress_overflow",
+        `Operation ${operation.callId} progress cannot advance safely.`,
+        false,
+      ),
+    );
+  }
+
+  const lifecycleInput = { world, registry, agentId, operation };
+  const step =
+    operation.firstStepState === "pending"
+      ? startOperationLifecycle(lifecycleInput)
+      : tickOperationLifecycle(lifecycleInput);
+  if (step.kind === "technical_failure") {
+    return hostedTechnicalFailure(world, step.operation, step.failure);
+  }
+  if (step.kind === "termination_ready") {
+    return {
+      kind: "termination_ready",
+      world,
+      operation: step.operation,
+      events: [],
+      transaction: step.transaction,
+    };
+  }
+
+  let advancedWorld = world;
+  let advancedOperation = step.operation;
+  let events: readonly DomainEvent[] = [];
+  if (step.kind === "transition") {
+    const phase = operation.firstStepState === "pending" ? "start" : "tick";
+    const committed = commitLifecycleTransition(
+      world,
+      registry,
+      operation,
+      step,
+      phase,
+    );
+    if (committed.kind === "technical_failure") return committed;
+    advancedWorld = committed.world;
+    advancedOperation = committed.operation;
+    events = committed.events;
+  }
+
+  const progressed = { ...advancedOperation, progressTicks: nextProgress };
+
+  if (step.kind === "completion_signal") {
+    if (
+      progressed.duration.kind === "fixed" &&
+      progressed.progressTicks !== progressed.duration.totalTicks
+    ) {
+      return hostedTechnicalFailure(
+        world,
+        operation,
+        operationTechnicalFailure(
+          "protocol",
+          "fixed_operation_completed_early",
+          `Fixed operation ${operation.callId} completed before its locked duration.`,
+          false,
+        ),
+      );
+    }
+    return completeHostedOperation(
+      advancedWorld,
+      registry,
+      agentId,
+      progressed,
+      events,
+      progressed.duration.kind === "fixed"
+        ? "duration_elapsed"
+        : "operation_signalled_completion",
+    );
+  }
+
+  if (
+    progressed.duration.kind === "fixed" &&
+    progressed.progressTicks === progressed.duration.totalTicks
+  ) {
+    return completeHostedOperation(
+      advancedWorld,
+      registry,
+      agentId,
+      progressed,
+      events,
+      "duration_elapsed",
+    );
+  }
+
+  return {
+    kind: "running",
+    world: advancedWorld,
+    operation: progressed,
+    events,
   };
 }
