@@ -151,6 +151,21 @@ git worktree add ../GodSimulation-wt/w2a-items -b wave2/w2a-item-appearance orig
 - `available_interactions` 查询对必填参数交互返回 `requiresParameters: true, duration: null, availability: null`，不抛错。
 - 测试 fixture 冰箱（`simulation-test-fixtures.ts`）：`use`（空参 10t）、`stock`（state 相关时长 10/20t）、`configure`（必填 mode 参数）三个交互，新测试优先复用。
 
+### 2026-09-04 拍板决定（完整原文见 TODO 文档约束 70-78，施工前必读）
+
+这几条是新增契约，与旧代码现状**不一致**，按直觉实现会做错：
+
+1. **operation 一律定义在宿主对象（物品/家具）的 `interactions` 内**，不存在脱离宿主独立存在的 operation。宿主自身的 operation（锅的 `cook`）目标隐含为宿主实例本身，由候选生成时绑定；只有作用于外部对象的 operation（鸡蛋的 `put_into`）才声明目标需求。
+2. **目标需求在契约层统一声明**：无目标 / 目标角色 / 写明 `requiredCapabilities` 的目标对象。核心据此做候选过滤、调用校验、目标 ID 随 `callId` 锁定三件事。**禁止各 operation 自行约定目标字段名**，否则核心无法统一校验与锁定。
+3. **`capabilities` 与 `tags` 分离**：`ObjectDefinition` 新增 `capabilities: string[]`（`heating` / `cooling` / `storage`），`tags` 仍只表类别（`home` / `food`）。**能力用于匹配，类别不用于匹配**——这是「只认能力，不认类别」在操作目标层的落实。空间类能力继续用 `movement` / `vision` / `traversal` / `occupancy` 结构化字段。
+4. **候选生成只按可达性与目标能力过滤，不调用 `canStart` 预筛前置条件**。操作用法由角色通过 `read` 说明书理解；选错时在 operation 首个执行步骤以权威状态校验，不满足则以已声明游戏内失败码原子关闭、说明缺失原因并触发思考，状态全不变。
+5. **不存在复合 operation**：禁止在 operation 内部静默串联多个语义操作（做菜 = 逐个 `put_into` 再 `cook`，不是一键完成）。每次结束触发熔断，由角色重新决策。
+6. **说明书机制**：核心提供通用 `read` 工具并在系统提示词声明其存在，角色按需调用；以**对象类型（定义 ID）**而非实例为输入，返回插件在定义中声明的**静态**用法说明，不含当前可用状态（可用性一律由 `canStart` 实时判）。缺声明的对象定义加载期拒绝。
+7. **物品容量占用一律非负整数**，只在规则集维护、读取时现算，**不在快照持久化**（避免第二份数值真相与迁移成本）。整组占用 = 单件 × 数量。
+8. **不支持容器嵌套**：只有角色与家具有容器，物品不能装物品，容量计算不递归。
+9. **声音传播受墙与门遮挡衰减**，衰减系数进规则集（静态墙预计算、动态门实时叠加）；**不做区域环境噪声**。
+10. 物品行为无类别字段：不存在 `equippable` / `visible` / `destroyable` / `droppable`。装备（`wear` / `undress` / `adjust_clothing`）、化妆、销毁、抛弃全是 operation；公开可见性属于**角色**的结构化外观分区，不属于物品。
+
 ---
 
 ## 7. 测试与验收
@@ -179,7 +194,8 @@ git worktree add ../GodSimulation-wt/w2a-items -b wave2/w2a-item-appearance orig
 
 ## 9. 委派 agent 开工检查单
 
-- [ ] 读完：本文件 → `PHILOSOPHY.md` → TODO 对应阶段条目 → Wave 编排轨线卡
+- [ ] 读完：本文件（**含 §6 的 2026-09-04 拍板决定 10 条**）→ `PHILOSOPHY.md` → TODO 对应阶段条目 + 约束 70-78 → Wave 编排轨线卡
+- [ ] 逐条确认约束 70-78 中哪些影响自己这一轨，并在开工前写进自己的实现方案（这些是新契约，与旧代码现状不一致）
 - [ ] worktree 从最新 main 切出，已 rebase 当层接口先行 PR
 - [ ] 确认自己的文件所有权范围与快照 schema owner
 - [ ] 代理环境变量已就位（§4）
