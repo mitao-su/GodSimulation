@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   definePlugin,
+  operationParametersJsonSchema,
   PluginManifestSchema,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
@@ -31,6 +32,7 @@ function countingResolverWorld() {
     stateVersion: 1,
     displayName: "Guarded",
     tags: [],
+    capabilities: ["approachable", "observable"],
     stateSchema: guardedStateSchema,
     initialState: () => ({ holder: null }),
     resourceId: "test.guarded",
@@ -45,6 +47,20 @@ function countingResolverWorld() {
         id: "use",
         displayName: "Use guarded",
         trigger: "active_command",
+        manual: {
+          operationId: "object.test.guarded.use" as never,
+          displayName: "Use guarded",
+          summary: "Use this guarded object.",
+          taskSlots: ["BODY"],
+          parametersSchema: operationParametersJsonSchema(
+            z.object({}).strict(),
+          ),
+          target: { kind: "none" },
+          duration: { kind: "fixed" },
+          worldPreconditions: [],
+        },
+        target: { kind: "none" },
+        duration: { kind: "fixed" },
         taskSlots: ["BODY"],
         parametersSchema: z.object({}).strict(),
         resolveDuration: () => {
@@ -93,6 +109,7 @@ function countingResolverWorld() {
           initialMemories: [{ id: "test.carl.memory", summary: "Test memory" }],
           resourceId: "test.carl",
           animationSetId: "test.humanoid",
+          operations: [],
         },
       ],
     },

@@ -5,6 +5,7 @@ import {
   definePlugin,
   EmptyOperationArgumentsSchema,
   EmptyOperationResultSchema,
+  operationParametersJsonSchema,
   PluginManifestSchema,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
@@ -54,6 +55,7 @@ const passageDefinition: ObjectDefinition<PassageState> = {
   stateVersion: 1,
   displayName: "Passage",
   tags: [],
+  capabilities: ["approachable", "observable"],
   stateSchema: PassageStateSchema,
   initialState: () => ({ raised: false, sealed: false }),
   resourceId: "test.passage",
@@ -73,14 +75,47 @@ const passageDefinition: ObjectDefinition<PassageState> = {
       id: "raise",
       displayName: "Raise passage",
       trigger: "active_command",
+      manual: {
+        operationId: "object.test.passage.raise" as never,
+        displayName: "Raise passage",
+        summary: "Raise this passage so it can be traversed.",
+        taskSlots: ["BODY"],
+        parametersSchema: operationParametersJsonSchema(
+          EmptyOperationArgumentsSchema,
+        ),
+        target: { kind: "none" },
+        duration: { kind: "fixed" },
+        worldPreconditions: [
+          {
+            failureCode: "already_raised",
+            description: "The passage may already be raised.",
+          },
+          {
+            failureCode: "sealed",
+            description: "A sealed passage cannot be raised.",
+          },
+        ],
+      },
+      target: { kind: "none" },
+      duration: { kind: "fixed" },
       taskSlots: ["BODY"],
       parametersSchema: EmptyOperationArgumentsSchema,
       resolveDuration: () => ({ kind: "fixed", totalTicks: 3 }),
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "raising the passage" },
       domainFailures: [
-        { code: "already_raised", summary: "Passage is already raised" },
-        { code: "sealed", summary: "Passage is sealed" },
+        {
+          code: "already_raised",
+          summary: "Passage is already raised",
+          detailsSchema: EmptyOperationArgumentsSchema,
+          resultSchema: EmptyOperationResultSchema,
+        },
+        {
+          code: "sealed",
+          summary: "Passage is sealed",
+          detailsSchema: EmptyOperationArgumentsSchema,
+          resultSchema: EmptyOperationResultSchema,
+        },
       ],
       resultSchema: EmptyOperationResultSchema,
       canStart: (state) =>
@@ -147,6 +182,10 @@ const inertPassageDefinition: ObjectDefinition<PassageState> = {
   interactions: [
     {
       ...passageDefinition.interactions[0]!,
+      manual: {
+        ...passageDefinition.interactions[0]!.manual,
+        operationId: "object.test.inert-passage.raise" as never,
+      },
       complete: () => ({ effects: [] }),
     },
   ],
@@ -182,7 +221,14 @@ const resultingPassageDefinition: ObjectDefinition<PassageState> = {
   interactions: [
     {
       ...passageDefinition.interactions[0]!,
+      manual: {
+        ...passageDefinition.interactions[0]!.manual,
+        operationId: "object.test.resulting-passage.raise" as never,
+      },
       resultSchema: PassageResultSchema,
+      domainFailures: passageDefinition.interactions[0]!.domainFailures.map(
+        (failure) => ({ ...failure, resultSchema: PassageResultSchema }),
+      ),
       fail: () => ({ effects: [], result: { status: "failed" } }),
       cancel: () => ({ effects: [], result: { status: "cancelled" } }),
     },

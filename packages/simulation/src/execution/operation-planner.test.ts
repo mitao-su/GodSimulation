@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import type { InteractionDefinition } from "@god-sim/plugin-sdk";
+import {
+  operationParametersJsonSchema,
+  type InteractionDefinition,
+} from "@god-sim/plugin-sdk";
 import {
   resolveTaskDecision,
   type EntityId,
@@ -69,6 +72,9 @@ function operationOption(
 function requiredParameterOperation() {
   const registered = testPluginRegistry.getObject("test.fridge");
   if (!registered) throw new Error("Missing fridge definition");
+  const parametersSchema = z
+    .object({ mode: z.enum(["cold", "eco"]) })
+    .strict();
   const interaction: InteractionDefinition<
     JsonValue,
     { readonly mode: "cold" | "eco" }
@@ -76,10 +82,20 @@ function requiredParameterOperation() {
     id: "set_mode",
     displayName: "Set fridge mode",
     trigger: "active_command",
+    manual: {
+      operationId: "object.test.fridge.set_mode" as never,
+      displayName: "Set fridge mode",
+      summary: "Set this refrigerator to cold or eco mode.",
+      taskSlots: ["BODY"],
+      parametersSchema: operationParametersJsonSchema(parametersSchema),
+      target: { kind: "none" },
+      duration: { kind: "fixed" },
+      worldPreconditions: [],
+    },
+    target: { kind: "none" },
+    duration: { kind: "fixed" },
     taskSlots: ["BODY"],
-    parametersSchema: z
-      .object({ mode: z.enum(["cold", "eco"]) })
-      .strict(),
+    parametersSchema,
     resolveDuration: (_state, _context, value) => ({
       kind: "fixed",
       totalTicks: value.mode === "cold" ? 4 : 2,

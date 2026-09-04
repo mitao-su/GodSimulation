@@ -1,8 +1,14 @@
+import { JsonValueSchema, OperationIdSchema } from "@god-sim/protocol";
+
 import type { AgentDefinition } from "../agent/agent-definition";
-import type { ObjectDefinition } from "../object/object-definition";
-import { assertOperationContract } from "../operation/operation-contract";
+import { AgentOperationDefinitionSchema } from "../agent/agent-operation";
+import {
+  ObjectCapabilitiesSchema,
+  type ObjectDefinition,
+} from "../object/object-definition";
+import { bindHostedInteractionDefinition } from "../object/object-interaction";
+import { assertHostedOperationContract } from "../operation/operation-contract";
 import { PluginManifestSchema, type PluginManifest } from "./plugin-manifest";
-import { JsonValueSchema } from "@god-sim/protocol";
 
 export interface GamePlugin {
   readonly manifest: PluginManifest;
@@ -53,11 +59,31 @@ export function definePlugin(
   assertManifestMatches("agent", manifest.agentDefinitionIds, agentIds);
 
   for (const definition of registrations.objects) {
+    ObjectCapabilitiesSchema.parse(definition.capabilities);
     JsonValueSchema.parse(definition.stateSchema.parse(definition.initialState()));
-    for (const interaction of definition.interactions) {
-      assertOperationContract(
+    assertUnique(
+      `interaction on object ${definition.id}`,
+      definition.interactions.map((interaction) => interaction.id),
+    );
+    const hostedInteractions = definition.interactions.map((interaction) =>
+      bindHostedInteractionDefinition(interaction),
+    );
+    assertUnique(
+      `operation on object ${definition.id}`,
+      hostedInteractions.map((interaction) => interaction.id),
+    );
+    for (const [index, interaction] of definition.interactions.entries()) {
+      const expectedOperationId = OperationIdSchema.parse(
+        `object.${definition.id}.${interaction.id}`,
+      );
+      if (hostedInteractions[index]!.id !== expectedOperationId) {
+        throw new Error(
+          `Object ${definition.id} interaction ${interaction.id} must use operation ID ${expectedOperationId}`,
+        );
+      }
+      assertHostedOperationContract(
         "Object " + definition.id + " interaction " + interaction.id,
-        interaction,
+        hostedInteractions[index]!,
       );
     }
     if (
@@ -70,6 +96,19 @@ export function definePlugin(
         `Object ${definition.id} automatic traversal interaction ${definition.traversal.interactionId} is not registered`,
       );
     }
+  }
+
+  for (const definition of registrations.agents) {
+    if (!Array.isArray(definition.operations)) {
+      throw new Error(`Agent ${definition.id} requires an operation mount table`);
+    }
+    const operations = definition.operations.map((operation) =>
+      AgentOperationDefinitionSchema.parse(operation),
+    );
+    assertUnique(
+      `operation on agent ${definition.id}`,
+      operations.map((operation) => operation.operationId),
+    );
   }
 
   return Object.freeze({

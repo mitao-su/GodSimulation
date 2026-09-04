@@ -1,5 +1,7 @@
 import type { AgentDefinition } from "@god-sim/plugin-sdk";
 
+import { starterAgentOperations } from "../operations";
+
 export const aliceDefinition: AgentDefinition = {
   id: "starter.alice",
   version: "0.1.0",
@@ -17,4 +19,5 @@ export const aliceDefinition: AgentDefinition = {
   ],
   resourceId: "starter-agents.memao.alice",
   animationSetId: "starter-agents.memao.humanoid",
+  operations: starterAgentOperations,
 };

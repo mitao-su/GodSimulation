@@ -58,8 +58,7 @@ export interface ObjectDefinition<State = unknown> {
   readonly stateVersion: number;
   readonly displayName: string;
   readonly tags: readonly string[];
-  /** W1-A 完成现有插件迁移前保持可选；目标匹配只允许读取该能力列表。 */
-  readonly capabilities?: readonly string[];
+  readonly capabilities: readonly string[];
   readonly stateSchema: z.ZodType<State>;
   initialState(): State;
   readonly resourceId: string;

@@ -9,6 +9,7 @@ export const wallDefinition: ObjectDefinition<WallState> = {
   stateVersion: 1,
   displayName: "Wall",
   tags: ["structure", "movement-blocker", "vision-occluder"],
+  capabilities: ["approachable", "observable"],
   stateSchema: WallStateSchema,
   initialState: () => ({}),
   resourceId: "pixel-16-interiors.wall",
