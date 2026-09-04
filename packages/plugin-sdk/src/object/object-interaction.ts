@@ -8,7 +8,10 @@ import {
 } from "@god-sim/protocol";
 
 import type { EffectProposal } from "../effect/effect-proposal";
-import type { OperationContract } from "../operation/operation-contract";
+import type {
+  HostOperationContract,
+  OperationContract,
+} from "../operation/operation-contract";
 import { TriggerSourceSchema } from "../trigger/trigger-source";
 
 export const InteractionContextSchema = z
@@ -84,6 +87,15 @@ export interface InteractionDefinition<
     context: InteractionContext,
     argumentsValue: Readonly<Arguments>,
   ): InteractionLifecycleProposal;
+}
+
+export interface HostedInteractionDefinition<
+  State,
+  Arguments extends JsonObject = Record<string, never>,
+> extends HostOperationContract<State, InteractionContext, Arguments> {
+  readonly id: string;
+  readonly displayName: string;
+  readonly trigger: "active_command";
 }
 
 export const InteractionMetadataSchema = z

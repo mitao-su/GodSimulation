@@ -3,10 +3,21 @@ import { z } from "zod";
 import {
   CanonicalTaskTracksSchema,
   JsonObjectSchema,
+  OperationDomainFailureCodeSchema,
+  OperationDomainFailureSchema,
+  OperationTechnicalFailureSchema,
   type JsonObject,
+  type OperationDomainFailure,
   type OperationDuration,
+  type OperationManual,
+  type OperationTargetRequirement,
   type TaskTrack,
 } from "@god-sim/protocol";
+
+import {
+  EffectProposalSchema,
+  type EffectProposal,
+} from "../effect/effect-proposal";
 
 export const EmptyOperationArgumentsSchema = z.object({}).strict();
 export const EmptyOperationResultSchema = z.object({}).strict();
@@ -36,11 +47,7 @@ export type PublicBehaviorDeclaration = z.infer<
 
 export const OperationDomainFailureDefinitionSchema = z
   .object({
-    code: z
-      .string()
-      .min(1)
-      .max(120)
-      .regex(/^[a-z][a-z0-9_]*$/),
+    code: OperationDomainFailureCodeSchema,
     summary: z.string().min(1).max(500),
   })
   .strict();
@@ -69,6 +76,88 @@ export interface OperationContract<
     context: Context,
     argumentsValue: Readonly<Arguments>,
   ): JsonObject | null;
+}
+
+export const OperationTerminalProposalSchema = EffectProposalSchema.extend({
+  result: JsonObjectSchema,
+}).strict();
+export interface OperationTerminalProposal extends EffectProposal {
+  readonly result: JsonObject;
+}
+
+const OperationStartedResultSchema = z
+  .object({
+    kind: z.literal("started"),
+    proposal: EffectProposalSchema,
+  })
+  .strict();
+
+export const OperationStartResultSchema = z.discriminatedUnion("kind", [
+  OperationStartedResultSchema,
+  OperationDomainFailureSchema,
+  OperationTechnicalFailureSchema,
+]);
+export type OperationStartResult = z.infer<typeof OperationStartResultSchema>;
+
+export const OperationTickResultSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("running"),
+      proposal: EffectProposalSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal("complete") }).strict(),
+  OperationDomainFailureSchema,
+  OperationTechnicalFailureSchema,
+]);
+export type OperationTickResult = z.infer<typeof OperationTickResultSchema>;
+
+export interface OperationLifecycle<
+  State,
+  Context,
+  Arguments extends JsonObject = JsonObject,
+> {
+  start(
+    state: Readonly<State>,
+    context: Context,
+    argumentsValue: Readonly<Arguments>,
+  ): OperationStartResult;
+  tick?(
+    state: Readonly<State>,
+    context: Context,
+    argumentsValue: Readonly<Arguments>,
+  ): OperationTickResult;
+  complete(
+    state: Readonly<State>,
+    context: Context,
+    argumentsValue: Readonly<Arguments>,
+  ): OperationTerminalProposal;
+  fail(
+    state: Readonly<State>,
+    context: Context,
+    argumentsValue: Readonly<Arguments>,
+    failure: OperationDomainFailure,
+  ): OperationTerminalProposal;
+  cancel(
+    state: Readonly<State>,
+    context: Context,
+    argumentsValue: Readonly<Arguments>,
+  ): OperationTerminalProposal;
+  fuse(
+    state: Readonly<State>,
+    context: Context,
+    argumentsValue: Readonly<Arguments>,
+  ): JsonObject | null;
+}
+
+export interface HostOperationContract<
+  State,
+  Context,
+  Arguments extends JsonObject = JsonObject,
+> extends OperationContract<State, Context, Arguments>,
+    OperationLifecycle<State, Context, Arguments> {
+  readonly manual: OperationManual;
+  readonly target: OperationTargetRequirement;
 }
 
 interface UnknownOperationContract {

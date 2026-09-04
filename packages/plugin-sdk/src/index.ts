@@ -1,4 +1,5 @@
 export * from "./agent/agent-definition";
+export * from "./agent/agent-operation";
 export * from "./effect/effect-proposal";
 export * from "./memory/memory-extractor";
 export * from "./object/object-definition";
