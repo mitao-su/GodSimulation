@@ -122,4 +122,38 @@ describe("startSimulationWorker", () => {
       }
     }
   });
+
+  it("changes only real-time scheduling when a deployment interval is configured", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv(
+      "GOD_SIM_PLUGIN_DESCRIPTORS",
+      JSON.stringify([{ manifestPath: "plugin.json", entryPath: "dist/index.js" }]),
+    );
+    vi.stubEnv("GOD_SIM_TICK_INTERVAL_MS", "25");
+    const sendDescriptor = Object.getOwnPropertyDescriptor(process, "send");
+    const disconnectDescriptor = Object.getOwnPropertyDescriptor(process, "disconnect");
+    Object.defineProperty(process, "send", { configurable: true, value: vi.fn() });
+    Object.defineProperty(process, "disconnect", { configurable: true, value: vi.fn() });
+    vi.spyOn(process, "on").mockImplementation(() => process);
+
+    try {
+      await startSimulationWorker();
+
+      await vi.advanceTimersByTimeAsync(24);
+      expect(bootstrapState.ticks).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bootstrapState.ticks).toBe(1);
+      await vi.advanceTimersByTimeAsync(75);
+      expect(bootstrapState.ticks).toBe(4);
+    } finally {
+      bootstrapState.onShutdown?.();
+      if (sendDescriptor) Object.defineProperty(process, "send", sendDescriptor);
+      else Reflect.deleteProperty(process, "send");
+      if (disconnectDescriptor) {
+        Object.defineProperty(process, "disconnect", disconnectDescriptor);
+      } else {
+        Reflect.deleteProperty(process, "disconnect");
+      }
+    }
+  });
 });

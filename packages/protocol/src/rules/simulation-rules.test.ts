@@ -53,6 +53,9 @@ const validRules = {
   sound: {
     speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
     attenuationPerTile: 0.25,
+    attenuationPerWall: 1,
+    attenuationPerOpenDoor: 0.1,
+    attenuationPerClosedDoor: 0.75,
     fullContentThreshold: 1,
     unclearContentThreshold: 0.25,
   },
@@ -72,6 +75,32 @@ describe("SimulationRulesSchema", () => {
     const withoutInventory = { ...validRules };
     Reflect.deleteProperty(withoutInventory, "inventory");
     expect(SimulationRulesSchema.safeParse(withoutInventory).success).toBe(false);
+  });
+
+  it("keeps deployment timing out of the world-locked rules", () => {
+    expect(
+      SimulationRulesSchema.safeParse({
+        ...validRules,
+        time: { ...validRules.time, realTickIntervalMs: 50 },
+      }).success,
+    ).toBe(false);
+    expect(
+      SimulationRulesSchema.safeParse({
+        ...validRules,
+        modelTimeoutMs: 120_000,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires every currently confirmed core operation rule", () => {
+    for (const operationId of ["move", "wait", "observe"] as const) {
+      const operations: Record<string, unknown> = { ...validRules.operations };
+      Reflect.deleteProperty(operations, operationId);
+      expect(
+        SimulationRulesSchema.safeParse({ ...validRules, operations }).success,
+        operationId,
+      ).toBe(false);
+    }
   });
 
   it("requires fatigue and retrieval weights to total one", () => {
@@ -139,6 +168,33 @@ describe("SimulationRulesSchema", () => {
           ...validRules.sound,
           speakSourceStrength: { quiet: 2, normal: 1, loud: 4 },
         },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires explicit wall and door attenuation with closed doors stronger", () => {
+    const soundWithoutWall: Record<string, unknown> = { ...validRules.sound };
+    Reflect.deleteProperty(soundWithoutWall, "attenuationPerWall");
+    expect(
+      SimulationRulesSchema.safeParse({
+        ...validRules,
+        sound: soundWithoutWall,
+      }).success,
+    ).toBe(false);
+    expect(
+      SimulationRulesSchema.safeParse({
+        ...validRules,
+        sound: {
+          ...validRules.sound,
+          attenuationPerOpenDoor: 0.75,
+          attenuationPerClosedDoor: 0.75,
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      SimulationRulesSchema.safeParse({
+        ...validRules,
+        sound: { ...validRules.sound, attenuationPerOpenDoor: 0 },
       }).success,
     ).toBe(false);
   });

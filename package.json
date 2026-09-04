@@ -15,7 +15,8 @@
     "build": "pnpm -r --if-present build",
     "build:plugins": "pnpm --filter ./plugins/* build",
     "dev": "pnpm build:plugins && concurrently -k -n server,web \"pnpm --filter @god-sim/local-server dev\" \"pnpm --filter @god-sim/web dev\"",
-    "lint": "eslint . && depcruise apps packages plugins --config .dependency-cruiser.cjs --output-type err",
+    "lint": "pnpm lint:policy && eslint . && depcruise apps packages plugins --config .dependency-cruiser.cjs --output-type err",
+    "lint:policy": "node scripts/check-simulation-policy-literals.mjs",
     "test": "pnpm build:plugins && vitest run",
     "test:e2e": "pnpm build && playwright test",
     "typecheck": "tsc -b --pretty false"

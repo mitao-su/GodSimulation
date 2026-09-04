@@ -331,6 +331,9 @@ export const testSimulationRulesLock = createSimulationRulesLock({
     sound: {
       speakSourceStrength: { quiet: 1, normal: 2, loud: 4 },
       attenuationPerTile: 0.25,
+      attenuationPerWall: 1,
+      attenuationPerOpenDoor: 0.1,
+      attenuationPerClosedDoor: 0.75,
       fullContentThreshold: 1,
       unclearContentThreshold: 0.25,
     },
