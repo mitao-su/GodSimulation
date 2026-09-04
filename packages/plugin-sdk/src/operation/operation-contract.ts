@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 import {
+  AgentIdSchema,
   CanonicalTaskTracksSchema,
+  EntityIdSchema,
   JsonObjectSchema,
   OperationDomainFailureCodeSchema,
   OperationDomainFailureSchema,
@@ -357,6 +359,14 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 }
 
+const OperationParametersDocumentSchema = z
+  .object({
+    type: z.literal("object"),
+    properties: z.record(z.string(), z.unknown()),
+    required: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
 export function operationParametersJsonSchema(
   schema: z.ZodType,
 ): JsonObject {
@@ -365,6 +375,38 @@ export function operationParametersJsonSchema(
   };
   delete document["$schema"];
   return JsonObjectSchema.parse(document);
+}
+
+function assertTargetParameterContract(
+  label: string,
+  target: OperationTargetRequirement,
+  parametersDocument: JsonObject,
+): void {
+  if (target.kind === "none") return;
+
+  const parameterName =
+    target.kind === "character" ? "targetCharacterId" : "targetEntityId";
+  const parameters = OperationParametersDocumentSchema.safeParse(
+    parametersDocument,
+  );
+  if (
+    !parameters.success ||
+    !parameters.data.required?.includes(parameterName) ||
+    !(parameterName in parameters.data.properties)
+  ) {
+    throw new Error(
+      `${label} ${target.kind} target requires parameter ${parameterName}`,
+    );
+  }
+
+  const expectedSchema = operationParametersJsonSchema(
+    target.kind === "character" ? AgentIdSchema : EntityIdSchema,
+  );
+  if (!sameJson(parameters.data.properties[parameterName], expectedSchema)) {
+    throw new Error(
+      `${label} parameter ${parameterName} must use the canonical ID schema`,
+    );
+  }
 }
 
 function requireFunction(label: string, name: string, value: unknown): void {
@@ -466,6 +508,7 @@ export function assertHostedOperationContract(
   if (!sameJson(parametersDocument, manual.parametersSchema)) {
     throw new Error(label + " parameter schema does not match its manual");
   }
+  assertTargetParameterContract(label, target, parametersDocument);
 
   const manualFailureCodes = new Set<string>();
   for (const precondition of manual.worldPreconditions) {

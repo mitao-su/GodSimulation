@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
-import { OperationManualSchema } from "@god-sim/protocol";
+import {
+  AgentIdSchema,
+  EntityIdSchema,
+  OperationManualSchema,
+  type OperationTargetRequirement,
+} from "@god-sim/protocol";
 
 import {
   assertHostedOperationContract,
@@ -92,6 +97,22 @@ const hostedDefinition: HostedOperationDefinition<
     delivered: true,
   }),
 };
+
+function hostedDefinitionWithTarget(
+  target: OperationTargetRequirement,
+  targetParametersSchema: z.ZodType,
+) {
+  return {
+    ...hostedDefinition,
+    target,
+    parametersSchema: targetParametersSchema,
+    manual: OperationManualSchema.parse({
+      ...manual,
+      target,
+      parametersSchema: operationParametersJsonSchema(targetParametersSchema),
+    }),
+  };
+}
 
 describe("hosted operation SDK contract", () => {
   it("keeps an agent mount separate from its core runtime", () => {
@@ -243,6 +264,67 @@ describe("hosted operation SDK contract", () => {
         }),
       ).toThrow(message);
     }
+  });
+
+  it("requires the canonical target ID parameter for external targets", () => {
+    const characterParameters = z
+      .object({ targetCharacterId: AgentIdSchema })
+      .strict();
+    const objectParameters = z
+      .object({ targetEntityId: EntityIdSchema })
+      .strict();
+
+    expect(() =>
+      assertHostedOperationContract(
+        "Character target",
+        hostedDefinitionWithTarget({ kind: "character" }, characterParameters),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertHostedOperationContract(
+        "Object target",
+        hostedDefinitionWithTarget(
+          { kind: "object", requiredCapabilities: ["container"] },
+          objectParameters,
+        ),
+      ),
+    ).not.toThrow();
+
+    const emptyParameters = z.object({}).strict();
+    expect(() =>
+      assertHostedOperationContract(
+        "Missing character target",
+        hostedDefinitionWithTarget({ kind: "character" }, emptyParameters),
+      ),
+    ).toThrow("requires parameter targetCharacterId");
+    expect(() =>
+      assertHostedOperationContract(
+        "Missing object target",
+        hostedDefinitionWithTarget(
+          { kind: "object", requiredCapabilities: ["container"] },
+          emptyParameters,
+        ),
+      ),
+    ).toThrow("requires parameter targetEntityId");
+
+    expect(() =>
+      assertHostedOperationContract(
+        "Optional character target",
+        hostedDefinitionWithTarget(
+          { kind: "character" },
+          z.object({ targetCharacterId: AgentIdSchema.optional() }).strict(),
+        ),
+      ),
+    ).toThrow("requires parameter targetCharacterId");
+    expect(() =>
+      assertHostedOperationContract(
+        "Noncanonical object target",
+        hostedDefinitionWithTarget(
+          { kind: "object", requiredCapabilities: ["container"] },
+          z.object({ targetEntityId: z.string() }).strict(),
+        ),
+      ),
+    ).toThrow("must use the canonical ID schema");
   });
 
   it("ties each domain failure code to details and visible result schemas", () => {
