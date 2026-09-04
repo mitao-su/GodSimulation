@@ -153,13 +153,7 @@ git worktree add ../GodSimulation-wt/w2a-items -b wave2/w2a-item-appearance orig
 
 ### 行为契约的唯一出处
 
-`docs/architecture/character-context-implementation-todo.md` 是**行为契约的唯一权威**，本文件不复述其内容——只复述会同时维护两份、必然漂移。开工前必须读它对应部分：
-
-- **第 1 节「已确认的行为约束」**：69 条基线约束 + 70-78 条 2026-09-04 拍板新增（operation 目标需求与能力体系、说明书机制、候选生成不过滤前置、容器嵌套禁令、容量数值、声音遮挡等）。这些是**新契约，与当前代码现状不一致**，凭直觉实现会做错。
-- **第 4 节 + 4.1 节**：未决项清单与已澄清的伪问题（如「装备/可见性是物品属性」是摘要偏差，实际都是 operation 或角色分区）。
-- **附录 A**：operation 案例（西红柿炒蛋串联、`read` 渐进式披露、认能力不认类别），用于理解设计意图。
-
-读法是**按自己这一轨的阶段**：先读该阶段的全部条目（含已勾选项，它们是上下文），再读第 1 节里被这些条目引用的约束编号。
+[《角色上下文、感知与记忆系统实施 TODO》](docs\architecture\character-context-implementation-todo.md) 是**行为契约的唯一权威**。
 
 ---
 
