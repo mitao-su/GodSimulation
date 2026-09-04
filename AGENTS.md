@@ -148,7 +148,7 @@ git worktree add ../GodSimulation-wt/w2a-items -b wave2/w2a-item-appearance orig
 - `proposeInteraction` 完全不解析/返回 duration。时长所有权只归 planner：调用创建时经 adapter `resolveDuration` 锁定进 `ActiveOperation.duration`，此后任何路径（含已建立调用的 start）绝不触碰 resolver。
 - 快照恢复共享不变量：action 进度 ≤ 自身时长；`currentActionIndex` 之前的前缀 action 只允许两种形态——`progress === duration`（正常完成）或 `interact_object + automatic_traversal + progress 0 + 未 started`（stale skip，贡献 0）；`progressTicks ≥ Σ前缀贡献 + 当前 action 进度`。
 - `ActiveOperation.state` 是不透明 JsonObject，runtime 用 `stateSchema`/`initialState` 自持私有状态。快照 state schema v3，带 v2→v3 迁移。
-- `available_interactions` 查询对必填参数交互返回 `requiresParameters: true, duration: null, availability: null`，不抛错。
+- 模型协议不再接收动态 `taskOptions` / `available_interactions` 白名单。operation 必须挂在角色、物品或家具宿主定义上并提供静态说明书；角色通过自身 `HEAD + indeterminate` 的 `read` operation 查询后直接提交 `operationId`、宿主实例和参数。决策预检只校验空任务/operation 分支形状、operation 与宿主绑定、轨道和参数 Schema；距离、能力、占用、材料等世界条件在调用建立后的首个执行步骤校验，失败走该 operation 声明的 `domainFailure`。
 - 测试 fixture 冰箱（`simulation-test-fixtures.ts`）：`use`（空参 10t）、`stock`（state 相关时长 10/20t）、`configure`（必填 mode 参数）三个交互，新测试优先复用。
 
 ### 行为契约的唯一出处
