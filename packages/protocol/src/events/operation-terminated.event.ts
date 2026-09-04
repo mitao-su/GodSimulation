@@ -12,6 +12,9 @@ export const OperationTerminationOutcomeSchema = z.enum([
   "failed",
   "cancelled",
 ]);
+export type OperationTerminationOutcome = z.infer<
+  typeof OperationTerminationOutcomeSchema
+>;
 
 export const OperationTerminatedEventSchema = EventEnvelopeSchema.extend({
   type: z.literal("operation_terminated"),

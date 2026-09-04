@@ -20,6 +20,7 @@ export * from "./events/operation-terminated.event";
 export * from "./events/perceptible-result-emitted.event";
 export * from "./events/perception-recorded.event";
 export * from "./events/world-released.event";
+export * from "./execution/host-operation-contract";
 export * from "./execution/task-contract";
 export * from "./identity/ids";
 export * from "./ipc/host-worker-message";

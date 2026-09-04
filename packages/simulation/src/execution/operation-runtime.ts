@@ -1,20 +1,37 @@
 import type { z } from "zod";
 
 import type {
+  HostedOperationDomainFailureDefinition,
   InteractionAvailability,
   OperationDomainFailureDefinition,
   OperationEventIgnoreRule,
+  OperationStartResult,
+  OperationTerminalProposal,
+  OperationTickResult,
   PublicBehaviorDeclaration,
 } from "@god-sim/plugin-sdk";
 import type {
   AgentId,
+  DirectOperationReference,
+  DomainEvent,
   EntityId,
   EventId,
   JsonObject,
+  OperationDomainFailure,
+  OperationHostDefinitionReference,
+  OperationHostReference,
   OperationCallId,
   OperationDuration,
+  OperationDurationDeclaration,
+  OperationFirstStepState,
   OperationId,
+  OperationManual,
   OperationResultContext,
+  OperationTargetReference,
+  OperationTargetRequirement,
+  OperationTechnicalFailure,
+  OperationTerminationOutcome,
+  OperationTerminationSource,
   TaskOptionId,
   TaskTrack,
 } from "@god-sim/protocol";
@@ -40,6 +57,165 @@ export interface OperationRegistry {
 }
 
 export type OperationRuntimeRegistry = PluginRegistry & OperationRegistry;
+
+export type OperationReferenceRejectionCode =
+  | "unknown_operation"
+  | "invalid_host_reference"
+  | "unknown_host"
+  | "operation_not_mounted"
+  | "invalid_task_track"
+  | "invalid_arguments";
+
+export interface OperationRuntimeCall {
+  readonly callId: OperationCallId;
+  readonly operationId: OperationId;
+  readonly host: OperationHostReference;
+  readonly hostDefinition: OperationHostDefinitionReference;
+  readonly target: OperationTargetReference;
+  readonly taskSlots: readonly TaskTrack[];
+  readonly arguments: JsonObject;
+  readonly duration: OperationDuration;
+  readonly startedAtTick: number;
+  readonly progressTicks: number;
+  readonly firstStepState: OperationFirstStepState;
+  readonly state: JsonObject;
+}
+
+export interface HostedOperationRuntime {
+  readonly id: OperationId;
+  readonly displayName: string;
+  readonly trigger: "active_command";
+  readonly ownerPluginId: string | null;
+  readonly host: OperationHostDefinitionReference;
+  readonly manual: OperationManual;
+  readonly target: OperationTargetRequirement;
+  readonly duration: OperationDurationDeclaration;
+  readonly taskSlots: readonly TaskTrack[];
+  readonly eventIgnore: readonly OperationEventIgnoreRule[];
+  readonly publicBehavior: PublicBehaviorDeclaration;
+  readonly domainFailures: readonly HostedOperationDomainFailureDefinition[];
+  readonly resultSchema: z.ZodType<JsonObject>;
+  readonly stateSchema: z.ZodType<JsonObject>;
+  readonly parametersSchema: z.ZodType<JsonObject>;
+  initialState(
+    context: OperationRuntimeContext,
+    host: OperationHostReference,
+    argumentsValue: Readonly<JsonObject>,
+  ): JsonObject;
+  resolveDuration(
+    context: OperationRuntimeContext,
+    host: OperationHostReference,
+    argumentsValue: Readonly<JsonObject>,
+  ): OperationDuration;
+  start(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+  ): OperationStartResult;
+  tick?(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+  ): OperationTickResult;
+  complete(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+  ): OperationTerminalProposal;
+  fail(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+    failure: OperationDomainFailure,
+  ): OperationTerminalProposal;
+  cancel(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+  ): OperationTerminalProposal;
+  fuse(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+  ): JsonObject | null;
+  acknowledgeFuseResult(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+    result: Readonly<JsonObject>,
+  ): JsonObject;
+}
+
+export interface ResolvedOperationReference {
+  readonly runtime: HostedOperationRuntime;
+  readonly host: OperationHostReference;
+  readonly target: OperationTargetReference;
+  readonly arguments: JsonObject;
+}
+
+export type ResolveOperationReferenceResult =
+  | {
+      readonly kind: "resolved";
+      readonly binding: ResolvedOperationReference;
+    }
+  | {
+      readonly kind: "invalid_reference";
+      readonly code: OperationReferenceRejectionCode;
+      readonly message: string;
+    };
+
+export interface DirectOperationReferenceResolver {
+  resolveOperationReference(
+    context: OperationRuntimeContext,
+    track: TaskTrack,
+    reference: DirectOperationReference,
+  ): ResolveOperationReferenceResult;
+}
+
+export interface HostedOperationRegistry {
+  getHostedOperation(
+    operationId: OperationId | string,
+    host: OperationHostDefinitionReference,
+  ): HostedOperationRuntime | undefined;
+}
+
+export type HostedOperationRuntimeRegistry = OperationRuntimeRegistry &
+  DirectOperationReferenceResolver &
+  HostedOperationRegistry;
+
+interface OperationTerminationTransactionBase {
+  readonly agentId: AgentId;
+  readonly callId: OperationCallId;
+  readonly operationId: OperationId;
+  readonly source: OperationTerminationSource;
+  readonly terminatedAtTick: number;
+  readonly proposal: OperationTerminalProposal;
+}
+
+export type OperationTerminationTransaction =
+  | (OperationTerminationTransactionBase & {
+      readonly outcome: Extract<
+        OperationTerminationOutcome,
+        "completed" | "cancelled"
+      >;
+      readonly failure?: never;
+    })
+  | (OperationTerminationTransactionBase & {
+      readonly outcome: Extract<OperationTerminationOutcome, "failed">;
+      readonly failure: OperationDomainFailure;
+    });
+
+export type OperationTerminationCommitResult =
+  | {
+      readonly kind: "committed";
+      readonly world: WorldState;
+      readonly events: readonly DomainEvent[];
+    }
+  | {
+      readonly kind: "technical_failure";
+      readonly failure: OperationTechnicalFailure;
+    };
+
+export interface AtomicOperationTerminationPort {
+  commitTermination(
+    world: WorldState,
+    registry: HostedOperationRuntimeRegistry,
+    transaction: OperationTerminationTransaction,
+  ): OperationTerminationCommitResult;
+}
 
 export interface OperationRuntimeContext {
   readonly world: WorldState;

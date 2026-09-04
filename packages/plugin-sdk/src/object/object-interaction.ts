@@ -8,7 +8,10 @@ import {
 } from "@god-sim/protocol";
 
 import type { EffectProposal } from "../effect/effect-proposal";
-import type { OperationContract } from "../operation/operation-contract";
+import type {
+  HostedOperationDefinition,
+  OperationContract,
+} from "../operation/operation-contract";
 import { TriggerSourceSchema } from "../trigger/trigger-source";
 
 export const InteractionContextSchema = z
@@ -85,6 +88,17 @@ export interface InteractionDefinition<
     argumentsValue: Readonly<Arguments>,
   ): InteractionLifecycleProposal;
 }
+
+export type HostedInteractionDefinition<
+  State,
+  Arguments extends JsonObject = Record<string, never>,
+  OperationState extends JsonObject = JsonObject,
+> = HostedOperationDefinition<
+  State,
+  InteractionContext,
+  Arguments,
+  OperationState
+>;
 
 export const InteractionMetadataSchema = z
   .object({
