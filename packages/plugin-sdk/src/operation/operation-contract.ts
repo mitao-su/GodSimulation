@@ -381,6 +381,7 @@ export function operationParametersJsonSchema(
 function assertTargetParameterContract(
   label: string,
   target: OperationTargetRequirement,
+  parametersSchema: z.ZodType,
   parametersDocument: JsonObject,
 ): void {
   const parameters = OperationParametersDocumentSchema.safeParse(
@@ -390,6 +391,23 @@ function assertTargetParameterContract(
     throw new Error(label + " parameter schema must describe an object");
   }
   if (parameters.data.additionalProperties !== false) {
+    throw new Error(label + " parameter schema must reject unknown properties");
+  }
+  let unknownParameter = "__godSimUnknownOperationParameter";
+  while (unknownParameter in parameters.data.properties) {
+    unknownParameter += "_";
+  }
+  const unknownParameterResult = parametersSchema.safeParse({
+    [unknownParameter]: null,
+  });
+  if (
+    unknownParameterResult.success ||
+    !unknownParameterResult.error.issues.some(
+      (issue) =>
+        issue.code === "unrecognized_keys" &&
+        issue.keys.includes(unknownParameter),
+    )
+  ) {
     throw new Error(label + " parameter schema must reject unknown properties");
   }
 
@@ -535,7 +553,12 @@ export function assertHostedOperationContract(
   if (!sameJson(parametersDocument, manual.parametersSchema)) {
     throw new Error(label + " parameter schema does not match its manual");
   }
-  assertTargetParameterContract(label, target, parametersDocument);
+  assertTargetParameterContract(
+    label,
+    target,
+    definition.parametersSchema,
+    parametersDocument,
+  );
 
   const manualFailureCodes = new Set<string>();
   for (const precondition of manual.worldPreconditions) {

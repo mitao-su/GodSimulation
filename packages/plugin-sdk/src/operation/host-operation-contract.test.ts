@@ -383,7 +383,8 @@ describe("hosted operation SDK contract", () => {
     ).toThrow();
   });
 
-  it("rejects parameter schemas that retain undeclared target IDs", () => {
+  it("rejects parameter schemas that accept undeclared target IDs", () => {
+    const strippingNoneParameters = z.object({});
     const passthroughNoneParameters = z.object({}).passthrough();
     const catchallNoneParameters = z.object({}).catchall(z.string());
     const passthroughCharacterParameters = z
@@ -394,6 +395,7 @@ describe("hosted operation SDK contract", () => {
       .catchall(z.string());
 
     const permissiveDefinitions = [
+      hostedDefinitionWithTarget({ kind: "none" }, strippingNoneParameters),
       hostedDefinitionWithTarget({ kind: "none" }, passthroughNoneParameters),
       hostedDefinitionWithTarget({ kind: "none" }, catchallNoneParameters),
       hostedDefinitionWithTarget(
