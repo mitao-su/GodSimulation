@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统 — 并行施工编排（Wave Plan）
 
-> 状态：L1-L4 已按 2026-09-04 拍板口径重排；W2-C 已合入；L5 设讨论门禁，暂不派发
+> 状态：W1-IF、W2-C 已合入；W1-A-P1、W1-B-P1、W1-D 已解锁；L1-L4 按 2026-09-04 拍板口径重排；L5 设讨论门禁，暂不派发
 >
 > 行为基线：[《实施 TODO》](./character-context-implementation-todo.md)（下称「TODO」）
 >
@@ -62,7 +62,7 @@
 
 ```mermaid
 flowchart TB
-  W1IF["W1-IF 宿主 operation 与直接调用协议"] --> W1A["W1-A P1/P2 宿主注册/说明书/首步校验"]
+  W1IF["W1-IF 宿主 operation 与直接调用协议（已合入）"] --> W1A["W1-A P1/P2 宿主注册/说明书/首步校验"]
   W1IF --> W1B12["W1-B P1/P2 生命周期/原子终止"]
   W1IF --> W1D["W1-D 规则与 Tick 时间"]
   W2C["W2-C 归档存储独立支线（已合入）"]
@@ -120,7 +120,7 @@ flowchart TB
 
 | 层 | 先行 PR | 并行实现轨 | 收口 PR | 最大并行度 |
 | --- | --- | --- | --- | --- |
-| L1 | W1-IF | IF 合入后启动 W1-A / W1-B / W1-D；A-P2 与 B-P2 后滚动启动 W1-C | W1-B-P3 → W1-X | 4 |
+| L1 | W1-IF（已合入） | 当前可派 W1-A-P1 / W1-B-P1 / W1-D；A-P2 与 B-P2 后滚动启动 W1-C | W1-B-P3 → W1-X | 4 |
 | L2 | W2-IF | W2-A / W2-B / W2-D | W2-X | 4 |
 | L3 | W3-IF | W3-A1 / W3-A2 / W3-A3；W3-B 作为不阻塞 L4 的并行支线 | W3-X | 4 |
 | L4 | W4-IF | 首批 W4-A1 / W4-A2 / W4-B1 / W4-C；滚动启动 W4-A3 / W4-B2 | W4-X | 4 |
@@ -133,7 +133,10 @@ flowchart TB
 
 ## 5. 第一层：宿主 operation、生命周期、决策与时间（L1）
 
-### W1-IF 公共接口 PR
+### W1-IF 公共接口 PR（已合入）
+
+- **合入状态**：已于 2026-09-04 通过 PR #4 合入 `main`（merge commit `88c8ac08437099846333dfed3a5fff9abbd12c13`）。该 PR 只完成公共接口地基；W1-A-P1、W1-B-P1、W1-D 的启动依赖已满足，后续 W1-B-P3 仍由同一保存格式 owner 负责。
+- **实现边界**：本 PR 没有接入宿主注册、operation 执行、模型决策切换、线上快照版本或迁移；阶段 1 的行为条目仍须由后续轨线通过运行时验收。
 
 - **先行内容**：
   - `AgentDefinition.operations` 与 `AgentOperationDefinition` 骨架。
@@ -223,7 +226,7 @@ flowchart TB
 ### W2-C 归档存储地基
 
 - **合入状态**：已于 2026-09-04 通过 PR #3 合入 `main`（merge commit `299e01969daa438d5799449d516fd6385d1d771a`）；L5 讨论门禁对 W2-C 的前置已满足。
-- **启动依赖（已满足）**：本次文档基线合入即可，可与 W1-IF 同时启动；它是可跨 L1-L4 施工的独立支线，不等待任何 L1-L4 代码 PR。
+- **启动依赖（已满足）**：本轨已独立完成，不等待任何 L1-L4 代码 PR；上述“可与 W1-IF 同时启动”仅保留为历史编排说明。
 - **覆盖**：TODO 阶段 10 的 SQLite Schema、记录隔离、衰减/删除、FTS/向量索引、编码器锁与纯排序接口。
 - **主写**：`timeline/**` 的存储领域接口与 `sqlite-store/**` 的实现和迁移。
 - **禁碰**：protocol IPC、simulation、cognition 与 worker/host 接线。L5 如何跨进程调用及其 DTO 留到讨论门禁。

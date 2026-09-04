@@ -2,17 +2,17 @@
 
 > 使用方式：每次派发时，把“公共前缀”和一个“任务块”一起发送给 agent。
 >
-> 当前只允许派发 L1-L4。L5 有讨论门禁；W6 依赖 L5，因此两者暂不提供施工提示词。
+> 当前只允许派发 L1-L4。W1-IF 与 W2-C 已完成，相关提示词保留作范围审计，不再重复派发；L5 有讨论门禁，W6 依赖 L5，因此两者暂不提供施工提示词。
 
 ## 派发顺序
 
-先把本次 TODO、Wave、AGENTS.md 和提示词文档作为同一个文档 PR 合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
+TODO、Wave、AGENTS.md 和提示词文档基线已合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
 
-1. 同时派 W1-IF 与 W2-C；W1-IF 合入后派 W1-A-P1、W1-B-P1、W1-D。若 W2-C 仍在施工，四条正好占满总并发。
-2. W1-A 与 W1-B 各自在前一片合入后继续 P2；A-P2、B-P2 都合入后再派 W1-C；W1-C 与 W1-D 合入后再派 W1-B-P3，最后派 W1-X。所有滚动派发都把仍在施工的 W2-C 算入最多四条。
-3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。W2-C 不阻塞这里，但始终占一个总并发名额。
-4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。若 W2-C 仍在施工，它也占一个总并发名额。
-5. 派 W4-IF；随后优先派 W4-A1、A2、B1、C，按前置滚动派 A3、B2；所有 L4 实现合入后派 W4-X。W2-C、W3-B 与 L4 所有在施工轨合计不得超过四条，名额不足时优先 L4 主线。
+1. 当前可并行派 W1-A-P1、W1-B-P1、W1-D；W1-A-P1 与 W1-B-P1 各自在合入后继续 P2。
+2. W1-A-P2、W1-B-P2 都合入后派 W1-C；W1-C 与 W1-D 合入后再派 W1-B-P3，最后派 W1-X。
+3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
+4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。
+5. 派 W4-IF；随后优先派 W4-A1、A2、B1、C，按前置滚动派 A3、B2；所有 L4 实现合入后派 W4-X。W3-B 与 L4 所有在施工轨合计不得超过四条，名额不足时优先 L4 主线。
 
 W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-IF/W4-X 也分别保持同一 owner。每个 PR 合入后仍要删除旧 worktree，并从最新 main 为下一片重新建分支。
 
@@ -36,14 +36,14 @@ W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-I
 
 ## L1 提示词
 
-### W1-IF 公共接口
+### W1-IF 公共接口（已合入 PR #4）
 
 ```text
-任务：W1-IF 宿主 operation 与直接调用公共接口 PR。分支建议 wave1/w1if-host-operation-contract。你也是后续 W1-B-P3 的 L1 保存格式 owner。
+审计记录：W1-IF 已于 2026-09-04 通过 PR #4 合入 main，merge commit 为 88c8ac08437099846333dfed3a5fff9abbd12c13；无需再次派发。提交者仍是后续 W1-B-P3 的 L1 保存格式 owner。
 
-只实现行为尚未接入的类型和 Schema：AgentDefinition.operations / AgentOperationDefinition；角色、物品、家具三种宿主引用；必填静态说明书；统一外部目标需求；ObjectDefinition.capabilities；continue | replace(emptyTask | operation 引用) 的新版决策形状；统一 operation 的 start、可选 tick、complete、fail、cancel、fuse 生命周期签名；首步校验结果、类型化失败和原子终止事务窄接口；L1 所需快照字段的独立 Schema 片段和序列化端口。operation 引用包含 operationId、角色自身可省略的 hostEntityId 和 arguments；空任务分支不得携带这些字段或创建 callId。补齐所有跨包消费者所需的包根导出。
+已实现且已合入的范围：AgentDefinition.operations / AgentOperationDefinition；角色、物品、家具三种宿主引用；必填静态说明书；统一外部目标需求；ObjectDefinition.capabilities；continue | replace(emptyTask | operation 引用) 的新版决策形状；统一 operation 的 start、可选 tick、complete、fail、cancel、fuse 生命周期签名；首步校验结果、类型化失败和原子终止事务窄接口；L1 所需快照字段的独立 Schema 片段和序列化端口。operation 引用包含 operationId、角色自身可省略的 hostEntityId 和 arguments；空任务分支不得携带这些字段或创建 callId。已补齐所有跨包消费者所需的包根导出。
 
-主写 packages/protocol 的新契约文件、packages/plugin-sdk 的契约类型、packages/simulation/src/execution/operation-runtime.ts 的窄接口和独立快照字段 Schema。不要修改线上快照版本，不要实现注册、执行、模型调用、规则数值或迁移。新版 Schema 可与旧 taskOptionId/taskOptions 类型暂时并存以保持当前生产路径可编译，但两者不得互相调用；生产切换由 W1-C 完成，死代码由 W1-X 删除。PR 合入后停止，后续任务从新 main 开分支。
+实际变更边界：主写 packages/protocol 的新契约文件、packages/plugin-sdk 的契约类型、packages/simulation/src/execution/operation-runtime.ts 的窄接口和独立快照字段 Schema；没有修改线上快照版本，没有实现注册、执行、模型调用、规则数值或迁移。新版 Schema 与旧 taskOptionId/taskOptions 类型暂时并存以保持当前生产路径可编译，但两者不互相调用；生产切换由 W1-C 完成，死代码由 W1-X 删除。
 ```
 
 ### W1-A-P1 宿主、说明书与角色挂载
@@ -171,11 +171,11 @@ W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-I
 ### W2-C 归档存储地基
 
 ```text
-任务：W2-C，实现阶段 10 的纯存储与纯检索地基。前置：本次 TODO/Wave 文档基线已合入；不依赖 W1-IF 或其他 L1-L4 代码 PR，可与 W1-IF 同时启动。分支建议 wave2/w2c-archive-storage。这是可跨 L1-L4 继续的独立支线，但占用一个总并发名额。
+审计记录：W2-C 已于 2026-09-04 通过 PR #3 合入 main，merge commit 为 299e01969daa438d5799449d516fd6385d1d771a；无需再次派发，也不再占用并发名额。
 
-实现按世界/分支/角色/整理周期隔离的归档记忆 Schema，正文/来源/Tick/重要性/索引与编码器锁；按归档年龄直接重算指数衰减并删除，跨多日一次计算必须等价于逐日计算；实现 FTS 与向量命中按同一记录 ID 合并、排序纯函数和编码器/索引版本失效协议。相似正文但不同 ID 不去重，recall 不更新强度。
+已实现按世界/分支/角色/整理周期隔离的归档记忆 Schema，正文/来源/Tick/重要性/索引与编码器锁；按归档年龄直接重算指数衰减并删除，跨多日一次计算等价于逐日计算；实现 FTS 与向量命中按同一记录 ID 合并、排序纯函数和编码器/索引版本失效协议。相似正文但不同 ID 不去重，recall 不更新强度。
 
-主写 timeline 中的存储领域接口、sqlite-store 实现和 SQLite migration。禁止修改 protocol IPC、simulation、cognition、worker/host；L5 如何跨进程调用以及 DTO 放置保留讨论标记。测试隔离、衰减确定性、删除、双路合并和模型锁。
+实际变更边界：主写 timeline 中的存储领域接口、sqlite-store 实现和 SQLite migration；没有修改 protocol IPC、simulation、cognition、worker/host。L5 如何跨进程调用以及 DTO 放置仍保留讨论标记。
 ```
 
 ### W2-D 声音传播算法
