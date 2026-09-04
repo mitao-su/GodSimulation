@@ -382,15 +382,38 @@ function assertTargetParameterContract(
   target: OperationTargetRequirement,
   parametersDocument: JsonObject,
 ): void {
-  if (target.kind === "none") return;
-
-  const parameterName =
-    target.kind === "character" ? "targetCharacterId" : "targetEntityId";
   const parameters = OperationParametersDocumentSchema.safeParse(
     parametersDocument,
   );
+  if (!parameters.success) {
+    throw new Error(label + " parameter schema must describe an object");
+  }
+
+  const targetParameterNames = [
+    "targetCharacterId",
+    "targetEntityId",
+  ] as const;
+  if (target.kind === "none") {
+    for (const parameterName of targetParameterNames) {
+      if (parameterName in parameters.data.properties) {
+        throw new Error(
+          `${label} none target cannot declare parameter ${parameterName}`,
+        );
+      }
+    }
+    return;
+  }
+
+  const parameterName =
+    target.kind === "character" ? "targetCharacterId" : "targetEntityId";
+  const incompatibleParameterName =
+    target.kind === "character" ? "targetEntityId" : "targetCharacterId";
+  if (incompatibleParameterName in parameters.data.properties) {
+    throw new Error(
+      `${label} ${target.kind} target cannot declare parameter ${incompatibleParameterName}`,
+    );
+  }
   if (
-    !parameters.success ||
     !parameters.data.required?.includes(parameterName) ||
     !(parameterName in parameters.data.properties)
   ) {

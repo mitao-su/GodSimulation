@@ -290,6 +290,25 @@ describe("hosted operation SDK contract", () => {
       ),
     ).not.toThrow();
 
+    expect(() =>
+      assertHostedOperationContract(
+        "Unexpected character target",
+        hostedDefinitionWithTarget(
+          { kind: "none" },
+          z.object({ targetCharacterId: AgentIdSchema }).strict(),
+        ),
+      ),
+    ).toThrow("none target cannot declare parameter targetCharacterId");
+    expect(() =>
+      assertHostedOperationContract(
+        "Unexpected object target",
+        hostedDefinitionWithTarget(
+          { kind: "none" },
+          z.object({ targetEntityId: EntityIdSchema }).strict(),
+        ),
+      ),
+    ).toThrow("none target cannot declare parameter targetEntityId");
+
     const emptyParameters = z.object({}).strict();
     expect(() =>
       assertHostedOperationContract(
@@ -325,6 +344,43 @@ describe("hosted operation SDK contract", () => {
         ),
       ),
     ).toThrow("must use the canonical ID schema");
+    expect(() =>
+      assertHostedOperationContract(
+        "Mismatched character target",
+        hostedDefinitionWithTarget(
+          { kind: "character" },
+          z
+            .object({
+              targetCharacterId: AgentIdSchema,
+              targetEntityId: EntityIdSchema.optional(),
+            })
+            .strict(),
+        ),
+      ),
+    ).toThrow("character target cannot declare parameter targetEntityId");
+    expect(() =>
+      assertHostedOperationContract(
+        "Mismatched object target",
+        hostedDefinitionWithTarget(
+          { kind: "object", requiredCapabilities: ["container"] },
+          z
+            .object({
+              targetEntityId: EntityIdSchema,
+              targetCharacterId: AgentIdSchema.optional(),
+            })
+            .strict(),
+        ),
+      ),
+    ).toThrow("object target cannot declare parameter targetCharacterId");
+    expect(() =>
+      assertHostedOperationContract(
+        "Object target without capabilities",
+        hostedDefinitionWithTarget(
+          { kind: "object", requiredCapabilities: [] },
+          objectParameters,
+        ),
+      ),
+    ).toThrow();
   });
 
   it("ties each domain failure code to details and visible result schemas", () => {
