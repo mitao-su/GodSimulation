@@ -517,6 +517,46 @@ function commitLifecycleTransition(
   return { kind: "committed", world: committed.world, events: committed.events };
 }
 
+function projectLifecycleProposal(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  operation: OperationRuntimeCall,
+  proposal: OperationLifecycleTransitionResult["proposal"],
+  phase: "start" | "tick",
+): WorldState | HostedOperationTechnicalFailureResult {
+  try {
+    const projected = commitProposal(world, registry, proposal, {
+      causationId: `${operation.callId}:${phase}:${world.tick}`,
+      correlationId: operation.callId,
+    });
+    if (!projected.accepted) {
+      return hostedTechnicalFailure(
+        world,
+        operation,
+        operationTechnicalFailure(
+          "plugin",
+          "operation_lifecycle_effect_rejected",
+          `Operation ${phase} effect was rejected (${projected.reason.code}): ${projected.reason.message}`,
+          true,
+        ),
+      );
+    }
+    return projected.world;
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error);
+    return hostedTechnicalFailure(
+      world,
+      operation,
+      operationTechnicalFailure(
+        "plugin",
+        "operation_lifecycle_effect_exception",
+        `Operation ${phase} effect commit threw: ${description}`,
+        true,
+      ),
+    );
+  }
+}
+
 function completeHostedOperation(
   world: WorldState,
   registry: HostedOperationRuntimeRegistry,
@@ -565,8 +605,20 @@ export function resumeHostedOperationTermination(
   agentId: AgentId,
   pending: HostedOperationTerminationPendingResult["pending"],
 ): HostedOperationAdvanceResult {
+  let completionWorld = world;
+  if (pending.preTerminationProposal) {
+    const projected = projectLifecycleProposal(
+      world,
+      registry,
+      pending.operation,
+      pending.preTerminationProposal.proposal,
+      pending.preTerminationProposal.phase,
+    );
+    if ("kind" in projected) return projected;
+    completionWorld = projected;
+  }
   const completed = completeOperationLifecycle(
-    { world, registry, agentId, operation: pending.operation },
+    { world: completionWorld, registry, agentId, operation: pending.operation },
     pending.source,
   );
   if (completed.kind === "technical_failure") {
@@ -720,6 +772,19 @@ export function advanceHostedOperationBatch(
     }
     nextWorld = committed.world;
     events.push(...committed.events);
+    if (result.kind === "termination_pending" && result.pending.preTerminationProposal) {
+      processed.set(entry.operation.callId, {
+        ...result,
+        world: nextWorld,
+        events: committed.events,
+        pending: {
+          outcome: result.pending.outcome,
+          source: result.pending.source,
+          operation: result.pending.operation,
+        },
+      });
+      continue;
+    }
     processed.set(entry.operation.callId, {
       ...result,
       world: nextWorld,
@@ -869,12 +934,22 @@ export function advanceHostedOperation(
   }
 
   const advancedOperation = step.operation;
+  let evaluationWorld = world;
   const events: readonly DomainEvent[] = [];
   let transitionProposal: HostedOperationRunningResult["proposal"];
   let transitionPhase: HostedOperationRunningResult["phase"];
   if (step.kind === "transition") {
     transitionProposal = step.proposal;
     transitionPhase = operation.firstStepState === "pending" ? "start" : "tick";
+    const projected = projectLifecycleProposal(
+      world,
+      registry,
+      operation,
+      step.proposal,
+      transitionPhase,
+    );
+    if ("kind" in projected) return projected;
+    evaluationWorld = projected;
   }
 
   const progressed = { ...advancedOperation, progressTicks: nextProgress };
@@ -896,7 +971,7 @@ export function advanceHostedOperation(
       );
     }
     const completed = completeHostedOperation(
-      world,
+      evaluationWorld,
       registry,
       agentId,
       progressed,
@@ -916,7 +991,7 @@ export function advanceHostedOperation(
     progressed.progressTicks === progressed.duration.totalTicks
   ) {
     const completed = completeHostedOperation(
-      world,
+      evaluationWorld,
       registry,
       agentId,
       progressed,

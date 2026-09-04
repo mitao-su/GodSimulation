@@ -711,7 +711,7 @@ describe("hosted operation lifecycle runner", () => {
     });
   });
 
-  it("commits start effects but leaves terminal effects for the P2 transaction", () => {
+  it("defers start effects to batch commit and leaves terminal effects for the P2 transaction", () => {
     const start = vi.fn(
       (_context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
         kind: "started",
@@ -744,6 +744,16 @@ describe("hosted operation lifecycle runner", () => {
     const fixture = fixtureRuntime({ start, complete });
     const world = runningWorld();
     const beforeBladder = world.agents.get(agentId)?.bladder;
+
+    const evaluated = advanceHostedOperation(
+      world,
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "fixed", totalTicks: 1 } }),
+    );
+    expect(evaluated.kind).toBe("termination_ready");
+    expect(evaluated.world).toBe(world);
+    expect(evaluated.world.objects.get(fridgeId)).toEqual(world.objects.get(fridgeId));
 
     const result = advanceHostedOperationBatch(world, fixture.registry, [
       {
