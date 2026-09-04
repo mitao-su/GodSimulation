@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统实施 TODO
 
-> 状态：实施中；W1-IF、W1-D 与 W2-C 已合入，阶段 0 与阶段 2 已按 W1-D 的实现边界拆分完成项和后续接线
+> 状态：实施中；W1-IF、W1-A-P1、W1-D 与 W2-C 已合入，阶段 0 与阶段 2 已按 W1-D 的实现边界拆分完成项和后续接线
 >
 > 更新日期：2026-09-05
 >
@@ -132,6 +132,8 @@
 
 > W1-IF 公共接口地基已于 2026-09-04 通过 PR #4 合入 `main`（merge commit `88c8ac08437099846333dfed3a5fff9abbd12c13`）。本 PR 已提供宿主引用、静态说明书、目标与参数约束、直接决策形状、统一生命周期/失败/终止契约，以及 L1 快照字段 Schema 与序列化端口；没有接入注册、执行、模型决策切换、线上快照版本或迁移。以下阶段 1 条目仍以运行时实现和验收测试为准，不能因接口已合入而提前勾选。
 
+> W1-A-P1 已于 2026-09-04 通过 PR #7 合入 `main`（merge commit `bb9f3b0fb69028c86055cfeddd471fa3c458e0aa`）。本 PR 完成角色 operation 显式挂载、宿主注册/静态说明书契约、角色 `read` 及 `ObjectDefinition.capabilities`；直接调用生产切换、首步世界前置校验、声音/回忆运行时和阶段 1 的完整验收仍未完成。
+
 - [x] 定义统一的 `TaskTrack = HEAD | BODY`，从插件 SDK、动作资源、快照和测试中删除 `HANDS`。
 - [x] 将所有现有手部交互占用迁移到 `BODY`，检查门、冰箱、马桶及自动通行等插件行为。
 - [x] 将角色的单个 `currentGoal/actionPlan` 改为 `HEAD/BODY` 槽位到 active operation `callId` 的引用；普通单槽位调用分别保存自己的调用、动作计划和进度。
@@ -139,11 +141,11 @@
 - [x] 为两条轨道定义稳定空任务；空任务不占用有限时长、不自然完成、不自行触发决策。
 - [x] 定义“语义操作”与“内部微步骤”的协议边界：模型选择语义操作，程序只自动执行该操作内部必要且确定性的步骤。
 - [ ] 将所有游戏内操控统一建模为挂在角色、物品或家具宿主定义上的 operation，至少声明稳定 ID、静态说明书、`taskSlots`、参数 Schema、目标需求、时长协议、事件 `ignore` 规则、`publicBehavior`、生命周期处理和结果 Schema；`move`、`read` 与 `recall` 走同一分发框架。
-- [ ] 在 `AgentDefinition` 上增加 operation 声明并由插件加载期统一校验；把 `move`、`speak`、`recall`、`read`、`wait`、`observe` 从“核心全局自动注册”迁移为角色定义显式挂载。核心仍持有这些基础 operation 的权威运行时实现，但没有挂载声明的角色不得调用。
-- [ ] 在 `ObjectDefinition` 上新增必填 `capabilities: string[]`，与 `tags` 严格分离并更新现有插件定义；目标匹配只能读取 `capabilities`，不得把类别标签当能力。该协议属于 operation 目标体系地基，必须在阶段 3 之前完成。
-- [ ] 为所有宿主 operation 增加必填静态说明书并在定义加载期拒绝缺失；实现角色自身的 `read` operation：占用 `HEAD`、`indeterminate`、只读，本地结果在放行后、推进下一 Tick 前完成且 `worldTick` 不变，每次调用仍有独立 `callId` 与终态结果。系统提示词只引导角色用 `read` 查询，不预先灌入全部说明书。
+- [x] 在 `AgentDefinition` 上增加 operation 声明并由插件加载期统一校验；把 `move`、`speak`、`recall`、`read`、`wait`、`observe` 从“核心全局自动注册”迁移为角色定义显式挂载。核心仍持有这些基础 operation 的权威运行时实现，但没有挂载声明的角色不得调用。
+- [x] 在 `ObjectDefinition` 上新增必填 `capabilities: string[]`，与 `tags` 严格分离并更新现有插件定义；目标匹配只能读取 `capabilities`，不得把类别标签当能力。该协议属于 operation 目标体系地基，必须在阶段 3 之前完成。
+- [x] 为所有宿主 operation 增加必填静态说明书并在定义加载期拒绝缺失；实现角色自身的 `read` operation：占用 `HEAD`、`indeterminate`、只读，本地结果在放行后、推进下一 Tick 前完成且 `worldTick` 不变，每次调用仍有独立 `callId` 与终态结果。系统提示词只引导角色用 `read` 查询，不预先灌入全部说明书。
 - [ ] 将 `speak` 的发声音量参数限制为“小声、正常、大声”三档枚举；模型输出任意数字、其他档位或缺失音量时均视为参数 Schema 无效，调用不得建立。`speak` 参数 Schema 不包含 `targetCharacterId` 或其他作用角色字段；调用建立后将所选档位随 `callId` 锁定并纳入快照、恢复和回放。
-- [ ] 定义必填的公开行为协议：每个 operation 必须显式选择 `hidden`，或实现只返回公开字段的结构化投影；定义加载时拒绝缺失或无效声明，核心不得按 operation ID、参数或内部状态生成后备描述。
+- [x] 定义必填的公开行为协议：每个 operation 必须显式选择 `hidden`，或实现只返回公开字段的结构化投影；定义加载时拒绝缺失或无效声明，核心不得按 operation ID、参数或内部状态生成后备描述。
 - [ ] 允许 operation 定义声明“必须指定一个作用角色”；这类 operation 的参数 Schema 必须包含 `targetCharacterId`。模型输出必须能绑定到真实宿主 operation 且通过参数 Schema，目标存在性、距离和当前可用性留给调用首个执行步骤按 operation 自己声明的失败码校验。
 - [ ] 调用建立时把规范化后的 `targetCharacterId` 随 `callId` 锁定并纳入事件、快照、恢复和回放；运行期间只允许按既有失败或替换协议结束调用，不得把同一个调用静默改为作用其他角色。
 - [ ] 禁止需要指定作用角色的 operation 在开始、执行中、熔断、失败或取消阶段生成定向互动通知；只有正常完成事务可以把实际效果、发起者的成功终态 `operation_result` 和目标角色的互动事件一起原子提交，任一部分写入失败都必须使整个完成事务回滚。

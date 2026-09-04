@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统 — 并行施工编排（Wave Plan）
 
-> 状态：W1-IF、W1-D、W2-C 已合入；L1 继续推进 W1-A/W1-B，W1-D 对 W1-B-P3 与 W1-X 的前置已满足；L5 设讨论门禁，暂不派发
+> 状态：W1-IF、W1-A-P1、W1-D、W2-C 已合入；L1 继续推进 W1-A-P2/W1-B，W1-A-P2 与 W1-B-P2 合入后派 W1-C；L5 设讨论门禁，暂不派发
 >
 > 行为基线：[《实施 TODO》](./character-context-implementation-todo.md)（下称「TODO」）
 >
@@ -120,7 +120,7 @@ flowchart TB
 
 | 层 | 先行 PR | 并行实现轨 | 收口 PR | 最大并行度 |
 | --- | --- | --- | --- | --- |
-| L1 | W1-IF（已合入） | W1-D 已合入；当前推进 W1-A-P1 / W1-B-P1，A-P2 与 B-P2 后滚动启动 W1-C | W1-B-P3 → W1-X | 4 |
+| L1 | W1-IF（已合入） | W1-A-P1 已合入；当前推进 W1-A-P2 / W1-B-P1，A-P2 与 B-P2 后滚动启动 W1-C | W1-B-P3 → W1-X | 4 |
 | L2 | W2-IF | W2-A / W2-B / W2-D | W2-X | 4 |
 | L3 | W3-IF | W3-A1 / W3-A2 / W3-A3；W3-B 作为不阻塞 L4 的并行支线 | W3-X | 4 |
 | L4 | W4-IF | 首批 W4-A1 / W4-A2 / W4-B1 / W4-C；滚动启动 W4-A3 / W4-B2 | W4-X | 4 |
@@ -151,6 +151,9 @@ flowchart TB
 - **完成条件**：lint/typecheck/test/build 全绿，所有新接口暂未被生产路径调用或有明确的未实现保护。
 
 ### W1-A 宿主注册、说明书、直接调用与首步校验
+
+- **P1 合入状态**：已于 2026-09-04 通过 PR #7 合入 `main`（merge commit `bb9f3b0fb69028c86055cfeddd471fa3c458e0aa`）。已完成角色显式挂载基础 operation、宿主注册与静态说明书校验、角色 `read` operation、对象 `capabilities` 契约及 starter agents 挂载声明；`recall`/`speak` 尚未接入对应运行时，实际调用保持显式技术阻塞。
+- **P1 边界**：旧动态候选路径仅保留按角色挂载过滤的过渡兼容；直接调用生产切换、首步世界条件校验及候选路径删除仍由 P2/W1-C/W1-X 完成。阶段 1 的对应验收条目不因本 PR 合入而提前勾选。
 
 - **覆盖**：TODO 阶段 1 中宿主 operation、说明书、目标需求、`capabilities`、直接调用和首步前置校验条目。
 - **实现重点**：

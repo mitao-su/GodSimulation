@@ -2,13 +2,13 @@
 
 > 使用方式：每次派发时，把“公共前缀”和一个“任务块”一起发送给 agent。
 >
-> 当前只允许派发 L1-L4。W1-IF、W1-D 与 W2-C 已完成，相关提示词保留作范围审计，不再重复派发；L5 有讨论门禁，W6 依赖 L5，因此两者暂不提供施工提示词。
+> 当前只允许派发 L1-L4。W1-IF、W1-A-P1、W1-D 与 W2-C 已完成，相关提示词保留作范围审计，不再重复派发；L5 有讨论门禁，W6 依赖 L5，因此两者暂不提供施工提示词。
 
 ## 派发顺序
 
 TODO、Wave、AGENTS.md 和提示词文档基线已合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
 
-1. W1-D 已合入；当前继续推进 W1-A-P1、W1-B-P1，两者各自在合入后继续 P2。
+1. W1-A-P1、W1-D 已合入；当前继续推进 W1-A-P2、W1-B-P1，两者各自在合入后继续下一片。
 2. W1-A-P2、W1-B-P2 都合入后派 W1-C；W1-C 合入后即可派 W1-B-P3，最后派 W1-X。W1-D 对这两项的前置已经满足。
 3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
 4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。
@@ -46,14 +46,14 @@ W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-I
 实际变更边界：主写 packages/protocol 的新契约文件、packages/plugin-sdk 的契约类型、packages/simulation/src/execution/operation-runtime.ts 的窄接口和独立快照字段 Schema；没有修改线上快照版本，没有实现注册、执行、模型调用、规则数值或迁移。新版 Schema 与旧 taskOptionId/taskOptions 类型暂时并存以保持当前生产路径可编译，但两者不互相调用；生产切换由 W1-C 完成，死代码由 W1-X 删除。
 ```
 
-### W1-A-P1 宿主、说明书与角色挂载
+### W1-A-P1 宿主、说明书与角色挂载（已合入 PR #7）
 
 ```text
-任务：W1-A-P1，把 operation 真正挂到角色/物品/家具宿主，并实现静态说明书与 read。前置：W1-IF 已合入。分支建议 wave1/w1a-host-manuals-p1。
+审计记录：W1-A-P1 已于 2026-09-04 通过 PR #7 合入 main，merge commit 为 bb9f3b0fb69028c86055cfeddd471fa3c458e0aa；无需再次派发。
 
-把 core.move/core.speak/core.recall/core.read/core.wait/core.observe 从“全局自动授予”改为 AgentDefinition.operations 显式挂载；starter agents 明确声明自己的基础 operation。核心仍持有权威运行时实现，插件只决定角色是否挂载，不能让插件或模型直接改世界。P1 对 recall 只完成挂载声明和统一契约，不设计或接入 L5 的跨进程端口；L5 接线前若实际调用 recall，必须显式进入技术阻塞，禁止伪造结果。所有宿主 operation 必须通过同一契约校验且有静态说明书；read 挂角色自身，占 HEAD、indeterminate、只读，放行事务只建调用，结果在放行后、推进下一 Tick 前执行并提交，期间 worldTick 不变，且形成独立 call/result。
+已实现范围：角色显式挂载 core.move/core.speak/core.recall/core.read/core.wait/core.observe；插件加载期统一校验宿主 operation、静态说明书、公开行为声明、ObjectDefinition.capabilities 与挂载绑定；starter agents 已声明基础 operation；角色自身 read 为 HEAD + indeterminate 的只读 operation，静态结果在同一 worldTick 独立形成 call/result；recall/speak 尚未接入对应运行时，实际调用保持显式技术阻塞。
 
-主写 plugin-sdk/agent、plugin-sdk/object、operation 定义加载校验、simulation execution 的 registry 与 agent adapter、plugins/starter-agents。消费 W1-IF 的统一生命周期契约，不得另建接口。旧动态候选路径仍被当前生产代码引用，本 PR 只允许保持兼容，不得扩展；提示词和生产切换归 W1-C。不要实现首步世界校验，不要改 action runner、生命周期终止、decision、cognition、规则或快照文件。
+未完成范围：旧动态候选路径仍只保留按角色挂载过滤的过渡兼容；直接调用生产切换与首步世界条件校验归 W1-A-P2，模型决策切换归 W1-C，线上快照接线归 W1-B-P3，旧候选和死代码清理由 W1-X 完成。没有新增首步 canStart 预筛，也没有修改 action runner、生命周期终止、decision、cognition 生产逻辑、规则或快照文件。
 ```
 
 ### W1-A-P2 直接调用与首步校验
