@@ -5,6 +5,7 @@ import {
   AgentIdSchema,
   EntityIdSchema,
   OperationManualSchema,
+  type JsonObject,
   OperationArbitrationFailureSchema,
   type OperationTargetRequirement,
 } from "@god-sim/protocol";
@@ -460,6 +461,40 @@ describe("hosted operation SDK contract", () => {
         resourceClaimedFailure,
       ),
     ).toEqual({ kind: "unmapped", reasonCode: "resource_claimed" });
+  });
+
+  it("turns an exception from the details schema into a technical failure", () => {
+    const throwingDetailsSchema = {
+      safeParse: () => {
+        throw new Error("boom");
+      },
+    } as unknown as z.ZodType<JsonObject>;
+
+    expect(
+      mapOperationArbitrationFailure(
+        {
+          resource_claimed: {
+            failureCode: "occupied",
+            buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+              resourceEntityId,
+              winnerAgentId,
+            }),
+          },
+        },
+        [
+          {
+            code: "occupied",
+            summary: "The resource is occupied.",
+            detailsSchema: throwingDetailsSchema,
+            resultSchema: failureResultSchema,
+          },
+        ],
+        resourceClaimedFailure,
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      code: "arbitration_failure_details_validation_failed",
+    });
   });
 
   it("rejects every required hosted definition field when missing", () => {

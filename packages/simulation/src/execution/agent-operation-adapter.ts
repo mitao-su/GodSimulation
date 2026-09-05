@@ -14,6 +14,7 @@ import {
   type JsonObject,
   type OperationId,
   type OperationHostReference,
+  type OperationTechnicalFailure,
 } from "@god-sim/protocol";
 
 import {
@@ -41,6 +42,16 @@ type UnboundAgentOperationRuntime = Omit<
   HostedOperationRuntime,
   "host" | "manual" | "ownerPluginId"
 >;
+
+function invalidOperationCallBinding(message: string): OperationTechnicalFailure {
+  return {
+    kind: "technical_failure",
+    category: "protocol",
+    code: "invalid_operation_call_binding",
+    message,
+    retryable: false,
+  };
+}
 
 const FailureDetailsSchema = z.object({}).strict();
 
@@ -469,8 +480,14 @@ export function bindAgentOperationRuntime(
     operation: Parameters<HostedOperationRuntime["start"]>[1],
   ): void => {
     assertHostBinding(context, operation.host);
+    assertCallMetadataBinding(operation);
+  };
+  const assertCallMetadataBinding = (
+    operation: Parameters<HostedOperationRuntime["start"]>[1],
+  ): void => {
     if (
       operation.operationId !== implementation.id ||
+      operation.host.kind !== "agent" ||
       operation.hostDefinition.kind !== "agent" ||
       operation.hostDefinition.hostDefinitionId !== definition.id
     ) {
@@ -524,6 +541,16 @@ export function bindAgentOperationRuntime(
     acknowledgeFuseResult: (context, operation, result) => {
       assertCallBinding(context, operation);
       return implementation.acknowledgeFuseResult(context, operation, result);
+    },
+    mapArbitrationFailure: (operation, failure) => {
+      try {
+        assertCallMetadataBinding(operation);
+      } catch (error) {
+        return invalidOperationCallBinding(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return implementation.mapArbitrationFailure(operation, failure);
     },
   };
   assertHostedOperationContract(

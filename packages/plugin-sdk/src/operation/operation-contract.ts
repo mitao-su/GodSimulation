@@ -432,25 +432,33 @@ export function mapOperationArbitrationFailure(
       `Arbitration failure ${failure.data.reasonCode} details builder failed.`,
     );
   }
-  const parsedDetails = declaration.detailsSchema.safeParse(details);
-  const normalizedDetails = parsedDetails.success
-    ? JsonObjectSchema.safeParse(parsedDetails.data)
-    : undefined;
-  if (!parsedDetails.success || !normalizedDetails?.success) {
+
+  try {
+    const parsedDetails = declaration.detailsSchema.safeParse(details);
+    const normalizedDetails = parsedDetails.success
+      ? JsonObjectSchema.safeParse(parsedDetails.data)
+      : undefined;
+    if (!parsedDetails.success || !normalizedDetails?.success) {
+      return arbitrationMappingTechnicalFailure(
+        "invalid_arbitration_failure_details",
+        `Arbitration failure ${failure.data.reasonCode} produced invalid details.`,
+      );
+    }
+
+    return {
+      kind: "mapped",
+      failure: {
+        kind: "domain_failure",
+        code: mapping.failureCode,
+        details: normalizedDetails.data,
+      },
+    };
+  } catch {
     return arbitrationMappingTechnicalFailure(
-      "invalid_arbitration_failure_details",
-      `Arbitration failure ${failure.data.reasonCode} produced invalid details.`,
+      "arbitration_failure_details_validation_failed",
+      `Arbitration failure ${failure.data.reasonCode} details validation failed.`,
     );
   }
-
-  return {
-    kind: "mapped",
-    failure: {
-      kind: "domain_failure",
-      code: mapping.failureCode,
-      details: normalizedDetails.data,
-    },
-  };
 }
 
 export function assertOperationContract(

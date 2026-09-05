@@ -258,6 +258,7 @@ describe("definePlugin", () => {
     ["resultSchema", /result schema/i],
     ["eventIgnore", /event ignore/i],
     ["domainFailures", /domain failure/i],
+    ["arbitrationFailureMappings", /arbitration failure mapping/i],
     ["complete", /completion lifecycle/i],
     ["fail", /failure lifecycle/i],
     ["cancel", /cancel lifecycle/i],

@@ -109,6 +109,46 @@ describe("hosted operation registry", () => {
     }
   });
 
+  it("rejects a mismatched agent call before mapping arbitration failure", () => {
+    const runtime = agentRuntime("core.wait");
+    const world = simulationTestWorld();
+    const context = createOperationRuntimeContext(
+      world,
+      testPluginRegistry,
+      "alice" as never,
+    );
+    const host = { kind: "agent", hostEntityId: "alice" as never } as const;
+    const argumentsValue = JsonObjectSchema.parse({ durationTicks: 1 });
+    const call = runtimeCall(
+      runtime,
+      context,
+      host,
+      "operation-call:agent-arbitration" as OperationCallId,
+      argumentsValue,
+      runtime.initialState(context, host, argumentsValue),
+    );
+
+    expect(
+      runtime.mapArbitrationFailure(
+        {
+          ...call,
+          hostDefinition: {
+            kind: "agent",
+            hostDefinitionId: "test.bob",
+          },
+        },
+        OperationArbitrationFailureSchema.parse({
+          reasonCode: "resource_claimed",
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      code: "invalid_operation_call_binding",
+    });
+  });
+
   it("binds furniture operations through the same hosted registry", () => {
     const runtime = hostedRegistry().getHostedOperation(
       "object.test.fridge.use",
@@ -177,6 +217,20 @@ describe("hosted operation registry", () => {
           winnerAgentId: "bob",
         },
       },
+    });
+
+    expect(
+      runtime.mapArbitrationFailure(
+        { ...call, operationId: "core.wait" as never },
+        OperationArbitrationFailureSchema.parse({
+          reasonCode: "resource_claimed",
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      code: "invalid_operation_call_binding",
     });
   });
 
