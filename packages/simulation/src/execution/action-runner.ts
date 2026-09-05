@@ -17,6 +17,7 @@ import { operationTechnicalFailure } from "./operation-failure-classifier";
 import {
   completeOperationLifecycle,
   failOperationLifecycle,
+  mapOperationArbitrationFailure,
   startOperationLifecycle,
   tickOperationLifecycle,
   type OperationLifecycleTransitionResult,
@@ -670,7 +671,7 @@ function transitionIntent(
     effect.type === "reserve_occupancy"
       ? [
           {
-            intentId: `${entry.agentId}|${entry.operation.callId}|${phase}|${effectIndex}`,
+            intentId: `${entry.agentId}:${entry.operation.callId}:${phase}:${effectIndex}`,
             agentId: entry.agentId,
             entityId: effect.entityId,
             interactionId: entry.operation.operationId,
@@ -679,112 +680,6 @@ function transitionIntent(
         ]
       : [],
   );
-}
-
-function arbitrationFailure(
-  registry: HostedOperationRuntimeRegistry,
-  operation: OperationRuntimeCall,
-  reasonCode: "resource_claimed",
-  winnerAgentId: AgentId,
-):
-  | { readonly failure: { readonly kind: "domain_failure"; readonly code: string; readonly details: JsonObject } }
-  | { readonly failure: OperationTechnicalFailure } {
-  let runtime;
-  try {
-    runtime = registry.getHostedOperation(
-      operation.operationId,
-      operation.hostDefinition,
-    );
-  } catch (error) {
-    const description = error instanceof Error ? error.message : String(error);
-    return {
-      failure: operationTechnicalFailure(
-        "configuration",
-        "operation_arbitration_mapping_exception",
-        `Operation arbitration mapping threw: ${description}`,
-        false,
-      ),
-    };
-  }
-  if (!runtime) {
-    return {
-      failure: operationTechnicalFailure(
-        "configuration",
-        "operation_runtime_unavailable",
-        `No hosted runtime is registered for ${operation.operationId}.`,
-        false,
-      ),
-    };
-  }
-
-  // Arbitration reasons are mapped only through the operation's declared
-  // world-precondition directory; no error text is inspected.
-  if (reasonCode !== "resource_claimed") {
-    return {
-      failure: operationTechnicalFailure(
-        "protocol",
-        "operation_arbitration_reason_unknown",
-        `Unknown arbitration reason ${reasonCode}.`,
-        false,
-      ),
-    };
-  }
-  const precondition = runtime.manual.worldPreconditions[0];
-  if (!precondition) {
-    return {
-      failure: operationTechnicalFailure(
-        "protocol",
-        "operation_arbitration_failure_undeclared",
-        `Operation ${operation.operationId} does not declare an arbitration failure.`,
-        false,
-      ),
-    };
-  }
-  const declaration = runtime.domainFailures.find(
-    (candidate) => candidate.code === precondition.failureCode,
-  );
-  if (!declaration) {
-    return {
-      failure: operationTechnicalFailure(
-        "protocol",
-        "operation_arbitration_failure_undeclared",
-        `Operation ${operation.operationId} does not declare ${precondition.failureCode}.`,
-        false,
-      ),
-    };
-  }
-  let details: JsonObject | undefined;
-  for (const candidate of [
-    { holderId: winnerAgentId },
-    { summary: precondition.description },
-  ]) {
-    try {
-      const parsed = declaration.detailsSchema.safeParse(candidate);
-      if (parsed.success) {
-        details = parsed.data as JsonObject;
-        break;
-      }
-    } catch {
-      // A malformed plugin schema is handled as a technical failure below.
-    }
-  }
-  if (!details) {
-    return {
-      failure: operationTechnicalFailure(
-        "protocol",
-        "operation_arbitration_failure_details_invalid",
-        `Operation ${operation.operationId} cannot represent arbitration failure details.`,
-        false,
-      ),
-    };
-  }
-  return {
-    failure: {
-      kind: "domain_failure",
-      code: declaration.code,
-      details,
-    },
-  };
 }
 
 function proposalForResult(
@@ -866,8 +761,8 @@ export function advanceHostedOperationBatch(
         tieBreaker: record.tieBreaker,
       },
       {
-        causationId: `interaction_arbitrated:${record.entityId}:${world.tick}`,
-        correlationId: `interaction_arbitrated:${record.entityId}:${world.tick}`,
+        causationId: winner.intentId,
+        correlationId: winner.intentId,
       },
     );
     nextWorld = written.world;
@@ -915,6 +810,16 @@ export function advanceHostedOperationBatch(
           source: result.pending.source,
           operation: result.pending.operation,
         },
+      });
+      continue;
+    }
+    if (result.kind === "termination_ready" && result.preTerminationProposal) {
+      processed.set(entry.operation.callId, {
+        kind: "termination_ready",
+        world: nextWorld,
+        operation: result.operation,
+        events: committed.events,
+        transaction: result.transaction,
       });
       continue;
     }
@@ -985,16 +890,23 @@ export function advanceHostedOperationBatch(
       );
       continue;
     }
-    const mapped = arbitrationFailure(
-      registry,
-      result.operation,
-      rejected.reasonCode,
-      winner.agentId,
+    const mapped = mapOperationArbitrationFailure(
+      {
+        world: nextWorld,
+        registry,
+        agentId: entry.agentId,
+        operation: result.operation,
+      },
+      {
+        reasonCode: rejected.reasonCode,
+        resourceEntityId: rejected.entityId,
+        winnerAgentId: winner.agentId,
+      },
     );
-    if (mapped.failure.kind === "technical_failure") {
+    if (mapped.kind === "technical_failure") {
       processed.set(
         entry.operation.callId,
-        hostedTechnicalFailure(nextWorld, result.operation, mapped.failure),
+        hostedTechnicalFailure(nextWorld, mapped.operation, mapped.failure),
       );
       continue;
     }
@@ -1003,7 +915,7 @@ export function advanceHostedOperationBatch(
         world: nextWorld,
         registry,
         agentId: entry.agentId,
-        operation: result.operation,
+        operation: mapped.operation,
       },
       mapped.failure,
       "arbitration_domain_failure",

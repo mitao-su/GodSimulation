@@ -11,6 +11,7 @@ import {
   type JsonObject,
 } from "@god-sim/protocol";
 import {
+  mapOperationArbitrationFailure,
   type OperationStartResult,
   type OperationTerminalProposal,
   type OperationTickResult,
@@ -72,6 +73,13 @@ interface FixtureOverrides {
   readonly fail?: HostedOperationRuntime["fail"];
   readonly cancel?: HostedOperationRuntime["cancel"];
   readonly fuse?: HostedOperationRuntime["fuse"];
+  readonly mapArbitrationFailure?: HostedOperationRuntime["mapArbitrationFailure"];
+  readonly arbitrationFailureMappings?: HostedOperationRuntime["arbitrationFailureMappings"];
+  readonly domainFailures?: HostedOperationRuntime["domainFailures"];
+  readonly worldPreconditions?: readonly {
+    readonly failureCode: string;
+    readonly description: string;
+  }[];
   readonly stateSchema?: HostedOperationRuntime["stateSchema"];
   readonly resultSchema?: HostedOperationRuntime["resultSchema"];
 }
@@ -131,7 +139,7 @@ function fixtureRuntime(overrides: FixtureOverrides = {}) {
       },
       target: { kind: "none" },
       duration: overrides.duration ?? { kind: "fixed" },
-      worldPreconditions: [
+      worldPreconditions: overrides.worldPreconditions ?? [
         {
           failureCode: "occupied",
           description: "The fixture host must be available.",
@@ -143,7 +151,13 @@ function fixtureRuntime(overrides: FixtureOverrides = {}) {
     taskSlots: ["BODY"],
     eventIgnore: [],
     publicBehavior: { kind: "visible", label: "testing lifecycle" },
-    domainFailures: [
+    arbitrationFailureMappings: overrides.arbitrationFailureMappings ?? {
+      resource_claimed: {
+        failureCode: "occupied",
+        buildDetails: ({ winnerAgentId }) => ({ holderId: winnerAgentId }),
+      },
+    },
+    domainFailures: overrides.domainFailures ?? [
       {
         code: "occupied",
         summary: "The fixture host is occupied.",
@@ -167,6 +181,14 @@ function fixtureRuntime(overrides: FixtureOverrides = {}) {
     cancel: overrides.cancel ?? cancel,
     fuse: overrides.fuse ?? fuse,
     acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure:
+      overrides.mapArbitrationFailure ??
+      ((_context, _operation, failure) =>
+        mapOperationArbitrationFailure(
+          runtime.arbitrationFailureMappings,
+          runtime.domainFailures,
+          failure,
+        )),
   };
   const registry: HostedOperationRuntimeRegistry = {
     ...testPluginRegistry,
@@ -793,6 +815,7 @@ describe("hosted operation lifecycle runner", () => {
         },
       },
     });
+    expect(result).not.toHaveProperty("preTerminationProposal");
     expect(result.world.objects.get(fridgeId)).toMatchObject({
       version: 1,
       state: { holder: agentId },
@@ -1066,6 +1089,135 @@ describe("hosted operation lifecycle runner", () => {
     );
   });
 
+  it("uses the explicit arbitration mapping instead of manual precondition order", () => {
+    const start = vi.fn(
+      (context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
+        kind: "started",
+        proposal: {
+          effects: [
+            {
+              type: "reserve_occupancy",
+              entityId: fridgeId,
+              agentId: context.agentId,
+              expectedObjectVersion: 0,
+            },
+          ],
+        },
+        nextState: operation.state,
+      }),
+    );
+    const domainFailures: HostedOperationRuntime["domainFailures"] = [
+      {
+        code: "unrelated",
+        summary: "An unrelated failure.",
+        detailsSchema: z.object({ marker: z.string() }).strict(),
+        resultSchema: z
+          .object({ status: z.literal("failed"), reason: z.string() })
+          .strict(),
+      },
+      {
+        code: "occupied",
+        summary: "The fixture host is occupied.",
+        detailsSchema: z.object({ holderId: AgentIdSchema }).strict(),
+        resultSchema: z
+          .object({ status: z.literal("failed"), reason: z.string() })
+          .strict(),
+      },
+    ];
+    const fixture = fixtureRuntime({
+      start,
+      worldPreconditions: [
+        { failureCode: "unrelated", description: "An unrelated condition." },
+        { failureCode: "occupied", description: "The fixture host is occupied." },
+      ],
+      domainFailures,
+      arbitrationFailureMappings: {
+        resource_claimed: {
+          failureCode: "occupied",
+          buildDetails: ({ winnerAgentId }) => ({ holderId: winnerAgentId }),
+        },
+      },
+    });
+    const bob = AgentIdSchema.parse("bob");
+    const result = advanceHostedOperationBatch(runningWorld(), fixture.registry, [
+      { agentId, operation: runtimeCall() },
+      {
+        agentId: bob,
+        operation: runtimeCall({
+          callId: OperationCallIdSchema.parse("operation-call:bob"),
+        }),
+      },
+    ]);
+
+    const failed = result.results.find(
+      ({ result: item }) =>
+        item.kind === "termination_ready" && item.transaction.outcome === "failed",
+    );
+    expect(failed?.result).toMatchObject({
+      transaction: {
+        failure: { code: "occupied", details: { holderId: expect.any(String) } },
+      },
+    });
+  });
+
+  it("keeps an unmapped arbitration failure technical and does not call fail", () => {
+    const fail = vi.fn<HostedOperationRuntime["fail"]>(
+      (): OperationTerminalProposal => ({
+        effects: [],
+        result: { status: "failed", reason: "Should not be called" },
+      }),
+    );
+    const start = vi.fn(
+      (context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
+        kind: "started",
+        proposal: {
+          effects: [
+            {
+              type: "reserve_occupancy",
+              entityId: fridgeId,
+              agentId: context.agentId,
+              expectedObjectVersion: 0,
+            },
+          ],
+        },
+        nextState: operation.state,
+      }),
+    );
+    const fixture = fixtureRuntime({
+      start,
+      fail,
+      arbitrationFailureMappings: {},
+    });
+    const bob = AgentIdSchema.parse("bob");
+    const result = advanceHostedOperationBatch(runningWorld(), fixture.registry, [
+      { agentId, operation: runtimeCall() },
+      {
+        agentId: bob,
+        operation: runtimeCall({
+          callId: OperationCallIdSchema.parse("operation-call:bob"),
+        }),
+      },
+    ]);
+
+    expect(result.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          result: expect.objectContaining({
+            kind: "technical_failure",
+            failure: expect.objectContaining({
+              code: "operation_arbitration_failure_unmapped",
+            }),
+            operation: expect.objectContaining({
+              firstStepState: "started",
+              progressTicks: 1,
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(fail).not.toHaveBeenCalled();
+  });
+
   it("maps arbitration loss after a completion proposal through fail without re-ticking", () => {
     const complete = vi.fn<HostedOperationRuntime["complete"]>(() => {
       throw new Error("temporary completion failure");
@@ -1106,6 +1258,14 @@ describe("hosted operation lifecycle runner", () => {
     ]);
 
     expect(fail).toHaveBeenCalledTimes(1);
+    expect(fail.mock.calls[0]?.[1]).toMatchObject({
+      firstStepState: "started",
+      progressTicks: 1,
+    });
+    expect(fail.mock.calls[0]?.[2]).toMatchObject({
+      kind: "domain_failure",
+      code: "occupied",
+    });
     expect(result.results.filter(({ result: item }) => item.kind === "termination_ready")).toHaveLength(1);
     expect(result.results).toEqual(
       expect.arrayContaining([

@@ -1,7 +1,11 @@
 import {
   JsonObjectSchema,
+  OperationArbitrationFailureSchema,
+  OperationArbitrationFailureReasonCodeSchema,
+  OperationTechnicalFailureSchema,
   type AgentId,
   type JsonObject,
+  type OperationArbitrationFailure,
   type OperationDomainFailure,
   type OperationTechnicalFailure,
   type OperationTerminationSource,
@@ -44,6 +48,14 @@ export interface OperationLifecycleTechnicalFailureResult {
   readonly operation: OperationRuntimeCall;
   readonly failure: OperationTechnicalFailure;
 }
+
+export type OperationLifecycleArbitrationFailureResult =
+  | {
+      readonly kind: "mapped";
+      readonly operation: OperationRuntimeCall;
+      readonly failure: OperationDomainFailure;
+    }
+  | OperationLifecycleTechnicalFailureResult;
 
 export interface OperationLifecycleTransitionResult {
   readonly kind: "transition";
@@ -255,6 +267,121 @@ function bindLifecycle(input: OperationLifecycleRunInput): BindLifecycleResult {
         state: parsedState.state,
       },
     },
+  };
+}
+
+function invalidArbitrationMappingResult(
+  operation: OperationRuntimeCall,
+): OperationLifecycleTechnicalFailureResult {
+  return technicalFailure(
+    operation,
+    operationTechnicalFailure(
+      "plugin",
+      "arbitration_failure_mapping_invalid_result",
+      "Operation arbitration failure mapping returned an invalid result.",
+      false,
+    ),
+  );
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expected.length &&
+    expected.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+  );
+}
+
+/**
+ * 让 operation 自己把结构化仲裁事实映射为已声明的游戏内失败。
+ * 映射在隔离上下文中执行，任何未映射或非法返回都保持为技术失败。
+ */
+export function mapOperationArbitrationFailure(
+  input: OperationLifecycleRunInput,
+  failure: OperationArbitrationFailure,
+): OperationLifecycleArbitrationFailureResult {
+  let parsedFailure: OperationArbitrationFailure;
+  try {
+    const parsed = OperationArbitrationFailureSchema.safeParse(failure);
+    if (!parsed.success) return invalidArbitrationMappingResult(input.operation);
+    parsedFailure = parsed.data;
+  } catch {
+    return invalidArbitrationMappingResult(input.operation);
+  }
+
+  const bound = bindLifecycle(input);
+  if (bound.kind === "technical_failure") return bound;
+
+  let mapped: unknown;
+  try {
+    mapped = bound.binding.runtime.mapArbitrationFailure(
+      bound.binding.context,
+      bound.binding.operation,
+      parsedFailure,
+    );
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error);
+    return technicalFailure(
+      input.operation,
+      operationTechnicalFailure(
+        "plugin",
+        "arbitration_failure_mapping_exception",
+        `Operation arbitration failure mapping threw: ${description}`,
+        true,
+      ),
+    );
+  }
+
+  if (typeof mapped !== "object" || mapped === null) {
+    return invalidArbitrationMappingResult(input.operation);
+  }
+  const candidate = mapped as Record<string, unknown>;
+  if (candidate["kind"] === "technical_failure") {
+    const parsed = OperationTechnicalFailureSchema.safeParse(mapped);
+    return parsed.success
+      ? technicalFailure(input.operation, parsed.data)
+      : invalidArbitrationMappingResult(input.operation);
+  }
+  if (candidate["kind"] === "unmapped") {
+    if (!hasExactKeys(candidate, ["kind", "reasonCode"])) {
+      return invalidArbitrationMappingResult(input.operation);
+    }
+    const reasonCode = OperationArbitrationFailureReasonCodeSchema.safeParse(
+      candidate["reasonCode"],
+    );
+    return reasonCode.success
+      ? technicalFailure(
+          input.operation,
+          operationTechnicalFailure(
+            "protocol",
+            "operation_arbitration_failure_unmapped",
+            `Operation ${input.operation.operationId} did not map arbitration reason ${reasonCode.data}.`,
+            false,
+          ),
+        )
+      : invalidArbitrationMappingResult(input.operation);
+  }
+  if (candidate["kind"] !== "mapped") {
+    return invalidArbitrationMappingResult(input.operation);
+  }
+  if (!hasExactKeys(candidate, ["kind", "failure"])) {
+    return invalidArbitrationMappingResult(input.operation);
+  }
+
+  const validated = validateDeclaredOperationFailureInput(
+    bound.binding.runtime.domainFailures,
+    candidate["failure"],
+  );
+  if (validated.kind === "technical_failure") {
+    return technicalFailure(input.operation, validated.failure);
+  }
+  return {
+    kind: "mapped",
+    operation: bound.binding.operation,
+    failure: validated.value,
   };
 }
 
