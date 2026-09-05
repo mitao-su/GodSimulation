@@ -6,6 +6,7 @@ import {
   type AgentDefinition,
   type AgentOperationDefinition,
   type HostedOperationDomainFailureDefinition,
+  type OperationStartResult,
 } from "@god-sim/plugin-sdk";
 import {
   OperationHostDefinitionIdSchema,
@@ -35,6 +36,7 @@ import {
 import type {
   HostedOperationRuntime,
   OperationRuntimeContext,
+  OperationRuntimeCall,
   RegisteredOperation,
 } from "./operation-runtime";
 
@@ -72,6 +74,112 @@ function hostedFailures(
     detailsSchema: FailureDetailsSchema,
     resultSchema: operation.resultSchema,
   }));
+}
+
+function startFailure(
+  operation: RegisteredOperation,
+  reasonCode: string,
+): OperationStartResult {
+  if (!operation.domainFailures.some((failure) => failure.code === reasonCode)) {
+    return {
+      kind: "technical_failure",
+      category: "plugin",
+      code: "undeclared_domain_failure",
+      message: `Operation ${operation.id} returned undeclared domain failure ${reasonCode}.`,
+      retryable: false,
+    };
+  }
+  return { kind: "domain_failure", code: reasonCode, details: {} };
+}
+
+function startAfterAvailability(
+  operation: RegisteredOperation,
+  operationCall: OperationRuntimeCall,
+  availability: ReturnType<RegisteredOperation["canStart"]>,
+): OperationStartResult {
+  if (!availability.available) {
+    return startFailure(operation, availability.reasonCode);
+  }
+  return {
+    kind: "started",
+    proposal: { effects: [] },
+    nextState: operationCall.state,
+  };
+}
+
+function moveStartAvailability(
+  context: OperationRuntimeContext,
+  argumentsValue: Readonly<JsonObject>,
+) {
+  const targetEntityId = ENTITY_TARGET_ARGUMENTS_SCHEMA.safeParse(argumentsValue)
+    .data?.targetEntityId;
+  const target = targetEntityId
+    ? context.world.objects.get(targetEntityId)
+    : undefined;
+  const targetDefinition = target
+    ? context.registry.getObject(target.definitionId)?.definition
+    : undefined;
+  if (!target || !targetDefinition) {
+    return {
+      available: false as const,
+      reasonCode: "unknown_target",
+      summary: "The movement target does not exist",
+    };
+  }
+  if (!targetDefinition.capabilities.includes("approachable")) {
+    return {
+      available: false as const,
+      reasonCode: "movement_blocked",
+      summary: "The movement target is not approachable",
+    };
+  }
+  const operation = createMoveOperation();
+  const route = operation.canStart(context, argumentsValue);
+  return route;
+}
+
+function observeStartAvailability(
+  context: OperationRuntimeContext,
+  argumentsValue: Readonly<JsonObject>,
+) {
+  const targetEntityId = ENTITY_TARGET_ARGUMENTS_SCHEMA.safeParse(argumentsValue)
+    .data?.targetEntityId;
+  const target = targetEntityId
+    ? context.world.objects.get(targetEntityId)
+    : undefined;
+  const targetDefinition = target
+    ? context.registry.getObject(target.definitionId)?.definition
+    : undefined;
+  const agent = context.world.agents.get(context.agentId);
+  if (
+    !target ||
+    !targetDefinition?.capabilities.includes("observable") ||
+    !agent?.knowledge.visibleEntityIds.has(targetEntityId as never)
+  ) {
+    return {
+      available: false as const,
+      reasonCode: "target_not_visible",
+      summary: `${targetEntityId ?? "Target"} is not currently visible`,
+    };
+  }
+  return { available: true as const };
+}
+
+function waitStartAvailability(
+  context: OperationRuntimeContext,
+  argumentsValue: Readonly<JsonObject>,
+) {
+  const parsed = WaitOperationArgumentsSchema.safeParse(argumentsValue);
+  const max =
+    context.world.simulationRulesLock.rules.operations.wait.maxDurationTicks;
+  if (!parsed.success || parsed.data.durationTicks > max) {
+    return {
+      available: false as const,
+      reasonCode: "invalid_duration",
+      summary: `Wait duration must not exceed ${max} ticks`,
+    };
+  }
+  return { available: true as const };
 }
 
 function moveResult(stateValue: Readonly<JsonObject>): JsonObject {
@@ -116,6 +224,10 @@ function legacyCoreRuntime(
       state: Readonly<JsonObject>,
       result: Readonly<JsonObject>,
     ) => JsonObject;
+    readonly start?: (
+      context: OperationRuntimeContext,
+      operation: OperationRuntimeCall,
+    ) => OperationStartResult;
   },
 ): UnboundAgentOperationRuntime {
   const resultFromState =
@@ -138,11 +250,13 @@ function legacyCoreRuntime(
       operation.initialState(context, argumentsValue),
     resolveDuration: (context, _host, argumentsValue) =>
       operation.resolveDuration(context, argumentsValue),
-    start: (_context, operationCall) => ({
-      kind: "started",
-      proposal: { effects: [] },
-      nextState: operationCall.state,
-    }),
+    start:
+      options.start ??
+      ((_context, operationCall) => ({
+        kind: "started",
+        proposal: { effects: [] },
+        nextState: operationCall.state,
+      })),
     complete: (_context, operationCall) => ({
       effects: [],
       result: resultFromState(operationCall.state),
@@ -406,12 +520,24 @@ function coreAgentOperationImplementations(): ReadonlyMap<
       resultFromState: moveResult,
       fuseFromState: moveResult,
       acknowledgeFuseResult: acknowledgeMoveResult,
+      start: (context, operationCall) =>
+        startAfterAvailability(
+          move,
+          operationCall,
+          moveStartAvailability(context, operationCall.arguments),
+        ),
     }),
     legacyCoreRuntime(observe, {
       displayName: "Observe",
       parametersSchema: ENTITY_TARGET_ARGUMENTS_SCHEMA,
       target: { kind: "object", requiredCapabilities: ["observable"] },
       duration: { kind: "fixed" },
+      start: (context, operationCall) =>
+        startAfterAvailability(
+          observe,
+          operationCall,
+          observeStartAvailability(context, operationCall.arguments),
+        ),
     }),
     createReadRuntime(),
     unavailableRuntime({
@@ -437,6 +563,12 @@ function coreAgentOperationImplementations(): ReadonlyMap<
       parametersSchema: WaitOperationArgumentsSchema,
       target: { kind: "none" },
       duration: { kind: "fixed" },
+      start: (context, operationCall) =>
+        startAfterAvailability(
+          wait,
+          operationCall,
+          waitStartAvailability(context, operationCall.arguments),
+        ),
     }),
   ];
   return new Map(
@@ -445,6 +577,11 @@ function coreAgentOperationImplementations(): ReadonlyMap<
       implementation,
     ]),
   );
+}
+
+/** 核心可由角色定义挂载的 operation ID；实际可调用性仍由宿主 registry 决定。 */
+export function knownCoreAgentOperationIds(): readonly OperationId[] {
+  return [...coreAgentOperationImplementations().keys()];
 }
 
 export function bindAgentOperationRuntime(

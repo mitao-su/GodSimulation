@@ -10,12 +10,15 @@ import type { ToiletState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z
-  .object({
-    resourceEntityId: EntityIdSchema,
-    winnerAgentId: AgentIdSchema,
-  })
-  .strict();
+const failureDetailsSchema = z.union([
+  z.object({ summary: z.string() }).strict(),
+  z
+    .object({
+      resourceEntityId: EntityIdSchema,
+      winnerAgentId: AgentIdSchema,
+    })
+    .strict(),
+]);
 
 function releaseIfHeld(
   state: Readonly<ToiletState>,
@@ -48,6 +51,10 @@ export const useToiletInteraction: InteractionDefinition<ToiletState> = {
     duration: { kind: "fixed" },
     worldPreconditions: [
       {
+        failureCode: "out_of_range",
+        description: "The character must be at the toilet interaction position.",
+      },
+      {
         failureCode: "occupied",
         description: "Another character may already be using the toilet.",
       },
@@ -70,6 +77,12 @@ export const useToiletInteraction: InteractionDefinition<ToiletState> = {
     },
   },
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The toilet is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "occupied",
       summary: "The toilet is occupied",

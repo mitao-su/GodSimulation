@@ -33,6 +33,10 @@ export const doorOpenInteraction: InteractionDefinition<DoorState> = {
     target: { kind: "none" },
     duration: { kind: "fixed" },
     worldPreconditions: [
+      {
+        failureCode: "out_of_range",
+        description: "The character must be at the door interaction position.",
+      },
       { failureCode: "already_open", description: "The door may already be open." },
       { failureCode: "locked", description: "A locked door cannot be opened." },
     ],
@@ -46,6 +50,12 @@ export const doorOpenInteraction: InteractionDefinition<DoorState> = {
   publicBehavior: { kind: "visible", label: "opening the door" },
   arbitrationFailureMappings: {},
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The door is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "already_open",
       summary: "The door is already open",
@@ -95,6 +105,10 @@ export const doorCloseInteraction: InteractionDefinition<DoorState> = {
     target: { kind: "none" },
     duration: { kind: "fixed" },
     worldPreconditions: [
+      {
+        failureCode: "out_of_range",
+        description: "The character must be at the door interaction position.",
+      },
       { failureCode: "already_closed", description: "The door may already be closed." },
     ],
   },
@@ -107,6 +121,12 @@ export const doorCloseInteraction: InteractionDefinition<DoorState> = {
   publicBehavior: { kind: "visible", label: "closing the door" },
   arbitrationFailureMappings: {},
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The door is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "already_closed",
       summary: "The door is already closed",
@@ -148,6 +168,10 @@ export const doorLockInteraction: InteractionDefinition<DoorState> = {
     target: { kind: "none" },
     duration: { kind: "fixed" },
     worldPreconditions: [
+      {
+        failureCode: "out_of_range",
+        description: "The character must be at the door interaction position.",
+      },
       { failureCode: "must_close_first", description: "The door must be closed first." },
       { failureCode: "already_locked", description: "The door may already be locked." },
     ],
@@ -161,6 +185,12 @@ export const doorLockInteraction: InteractionDefinition<DoorState> = {
   publicBehavior: { kind: "visible", label: "locking the door" },
   arbitrationFailureMappings: {},
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The door is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "must_close_first",
       summary: "Close the door before locking it",
@@ -209,6 +239,10 @@ export const doorUnlockInteraction: InteractionDefinition<DoorState> = {
     target: { kind: "none" },
     duration: { kind: "fixed" },
     worldPreconditions: [
+      {
+        failureCode: "out_of_range",
+        description: "The character must be at the door interaction position.",
+      },
       { failureCode: "already_unlocked", description: "The door may already be unlocked." },
     ],
   },
@@ -221,6 +255,12 @@ export const doorUnlockInteraction: InteractionDefinition<DoorState> = {
   publicBehavior: { kind: "visible", label: "unlocking the door" },
   arbitrationFailureMappings: {},
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The door is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "already_unlocked",
       summary: "The door is not locked",

@@ -10,12 +10,15 @@ import type { RefrigeratorState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z
-  .object({
-    resourceEntityId: EntityIdSchema,
-    winnerAgentId: AgentIdSchema,
-  })
-  .strict();
+const failureDetailsSchema = z.union([
+  z.object({ summary: z.string() }).strict(),
+  z
+    .object({
+      resourceEntityId: EntityIdSchema,
+      winnerAgentId: AgentIdSchema,
+    })
+    .strict(),
+]);
 
 function releaseIfHeld(
   state: Readonly<RefrigeratorState>,
@@ -50,6 +53,10 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
     duration: { kind: "fixed" },
     worldPreconditions: [
       {
+        failureCode: "out_of_range",
+        description: "The character must be at the refrigerator interaction position.",
+      },
+      {
         failureCode: "occupied",
         description: "Another character may already be using the refrigerator.",
       },
@@ -72,6 +79,12 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
     },
   },
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The refrigerator is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "occupied",
       summary: "The refrigerator is occupied",

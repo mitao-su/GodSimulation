@@ -42,12 +42,15 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
 
 const fridgeState = z.object({ holder: z.string().nullable() }).strict();
 type FridgeState = z.infer<typeof fridgeState>;
-const fridgeFailureDetailsSchema = z
-  .object({
-    resourceEntityId: EntityIdSchema,
-    winnerAgentId: AgentIdSchema,
-  })
-  .strict();
+const fridgeFailureDetailsSchema = z.union([
+  z.object({ summary: z.string() }).strict(),
+  z
+    .object({
+      resourceEntityId: EntityIdSchema,
+      winnerAgentId: AgentIdSchema,
+    })
+    .strict(),
+]);
 
 const fridgeDefinition: ObjectDefinition<FridgeState> = {
   id: "test.fridge",
@@ -87,6 +90,10 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         duration: { kind: "fixed" },
         worldPreconditions: [
           {
+            failureCode: "out_of_range",
+            description: "The character must be at the refrigerator interaction position.",
+          },
+          {
             failureCode: "occupied",
             description: "Another character may already be using the refrigerator.",
           },
@@ -109,6 +116,14 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         },
       },
       domainFailures: [
+        {
+          code: "out_of_range",
+          summary: "Fridge out of range",
+          detailsSchema: z.object({ summary: z.string() }).strict(),
+          resultSchema: z
+            .object({ status: z.literal("failed") })
+            .strict(),
+        },
         {
           code: "occupied",
           summary: "Fridge occupied",
@@ -192,6 +207,10 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         duration: { kind: "fixed" },
         worldPreconditions: [
           {
+            failureCode: "out_of_range",
+            description: "The character must be at the refrigerator interaction position.",
+          },
+          {
             failureCode: "occupied",
             description: "Another character may already be using the refrigerator.",
           },
@@ -221,6 +240,12 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         },
       },
       domainFailures: [
+        {
+          code: "out_of_range",
+          summary: "Fridge out of range",
+          detailsSchema: z.object({ summary: z.string() }).strict(),
+          resultSchema: z.object({}).strict(),
+        },
         {
           code: "occupied",
           summary: "Fridge occupied",
@@ -271,7 +296,12 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         ),
         target: { kind: "none" },
         duration: { kind: "fixed" },
-        worldPreconditions: [],
+        worldPreconditions: [
+          {
+            failureCode: "out_of_range",
+            description: "The character must be at the refrigerator interaction position.",
+          },
+        ],
       },
       target: { kind: "none" },
       duration: { kind: "fixed" },
@@ -287,7 +317,14 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "configuring the fridge" },
       arbitrationFailureMappings: {},
-      domainFailures: [],
+      domainFailures: [
+        {
+          code: "out_of_range",
+          summary: "Fridge out of range",
+          detailsSchema: z.object({ summary: z.string() }).strict(),
+          resultSchema: z.object({}).strict(),
+        },
+      ],
       resultSchema: z.object({}).strict(),
       canStart: () => ({ available: true }),
       start: () => ({ effects: [] }),
