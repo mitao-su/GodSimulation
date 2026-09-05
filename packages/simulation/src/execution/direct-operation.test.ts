@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 
 import type { GamePlugin } from "@god-sim/plugin-sdk";
 import type {
@@ -8,7 +7,10 @@ import type {
   OperationCallId,
 } from "@god-sim/protocol";
 
-import { createOperationRuntimeContext } from "./operation-runtime";
+import {
+  createOperationRuntimeContext,
+  type HostedOperationRuntime,
+} from "./operation-runtime";
 import { createOperationRegistry } from "./operation-registry";
 import {
   prepareDirectOperationCall,
@@ -24,53 +26,6 @@ import { createPluginRegistry } from "../world/plugin-registry";
 const aliceId = "alice" as never;
 const bobId = "bob" as never;
 const fridgeId = "fridge-1" as never;
-
-function registryWithOutOfRangeFailure() {
-  const plugin: GamePlugin = {
-    ...testPlugin,
-    objects: testPlugin.objects.map((definition) =>
-      definition.id !== "test.fridge"
-        ? definition
-        : {
-            ...definition,
-            interactions: definition.interactions.map((interaction) =>
-              interaction.id !== "use"
-                ? interaction
-                : {
-                    ...interaction,
-                    manual: {
-                      ...interaction.manual,
-                      worldPreconditions: [
-                        ...interaction.manual.worldPreconditions,
-                        {
-                          failureCode: "out_of_range",
-                          description:
-                            "The actor must be at the refrigerator interaction position.",
-                        },
-                      ],
-                    },
-                    domainFailures: [
-                      ...interaction.domainFailures,
-                      {
-                        code: "out_of_range",
-                        summary: "The refrigerator is out of range",
-                        detailsSchema: z
-                          .object({ summary: z.string() })
-                          .strict(),
-                        resultSchema: interaction.resultSchema,
-                      },
-                    ],
-                  },
-            ),
-          },
-    ),
-  };
-  const pluginRegistry = createPluginRegistry([plugin]);
-  return {
-    ...pluginRegistry,
-    ...createOperationRegistry(pluginRegistry),
-  };
-}
 
 function worldAtFridge(options?: { readonly holder?: string | null }) {
   const world = simulationTestWorld();
@@ -117,6 +72,26 @@ function registryWithCountedDuration() {
   };
 }
 
+function registryWithHostedOverride(
+  override: Partial<HostedOperationRuntime>,
+) {
+  const base = testPluginRegistry;
+  return {
+    ...base,
+    resolveOperationReference: (context: Parameters<typeof base.resolveOperationReference>[0], track: Parameters<typeof base.resolveOperationReference>[1], reference: Parameters<typeof base.resolveOperationReference>[2]) => {
+      const resolved = base.resolveOperationReference(context, track, reference);
+      if (resolved.kind === "invalid_reference") return resolved;
+      return {
+        ...resolved,
+        binding: {
+          ...resolved.binding,
+          runtime: { ...resolved.binding.runtime, ...override },
+        },
+      };
+    },
+  } as typeof testPluginRegistry;
+}
+
 function operationReference(
   operationId: string,
   argumentsValue: JsonObject,
@@ -159,7 +134,7 @@ function startPrepared(
 
 describe("direct operation invocation", () => {
   it("establishes a furniture call before checking distance", () => {
-    const registry = registryWithOutOfRangeFailure();
+    const registry = testPluginRegistry;
     const world = simulationTestWorld();
     const prepared = preparedOperation(
       prepareDirectOperationCall(
@@ -183,7 +158,7 @@ describe("direct operation invocation", () => {
   });
 
   it("establishes an occupied furniture call and fails at start", () => {
-    const registry = registryWithOutOfRangeFailure();
+    const registry = testPluginRegistry;
     const world = worldAtFridge({ holder: "bob" });
     const prepared = preparedOperation(
       prepareDirectOperationCall(
@@ -321,7 +296,7 @@ describe("direct operation invocation", () => {
   });
 
   it("locks state-dependent duration at call creation", () => {
-    const registry = registryWithOutOfRangeFailure();
+    const registry = testPluginRegistry;
     const world = worldAtFridge();
     const prepared = preparedOperation(
       prepareDirectOperationCall(
@@ -373,6 +348,58 @@ describe("direct operation invocation", () => {
       totalTicks: 17,
     });
     expect(registry.resolveDuration).toHaveBeenCalledOnce();
+  });
+
+  it("converts resolver exceptions into a typed preparation failure", () => {
+    const registry = registryWithHostedOverride({
+      resolveDuration: () => {
+        throw new Error("resolver exploded");
+      },
+    });
+
+    expect(
+      prepareDirectOperationCall(
+        worldAtFridge(),
+        registry,
+        aliceId,
+        "BODY",
+        operationReference("object.test.fridge.stock", {}, "fridge-1"),
+        "operation-call:direct:resolver-error" as OperationCallId,
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      failure: { category: "plugin", code: "operation_preparation_failed" },
+    });
+  });
+
+  it("rejects invalid duration and operation state from a hosted runtime", () => {
+    const invalidDuration = registryWithHostedOverride({
+      resolveDuration: () => ({ kind: "indeterminate" }),
+    });
+    expect(
+      prepareDirectOperationCall(
+        worldAtFridge(),
+        invalidDuration,
+        aliceId,
+        "BODY",
+        operationReference("object.test.fridge.stock", {}, "fridge-1"),
+        "operation-call:direct:invalid-duration" as OperationCallId,
+      ),
+    ).toMatchObject({ kind: "technical_failure" });
+
+    const invalidState = registryWithHostedOverride({
+      initialState: () => ({ invalid: true }),
+    });
+    expect(
+      prepareDirectOperationCall(
+        worldAtFridge(),
+        invalidState,
+        aliceId,
+        "BODY",
+        operationReference("object.test.fridge.stock", {}, "fridge-1"),
+        "operation-call:direct:invalid-state" as OperationCallId,
+      ),
+    ).toMatchObject({ kind: "technical_failure" });
   });
 
   it("keeps core start failures inside each operation's declared catalog", () => {

@@ -6,6 +6,7 @@ import {
   type AgentId,
   type JsonObject,
   type OperationCallId,
+  type OperationTechnicalFailure,
   type TaskOption,
 } from "@god-sim/protocol";
 
@@ -36,7 +37,25 @@ export type PrepareDirectOperationResult =
       readonly kind: "invalid_reference";
       readonly code: OperationReferenceRejectionCode;
       readonly message: string;
+    }
+  | {
+      readonly kind: "technical_failure";
+      readonly failure: OperationTechnicalFailure;
     };
+
+function directPreparationFailure(error: unknown): OperationTechnicalFailure {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Operation preparation failed with an unknown plugin error.";
+  return {
+    kind: "technical_failure",
+    category: "plugin",
+    code: "operation_preparation_failed",
+    message: message.slice(0, 2_000),
+    retryable: false,
+  };
+}
 
 function sameTracks(left: readonly string[], right: readonly string[]): boolean {
   return (
@@ -139,34 +158,48 @@ export function prepareDirectOperationCall(
     };
   }
   const context = createOperationRuntimeContext(world, registry, agentId);
-  const resolved = registry.resolveOperationReference(context, track, reference);
+  let resolved: ReturnType<typeof registry.resolveOperationReference>;
+  try {
+    resolved = registry.resolveOperationReference(context, track, reference);
+  } catch (error) {
+    return { kind: "technical_failure", failure: directPreparationFailure(error) };
+  }
   if (resolved.kind === "invalid_reference") return resolved;
 
-  const { runtime, host, target, arguments: argumentsValue } = resolved.binding;
-  const duration = OperationDurationSchema.parse(
-    runtime.resolveDuration(context, host, argumentsValue),
-  );
-  const state = JsonObjectSchema.parse(
-    runtime.stateSchema.parse(
-      runtime.initialState(context, host, argumentsValue),
-    ),
-  );
+  try {
+    const { runtime, host, target, arguments: argumentsValue } = resolved.binding;
+    const duration = OperationDurationSchema.parse(
+      runtime.resolveDuration(context, host, argumentsValue),
+    );
+    if (duration.kind !== runtime.duration.kind) {
+      throw new Error(
+        `Operation ${runtime.id} resolved ${duration.kind} duration despite declaring ${runtime.duration.kind}`,
+      );
+    }
+    const state = JsonObjectSchema.parse(
+      runtime.stateSchema.parse(
+        runtime.initialState(context, host, argumentsValue),
+      ),
+    );
 
-  return {
-    kind: "prepared",
-    operation: {
-      callId,
-      operationId: runtime.id,
-      host,
-      hostDefinition: runtime.host,
-      target,
-      taskSlots: runtime.taskSlots,
-      arguments: argumentsValue,
-      duration,
-      startedAtTick: world.tick,
-      progressTicks: 0,
-      firstStepState: "pending",
-      state,
-    },
-  };
+    return {
+      kind: "prepared",
+      operation: {
+        callId,
+        operationId: runtime.id,
+        host,
+        hostDefinition: runtime.host,
+        target,
+        taskSlots: runtime.taskSlots,
+        arguments: argumentsValue,
+        duration,
+        startedAtTick: world.tick,
+        progressTicks: 0,
+        firstStepState: "pending",
+        state,
+      },
+    };
+  } catch (error) {
+    return { kind: "technical_failure", failure: directPreparationFailure(error) };
+  }
 }

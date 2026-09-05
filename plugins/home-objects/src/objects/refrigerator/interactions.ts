@@ -50,6 +50,10 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
     duration: { kind: "fixed" },
     worldPreconditions: [
       {
+        failureCode: "out_of_range",
+        description: "The character must be at the refrigerator interaction position.",
+      },
+      {
         failureCode: "occupied",
         description: "Another character may already be using the refrigerator.",
       },
@@ -72,6 +76,12 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
     },
   },
   domainFailures: [
+    {
+      code: "out_of_range",
+      summary: "The refrigerator is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
     {
       code: "occupied",
       summary: "The refrigerator is occupied",
