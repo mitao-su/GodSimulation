@@ -3,6 +3,8 @@ import type { z } from "zod";
 import type {
   HostedOperationDomainFailureDefinition,
   InteractionAvailability,
+  OperationArbitrationFailureMappingResult,
+  OperationArbitrationFailureMappings,
   OperationDomainFailureDefinition,
   OperationEventIgnoreRule,
   OperationStartResult,
@@ -17,6 +19,7 @@ import type {
   EntityId,
   EventId,
   JsonObject,
+  OperationArbitrationFailure,
   OperationDomainFailure,
   OperationHostDefinitionReference,
   OperationHostReference,
@@ -94,6 +97,7 @@ export interface HostedOperationRuntime {
   readonly eventIgnore: readonly OperationEventIgnoreRule[];
   readonly publicBehavior: PublicBehaviorDeclaration;
   readonly domainFailures: readonly HostedOperationDomainFailureDefinition[];
+  readonly arbitrationFailureMappings: OperationArbitrationFailureMappings;
   readonly resultSchema: z.ZodType<JsonObject>;
   readonly stateSchema: z.ZodType<JsonObject>;
   readonly parametersSchema: z.ZodType<JsonObject>;
@@ -137,6 +141,11 @@ export interface HostedOperationRuntime {
     operation: OperationRuntimeCall,
     result: Readonly<JsonObject>,
   ): JsonObject;
+  mapArbitrationFailure(
+    context: OperationRuntimeContext,
+    operation: OperationRuntimeCall,
+    failure: OperationArbitrationFailure,
+  ): OperationArbitrationFailureMappingResult;
 }
 
 export interface ResolvedOperationReference {
@@ -258,6 +267,7 @@ export interface RegisteredOperation {
   readonly eventIgnore: readonly OperationEventIgnoreRule[];
   readonly publicBehavior: PublicBehaviorDeclaration;
   readonly domainFailures: readonly OperationDomainFailureDefinition[];
+  readonly arbitrationFailureMappings: OperationArbitrationFailureMappings;
   readonly resultSchema: z.ZodType<JsonObject>;
   /**
    * Schema of the opaque per-call state owned by this operation. The

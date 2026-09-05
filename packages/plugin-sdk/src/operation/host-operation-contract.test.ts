@@ -5,11 +5,14 @@ import {
   AgentIdSchema,
   EntityIdSchema,
   OperationManualSchema,
+  type JsonObject,
+  OperationArbitrationFailureSchema,
   type OperationTargetRequirement,
 } from "@god-sim/protocol";
 
 import {
   assertHostedOperationContract,
+  mapOperationArbitrationFailure,
   OperationStartResultSchema,
   OperationTerminalProposalSchema,
   OperationTickResultSchema,
@@ -28,6 +31,12 @@ const parametersSchema = z
 const operationStateSchema = z.object({ delivered: z.boolean() }).strict();
 const failureDetailsSchema = z.object({ hostDefinitionId: z.string() }).strict();
 const failureResultSchema = z.object({ reason: z.string() }).strict();
+const arbitrationFailureDetailsSchema = z
+  .object({
+    resourceEntityId: EntityIdSchema,
+    winnerAgentId: AgentIdSchema,
+  })
+  .strict();
 
 const manual = OperationManualSchema.parse({
   operationId: "core.read",
@@ -66,6 +75,7 @@ const hostedDefinition: HostedOperationDefinition<
   parametersSchema,
   eventIgnore: [],
   publicBehavior: { kind: "hidden" },
+  arbitrationFailureMappings: {},
   domainFailures: [
     {
       code: "unknown_definition",
@@ -113,6 +123,63 @@ function hostedDefinitionWithTarget(
     }),
   };
 }
+
+function hostedDefinitionWithArbitrationMapping(
+  worldPreconditions: readonly {
+    readonly failureCode: string;
+    readonly description: string;
+  }[],
+  domainFailures: HostedOperationDefinition<
+    HostState,
+    Context,
+    Arguments,
+    OperationState
+  >["domainFailures"],
+) {
+  return {
+    ...hostedDefinition,
+    manual: OperationManualSchema.parse({
+      ...manual,
+      worldPreconditions,
+    }),
+    domainFailures,
+    arbitrationFailureMappings: {
+      resource_claimed: {
+        failureCode: "occupied",
+        buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+          resourceEntityId,
+          winnerAgentId,
+        }),
+      },
+    },
+  } satisfies HostedOperationDefinition<
+    HostState,
+    Context,
+    Arguments,
+    OperationState
+  >;
+}
+
+const resourceClaimedFailure = OperationArbitrationFailureSchema.parse({
+  reasonCode: "resource_claimed",
+  resourceEntityId: "fridge-1",
+  winnerAgentId: "bob",
+});
+
+const arbitrationDomainFailures = [
+  {
+    code: "unrelated_failure",
+    summary: "An unrelated failure.",
+    detailsSchema: z.object({}).strict(),
+    resultSchema: failureResultSchema,
+  },
+  {
+    code: "occupied",
+    summary: "The resource is occupied.",
+    detailsSchema: arbitrationFailureDetailsSchema,
+    resultSchema: failureResultSchema,
+  },
+] as const;
 
 describe("hosted operation SDK contract", () => {
   it("keeps an agent mount separate from its core runtime", () => {
@@ -214,6 +281,222 @@ describe("hosted operation SDK contract", () => {
     ).not.toThrow();
   });
 
+  it("maps arbitration reasons to explicit failures independently of manual order", () => {
+    const firstOrder = hostedDefinitionWithArbitrationMapping(
+      [
+        {
+          failureCode: "unrelated_failure",
+          description: "An unrelated failure.",
+        },
+        {
+          failureCode: "occupied",
+          description: "The resource may already be occupied.",
+        },
+      ],
+      arbitrationDomainFailures,
+    );
+    const secondOrder = hostedDefinitionWithArbitrationMapping(
+      [
+        {
+          failureCode: "occupied",
+          description: "The resource may already be occupied.",
+        },
+        {
+          failureCode: "unrelated_failure",
+          description: "An unrelated failure.",
+        },
+      ],
+      arbitrationDomainFailures,
+    );
+
+    expect(() =>
+      assertHostedOperationContract("First order", firstOrder),
+    ).not.toThrow();
+    expect(() =>
+      assertHostedOperationContract("Second order", secondOrder),
+    ).not.toThrow();
+
+    const expected = {
+      kind: "mapped",
+      failure: {
+        kind: "domain_failure",
+        code: "occupied",
+        details: {
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        },
+      },
+    } as const;
+    expect(
+      mapOperationArbitrationFailure(
+        firstOrder.arbitrationFailureMappings,
+        firstOrder.domainFailures,
+        resourceClaimedFailure,
+      ),
+    ).toEqual(expected);
+    expect(
+      mapOperationArbitrationFailure(
+        secondOrder.arbitrationFailureMappings,
+        secondOrder.domainFailures,
+        resourceClaimedFailure,
+      ),
+    ).toEqual(expected);
+  });
+
+  it("rejects an arbitration mapping that names an undeclared domain failure", () => {
+    const definition = {
+      ...hostedDefinitionWithArbitrationMapping(
+        [
+          {
+            failureCode: "unrelated_failure",
+            description: "An unrelated failure.",
+          },
+        ],
+        [
+          {
+            code: "unrelated_failure",
+            summary: "An unrelated failure.",
+            detailsSchema: z.object({}).strict(),
+            resultSchema: failureResultSchema,
+          },
+        ],
+      ),
+      arbitrationFailureMappings: {
+        resource_claimed: {
+          failureCode: "occupied",
+          buildDetails: () => ({}),
+        },
+      },
+    } as const;
+
+    expect(() =>
+      assertHostedOperationContract("Undeclared arbitration failure", definition),
+    ).toThrow(/references undeclared failure occupied/i);
+  });
+
+  it("rejects an arbitration mapping with an unknown reason code", () => {
+    const definition = {
+      ...hostedDefinition,
+      arbitrationFailureMappings: {
+        made_up_reason: {
+          failureCode: "unknown_definition",
+          buildDetails: () => ({ hostDefinitionId: "home.unknown" }),
+        },
+      },
+    } as const;
+
+    expect(() =>
+      assertHostedOperationContract("Unknown arbitration reason", definition),
+    ).toThrow(/unknown arbitration failure reason made_up_reason/i);
+  });
+
+  it("rejects an arbitration mapping that is absent from manual preconditions", () => {
+    const definition = hostedDefinitionWithArbitrationMapping(
+      [
+        {
+          failureCode: "unrelated_failure",
+          description: "An unrelated failure.",
+        },
+      ],
+      arbitrationDomainFailures,
+    );
+
+    expect(() =>
+      assertHostedOperationContract("Missing manual arbitration failure", definition),
+    ).toThrow(/missing from manual world preconditions: occupied/i);
+  });
+
+  it("rejects an arbitration mapping without a details builder", () => {
+    const definition = {
+      ...hostedDefinitionWithArbitrationMapping(
+        [
+          {
+            failureCode: "unknown_definition",
+            description: "The requested host definition must exist.",
+          },
+        ],
+        hostedDefinition.domainFailures,
+      ),
+      arbitrationFailureMappings: {
+        resource_claimed: {
+          failureCode: "unknown_definition",
+        },
+      },
+    } as const;
+
+    expect(() =>
+      assertHostedOperationContract("Missing arbitration details builder", definition),
+    ).toThrow(/requires a details builder/i);
+  });
+
+  it("rejects an arbitration mapping with a non-function details builder", () => {
+    const definition = {
+      ...hostedDefinitionWithArbitrationMapping(
+        [
+          {
+            failureCode: "unknown_definition",
+            description: "The requested host definition must exist.",
+          },
+        ],
+        hostedDefinition.domainFailures,
+      ),
+      arbitrationFailureMappings: {
+        resource_claimed: {
+          failureCode: "unknown_definition",
+          buildDetails: "not-a-function",
+        },
+      },
+    } as const;
+
+    expect(() =>
+      assertHostedOperationContract("Invalid arbitration details builder", definition),
+    ).toThrow(/requires a details builder/i);
+  });
+
+  it("returns an explicit unmapped result for an empty mapping table", () => {
+    expect(
+      mapOperationArbitrationFailure(
+        {},
+        arbitrationDomainFailures,
+        resourceClaimedFailure,
+      ),
+    ).toEqual({ kind: "unmapped", reasonCode: "resource_claimed" });
+  });
+
+  it("turns an exception from the details schema into a technical failure", () => {
+    const throwingDetailsSchema = {
+      safeParse: () => {
+        throw new Error("boom");
+      },
+    } as unknown as z.ZodType<JsonObject>;
+
+    expect(
+      mapOperationArbitrationFailure(
+        {
+          resource_claimed: {
+            failureCode: "occupied",
+            buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+              resourceEntityId,
+              winnerAgentId,
+            }),
+          },
+        },
+        [
+          {
+            code: "occupied",
+            summary: "The resource is occupied.",
+            detailsSchema: throwingDetailsSchema,
+            resultSchema: failureResultSchema,
+          },
+        ],
+        resourceClaimedFailure,
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      code: "arbitration_failure_details_validation_failed",
+    });
+  });
+
   it("rejects every required hosted definition field when missing", () => {
     const requiredFields = [
       "id",
@@ -226,6 +509,7 @@ describe("hosted operation SDK contract", () => {
       "parametersSchema",
       "eventIgnore",
       "publicBehavior",
+      "arbitrationFailureMappings",
       "domainFailures",
       "resultSchema",
       "stateSchema",

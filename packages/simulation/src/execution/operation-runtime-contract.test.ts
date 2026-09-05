@@ -50,6 +50,7 @@ const runtime: HostedOperationRuntime = {
   taskSlots: ["BODY"],
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "using the fridge" },
+  arbitrationFailureMappings: {},
   domainFailures: [],
   resultSchema: z.object({}).strict(),
   stateSchema: z.object({}).strict(),
@@ -66,6 +67,8 @@ const runtime: HostedOperationRuntime = {
   cancel: () => ({ effects: [], result: {} }),
   fuse: () => null,
   acknowledgeFuseResult: (_context, operation) => operation.state,
+  mapArbitrationFailure: (_context, _operationCall, failure) =>
+    ({ kind: "unmapped", reasonCode: failure.reasonCode }),
 };
 
 const hostedRegistry: HostedOperationRuntimeRegistry = {

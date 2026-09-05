@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   assertHostedOperationContract,
   bindHostedInteractionDefinition,
+  mapOperationArbitrationFailure,
   type InteractionDefinition,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
@@ -13,6 +14,7 @@ import {
   type EntityId,
   type JsonObject,
   type OperationId,
+  type OperationTechnicalFailure,
 } from "@god-sim/protocol";
 
 import {
@@ -40,6 +42,16 @@ export function objectInteractionOperationId(
   interactionId: string,
 ): OperationId {
   return OperationIdSchema.parse(`object.${definitionId}.${interactionId}`);
+}
+
+function invalidOperationCallBinding(message: string): OperationTechnicalFailure {
+  return {
+    kind: "technical_failure",
+    category: "protocol",
+    code: "invalid_operation_call_binding",
+    message,
+    retryable: false,
+  };
 }
 
 function interactionIsKnownUnavailable(
@@ -103,6 +115,7 @@ export function createObjectInteractionOperation<State>(
     eventIgnore: interaction.eventIgnore,
     publicBehavior: interaction.publicBehavior,
     domainFailures: interaction.domainFailures,
+    arbitrationFailureMappings: interaction.arbitrationFailureMappings,
     resultSchema: interaction.resultSchema,
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => argumentsSchema,
@@ -282,8 +295,15 @@ export function createHostedObjectInteractionOperation<State>(
     context: OperationRuntimeContext,
     operation: Parameters<HostedOperationRuntime["start"]>[1],
   ) => {
+    assertCallBinding(operation);
+    return binding(context, operation.host, operation.arguments);
+  };
+  const assertCallBinding = (
+    operation: Parameters<HostedOperationRuntime["start"]>[1],
+  ): void => {
     if (
       operation.operationId !== expectedId ||
+      operation.host.kind !== "furniture" ||
       operation.hostDefinition.kind !== "furniture" ||
       operation.hostDefinition.hostDefinitionId !== definition.id
     ) {
@@ -291,7 +311,6 @@ export function createHostedObjectInteractionOperation<State>(
         `Object operation call is not bound to ${definition.id}:${expectedId}`,
       );
     }
-    return binding(context, operation.host, operation.arguments);
   };
 
   const runtime: HostedOperationRuntime = {
@@ -307,6 +326,7 @@ export function createHostedObjectInteractionOperation<State>(
     eventIgnore: hosted.eventIgnore,
     publicBehavior: hosted.publicBehavior,
     domainFailures: hosted.domainFailures,
+    arbitrationFailureMappings: hosted.arbitrationFailureMappings,
     resultSchema: hosted.resultSchema,
     stateSchema: hosted.stateSchema,
     parametersSchema: hosted.parametersSchema,
@@ -393,6 +413,20 @@ export function createHostedObjectInteractionOperation<State>(
         bound.parameters,
         operationState(operation.state),
         result,
+      );
+    },
+    mapArbitrationFailure: (context, operation, failure) => {
+      try {
+        callBinding(context, operation);
+      } catch (error) {
+        return invalidOperationCallBinding(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return mapOperationArbitrationFailure(
+        hosted.arbitrationFailureMappings,
+        hosted.domainFailures,
+        failure,
       );
     },
   };

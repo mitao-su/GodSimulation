@@ -38,6 +38,7 @@ export function createWaitOperation(): RegisteredOperation {
     taskSlots: ["BODY"],
     eventIgnore: [],
     publicBehavior: { kind: "visible", label: "waiting" },
+    arbitrationFailureMappings: {},
     domainFailures: [
       {
         code: "invalid_duration",

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   assertHostedOperationContract,
+  mapOperationArbitrationFailure,
   type AgentDefinition,
   type AgentOperationDefinition,
   type HostedOperationDomainFailureDefinition,
@@ -13,6 +14,7 @@ import {
   type JsonObject,
   type OperationId,
   type OperationHostReference,
+  type OperationTechnicalFailure,
 } from "@god-sim/protocol";
 
 import {
@@ -40,6 +42,16 @@ type UnboundAgentOperationRuntime = Omit<
   HostedOperationRuntime,
   "host" | "manual" | "ownerPluginId"
 >;
+
+function invalidOperationCallBinding(message: string): OperationTechnicalFailure {
+  return {
+    kind: "technical_failure",
+    category: "protocol",
+    code: "invalid_operation_call_binding",
+    message,
+    retryable: false,
+  };
+}
 
 const FailureDetailsSchema = z.object({}).strict();
 
@@ -118,6 +130,7 @@ function legacyCoreRuntime(
     eventIgnore: operation.eventIgnore,
     publicBehavior: operation.publicBehavior,
     domainFailures: hostedFailures(operation),
+    arbitrationFailureMappings: operation.arbitrationFailureMappings,
     resultSchema: operation.resultSchema,
     stateSchema: operation.stateSchema,
     parametersSchema: options.parametersSchema,
@@ -147,6 +160,12 @@ function legacyCoreRuntime(
     acknowledgeFuseResult: (_context, operationCall, result) =>
       options.acknowledgeFuseResult?.(operationCall.state, result) ??
       operationCall.state,
+    mapArbitrationFailure: (_context, _operationCall, failure) =>
+      mapOperationArbitrationFailure(
+        operation.arbitrationFailureMappings,
+        hostedFailures(operation),
+        failure,
+      ),
   };
 }
 
@@ -244,6 +263,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
         resultSchema: ReadUnavailableResultSchema,
       },
     ],
+    arbitrationFailureMappings: {},
     resultSchema: ReadOperationResultSchema,
     stateSchema: ReadOperationStateSchema,
     parametersSchema: ReadOperationArgumentsSchema,
@@ -310,6 +330,8 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     }),
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure: (_context, _operationCall, failure) =>
+      mapOperationArbitrationFailure({}, [], failure),
   };
 }
 
@@ -341,6 +363,7 @@ function unavailableRuntime(options: {
     eventIgnore: [],
     publicBehavior: options.publicBehavior,
     domainFailures: [],
+    arbitrationFailureMappings: {},
     resultSchema: EMPTY_RESULT_SCHEMA,
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     parametersSchema: options.parametersSchema,
@@ -362,6 +385,8 @@ function unavailableRuntime(options: {
     cancel: () => ({ effects: [], result: {} }),
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure: (_context, _operationCall, failure) =>
+      mapOperationArbitrationFailure({}, [], failure),
   };
 }
 
@@ -455,8 +480,14 @@ export function bindAgentOperationRuntime(
     operation: Parameters<HostedOperationRuntime["start"]>[1],
   ): void => {
     assertHostBinding(context, operation.host);
+    assertCallMetadataBinding(operation);
+  };
+  const assertCallMetadataBinding = (
+    operation: Parameters<HostedOperationRuntime["start"]>[1],
+  ): void => {
     if (
       operation.operationId !== implementation.id ||
+      operation.host.kind !== "agent" ||
       operation.hostDefinition.kind !== "agent" ||
       operation.hostDefinition.hostDefinitionId !== definition.id
     ) {
@@ -510,6 +541,16 @@ export function bindAgentOperationRuntime(
     acknowledgeFuseResult: (context, operation, result) => {
       assertCallBinding(context, operation);
       return implementation.acknowledgeFuseResult(context, operation, result);
+    },
+    mapArbitrationFailure: (context, operation, failure) => {
+      try {
+        assertCallBinding(context, operation);
+      } catch (error) {
+        return invalidOperationCallBinding(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return implementation.mapArbitrationFailure(context, operation, failure);
     },
   };
   assertHostedOperationContract(

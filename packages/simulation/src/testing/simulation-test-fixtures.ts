@@ -9,6 +9,7 @@ import {
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
 import {
+  AgentIdSchema,
   createSimulationRulesLock,
   EntityIdSchema,
   OperationHostDefinitionIdSchema,
@@ -41,6 +42,12 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
 
 const fridgeState = z.object({ holder: z.string().nullable() }).strict();
 type FridgeState = z.infer<typeof fridgeState>;
+const fridgeFailureDetailsSchema = z
+  .object({
+    resourceEntityId: EntityIdSchema,
+    winnerAgentId: AgentIdSchema,
+  })
+  .strict();
 
 const fridgeDefinition: ObjectDefinition<FridgeState> = {
   id: "test.fridge",
@@ -92,11 +99,20 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       resolveDuration: () => ({ kind: "fixed", totalTicks: 10 }),
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "using the fridge" },
+      arbitrationFailureMappings: {
+        resource_claimed: {
+          failureCode: "occupied",
+          buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+            resourceEntityId,
+            winnerAgentId,
+          }),
+        },
+      },
       domainFailures: [
         {
           code: "occupied",
           summary: "Fridge occupied",
-          detailsSchema: z.object({ summary: z.string() }).strict(),
+          detailsSchema: fridgeFailureDetailsSchema,
           resultSchema: z
             .object({ status: z.literal("failed") })
             .strict(),
@@ -195,11 +211,20 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       }),
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "stocking the fridge" },
+      arbitrationFailureMappings: {
+        resource_claimed: {
+          failureCode: "occupied",
+          buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+            resourceEntityId,
+            winnerAgentId,
+          }),
+        },
+      },
       domainFailures: [
         {
           code: "occupied",
           summary: "Fridge occupied",
-          detailsSchema: z.object({ summary: z.string() }).strict(),
+          detailsSchema: fridgeFailureDetailsSchema,
           resultSchema: z.object({}).strict(),
         },
       ],
@@ -261,6 +286,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       }),
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "configuring the fridge" },
+      arbitrationFailureMappings: {},
       domainFailures: [],
       resultSchema: z.object({}).strict(),
       canStart: () => ({ available: true }),
@@ -445,6 +471,7 @@ const synchronizedWaitOperation: RegisteredOperation = {
   taskSlots: ["HEAD", "BODY"],
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "waiting" },
+  arbitrationFailureMappings: {},
   domainFailures: [],
   resultSchema: z.object({}).strict(),
   stateSchema: z.object({}).strict(),

@@ -17,6 +17,7 @@ export function createObserveOperation(): RegisteredOperation {
     taskSlots: ["HEAD"],
     eventIgnore: [],
     publicBehavior: { kind: "visible", label: "observing" },
+    arbitrationFailureMappings: {},
     domainFailures: [
       { code: "target_not_visible", summary: "Observation target is not visible" },
     ],

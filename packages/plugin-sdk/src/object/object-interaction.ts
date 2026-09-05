@@ -162,6 +162,7 @@ export function bindHostedInteractionDefinition<
     eventIgnore: interaction.eventIgnore,
     publicBehavior: interaction.publicBehavior,
     domainFailures: interaction.domainFailures,
+    arbitrationFailureMappings: interaction.arbitrationFailureMappings,
     resultSchema: interaction.resultSchema,
     stateSchema: EmptyInteractionOperationStateSchema,
     initialState: () => ({}),
