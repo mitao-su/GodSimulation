@@ -42,12 +42,15 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
 
 const fridgeState = z.object({ holder: z.string().nullable() }).strict();
 type FridgeState = z.infer<typeof fridgeState>;
-const fridgeFailureDetailsSchema = z
-  .object({
-    resourceEntityId: EntityIdSchema,
-    winnerAgentId: AgentIdSchema,
-  })
-  .strict();
+const fridgeFailureDetailsSchema = z.union([
+  z.object({ summary: z.string() }).strict(),
+  z
+    .object({
+      resourceEntityId: EntityIdSchema,
+      winnerAgentId: AgentIdSchema,
+    })
+    .strict(),
+]);
 
 const fridgeDefinition: ObjectDefinition<FridgeState> = {
   id: "test.fridge",

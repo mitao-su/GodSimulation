@@ -10,12 +10,15 @@ import type { RefrigeratorState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z
-  .object({
-    resourceEntityId: EntityIdSchema,
-    winnerAgentId: AgentIdSchema,
-  })
-  .strict();
+const failureDetailsSchema = z.union([
+  z.object({ summary: z.string() }).strict(),
+  z
+    .object({
+      resourceEntityId: EntityIdSchema,
+      winnerAgentId: AgentIdSchema,
+    })
+    .strict(),
+]);
 
 function releaseIfHeld(
   state: Readonly<RefrigeratorState>,
