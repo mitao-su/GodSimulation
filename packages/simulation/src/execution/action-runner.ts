@@ -16,6 +16,7 @@ import type {
 import { operationTechnicalFailure } from "./operation-failure-classifier";
 import {
   completeOperationLifecycle,
+  failOperationLifecycle,
   startOperationLifecycle,
   tickOperationLifecycle,
   type OperationLifecycleTransitionResult,
@@ -31,6 +32,7 @@ import {
   type InteractionIntent,
 } from "../interaction/effect-arbiter";
 import { commitProposal } from "../interaction/effect-committer";
+import { appendDomainEvent } from "../engine/event-writer";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
 import type { AgentState, WorldState } from "../world/world-state";
@@ -662,6 +664,7 @@ function transitionIntent(
   entry: HostedOperationBatchEntry,
   proposal: OperationLifecycleTransitionResult["proposal"],
   phase: "start" | "tick",
+  arrivalTick: number,
 ): InteractionIntent[] {
   return proposal.effects.flatMap((effect, effectIndex) =>
     effect.type === "reserve_occupancy"
@@ -671,11 +674,117 @@ function transitionIntent(
             agentId: entry.agentId,
             entityId: effect.entityId,
             interactionId: entry.operation.operationId,
-            arrivalTick: entry.operation.startedAtTick,
+            arrivalTick,
           },
         ]
       : [],
   );
+}
+
+function arbitrationFailure(
+  registry: HostedOperationRuntimeRegistry,
+  operation: OperationRuntimeCall,
+  reasonCode: "resource_claimed",
+  winnerAgentId: AgentId,
+):
+  | { readonly failure: { readonly kind: "domain_failure"; readonly code: string; readonly details: JsonObject } }
+  | { readonly failure: OperationTechnicalFailure } {
+  let runtime;
+  try {
+    runtime = registry.getHostedOperation(
+      operation.operationId,
+      operation.hostDefinition,
+    );
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error);
+    return {
+      failure: operationTechnicalFailure(
+        "configuration",
+        "operation_arbitration_mapping_exception",
+        `Operation arbitration mapping threw: ${description}`,
+        false,
+      ),
+    };
+  }
+  if (!runtime) {
+    return {
+      failure: operationTechnicalFailure(
+        "configuration",
+        "operation_runtime_unavailable",
+        `No hosted runtime is registered for ${operation.operationId}.`,
+        false,
+      ),
+    };
+  }
+
+  // Arbitration reasons are mapped only through the operation's declared
+  // world-precondition directory; no error text is inspected.
+  if (reasonCode !== "resource_claimed") {
+    return {
+      failure: operationTechnicalFailure(
+        "protocol",
+        "operation_arbitration_reason_unknown",
+        `Unknown arbitration reason ${reasonCode}.`,
+        false,
+      ),
+    };
+  }
+  const precondition = runtime.manual.worldPreconditions[0];
+  if (!precondition) {
+    return {
+      failure: operationTechnicalFailure(
+        "protocol",
+        "operation_arbitration_failure_undeclared",
+        `Operation ${operation.operationId} does not declare an arbitration failure.`,
+        false,
+      ),
+    };
+  }
+  const declaration = runtime.domainFailures.find(
+    (candidate) => candidate.code === precondition.failureCode,
+  );
+  if (!declaration) {
+    return {
+      failure: operationTechnicalFailure(
+        "protocol",
+        "operation_arbitration_failure_undeclared",
+        `Operation ${operation.operationId} does not declare ${precondition.failureCode}.`,
+        false,
+      ),
+    };
+  }
+  let details: JsonObject | undefined;
+  for (const candidate of [
+    { holderId: winnerAgentId },
+    { summary: precondition.description },
+  ]) {
+    try {
+      const parsed = declaration.detailsSchema.safeParse(candidate);
+      if (parsed.success) {
+        details = parsed.data as JsonObject;
+        break;
+      }
+    } catch {
+      // A malformed plugin schema is handled as a technical failure below.
+    }
+  }
+  if (!details) {
+    return {
+      failure: operationTechnicalFailure(
+        "protocol",
+        "operation_arbitration_failure_details_invalid",
+        `Operation ${operation.operationId} cannot represent arbitration failure details.`,
+        false,
+      ),
+    };
+  }
+  return {
+    failure: {
+      kind: "domain_failure",
+      code: declaration.code,
+      details,
+    },
+  };
 }
 
 function proposalForResult(
@@ -719,7 +828,7 @@ export function advanceHostedOperationBatch(
   const intents = results.flatMap(({ entry, result }) => {
     const proposal = proposalForResult(result);
     return proposal
-      ? transitionIntent(entry, proposal.proposal, proposal.phase)
+      ? transitionIntent(entry, proposal.proposal, proposal.phase, world.tick)
       : [];
   });
   const arbitration = arbitrateInteractionBatch(world, intents);
@@ -735,33 +844,57 @@ export function advanceHostedOperationBatch(
   const events: DomainEvent[] = [];
   const processed = new Map<OperationCallId, HostedOperationAdvanceResult>();
 
+  for (const record of arbitration.records) {
+    if (record.contenderAgentIds.length < 2 || record.tieBreaker === null) continue;
+    const winner = arbitration.decisions.find(
+      (decision) =>
+        decision.accepted &&
+        decision.entityId === record.entityId &&
+        decision.arrivalTick === record.arrivalTick,
+    );
+    if (!winner) {
+      throw new Error(`Arbitration for ${record.entityId} has no winner`);
+    }
+    const written = appendDomainEvent(
+      nextWorld,
+      {
+        type: "interaction_arbitrated",
+        entityId: record.entityId,
+        interactionId: winner.interactionId,
+        contenders: record.contenderAgentIds,
+        winnerAgentId: record.winnerAgentId,
+        tieBreaker: record.tieBreaker,
+      },
+      {
+        causationId: `interaction_arbitrated:${record.entityId}:${world.tick}`,
+        correlationId: `interaction_arbitrated:${record.entityId}:${world.tick}`,
+      },
+    );
+    nextWorld = written.world;
+    events.push(written.event);
+  }
+
+  // Commit every accepted proposal before invoking loser failure handlers so
+  // all lifecycle effects observe one arbitrated world state.
   for (const { entry, result } of results) {
     const proposal = proposalForResult(result);
     if (!proposal) {
       processed.set(entry.operation.callId, { ...result, world: nextWorld });
       continue;
     }
-    const proposalIntents = transitionIntent(entry, proposal.proposal, proposal.phase);
+    const proposalIntents = transitionIntent(
+      entry,
+      proposal.proposal,
+      proposal.phase,
+      world.tick,
+    );
     if (proposalIntents.some((intent) => rejectedIntentIds.has(intent.intentId))) {
-      processed.set(
-        entry.operation.callId,
-        hostedTechnicalFailure(
-          world,
-          entry.operation,
-          operationTechnicalFailure(
-            "plugin",
-            "operation_lifecycle_effect_arbitrated",
-            `Operation ${entry.operation.callId} lost same-tick effect arbitration.`,
-            true,
-          ),
-        ),
-      );
       continue;
     }
     const committed = commitLifecycleTransition(
       nextWorld,
       registry,
-      entry.operation,
+      result.operation,
       proposal.proposal,
       entry.operation.callId,
       proposal.phase,
@@ -789,6 +922,105 @@ export function advanceHostedOperationBatch(
       ...result,
       world: nextWorld,
       events: committed.events,
+    });
+  }
+
+  for (const { entry, result } of results) {
+    const proposal = proposalForResult(result);
+    if (!proposal) {
+      if (!processed.has(entry.operation.callId)) {
+        processed.set(entry.operation.callId, { ...result, world: nextWorld });
+      }
+      continue;
+    }
+    const proposalIntents = transitionIntent(
+      entry,
+      proposal.proposal,
+      proposal.phase,
+      world.tick,
+    );
+    if (!proposalIntents.some((intent) => rejectedIntentIds.has(intent.intentId))) {
+      continue;
+    }
+    const rejected = arbitration.decisions.find(
+      (decision) =>
+        !decision.accepted &&
+        proposalIntents.some((intent) => intent.intentId === decision.intentId),
+    );
+    if (!rejected || rejected.accepted) {
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(
+          nextWorld,
+          result.operation,
+          operationTechnicalFailure(
+            "protocol",
+            "operation_arbitration_decision_missing",
+            `Operation ${entry.operation.callId} has no rejected arbitration decision.`,
+            false,
+          ),
+        ),
+      );
+      continue;
+    }
+    const winner = arbitration.decisions.find(
+      (decision) =>
+        decision.accepted &&
+        decision.entityId === rejected.entityId &&
+        decision.arrivalTick === rejected.arrivalTick,
+    );
+    if (!winner) {
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(
+          nextWorld,
+          result.operation,
+          operationTechnicalFailure(
+            "protocol",
+            "operation_arbitration_winner_missing",
+            `Operation ${entry.operation.callId} has no arbitration winner.`,
+            false,
+          ),
+        ),
+      );
+      continue;
+    }
+    const mapped = arbitrationFailure(
+      registry,
+      result.operation,
+      rejected.reasonCode,
+      winner.agentId,
+    );
+    if (mapped.failure.kind === "technical_failure") {
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(nextWorld, result.operation, mapped.failure),
+      );
+      continue;
+    }
+    const failed = failOperationLifecycle(
+      {
+        world: nextWorld,
+        registry,
+        agentId: entry.agentId,
+        operation: result.operation,
+      },
+      mapped.failure,
+      "arbitration_domain_failure",
+    );
+    if (failed.kind === "technical_failure") {
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(nextWorld, failed.operation, failed.failure),
+      );
+      continue;
+    }
+    processed.set(entry.operation.callId, {
+      kind: "termination_ready",
+      world: nextWorld,
+      operation: failed.operation,
+      events: [],
+      transaction: failed.transaction,
     });
   }
   return {

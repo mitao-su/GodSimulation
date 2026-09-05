@@ -999,7 +999,124 @@ describe("hosted operation lifecycle runner", () => {
     expect(forward.world.objects.get(fridgeId)).toEqual(reverse.world.objects.get(fridgeId));
     expect(forward.world.randomState).toBe(reverse.world.randomState);
     expect(forward.results.filter(({ result }) => result.kind === "running")).toHaveLength(1);
-    expect(forward.results.filter(({ result }) => result.kind === "technical_failure")).toHaveLength(1);
+    expect(forward.results.filter(({ result }) => result.kind === "termination_ready")).toHaveLength(1);
+    expect(forward.results.find(({ result }) => result.kind === "termination_ready")?.result).toMatchObject({
+      transaction: {
+        outcome: "failed",
+        source: "arbitration_domain_failure",
+        failure: { code: "occupied", details: { holderId: expect.any(String) } },
+      },
+    });
+    expect(forward.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "interaction_arbitrated",
+          entityId: fridgeId,
+          contenders: expect.arrayContaining([agentId, "bob"]),
+        }),
+      ]),
+    );
+  });
+
+  it("uses the current world tick for arbitration arrival, including restored calls", () => {
+    const fixture = fixtureRuntime({
+      start: vi.fn(
+        (context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
+          kind: "started",
+          proposal: {
+            effects: [
+              {
+                type: "reserve_occupancy",
+                entityId: fridgeId,
+                agentId: context.agentId,
+                expectedObjectVersion: 0,
+              },
+            ],
+          },
+          nextState: operation.state,
+        }),
+      ),
+    });
+    const world = { ...runningWorld(), tick: 9 };
+    const aliceEntry = {
+      agentId,
+      operation: runtimeCall({ startedAtTick: 100 }),
+    };
+    const bobEntry = {
+      agentId: AgentIdSchema.parse("bob"),
+      operation: runtimeCall({
+        callId: OperationCallIdSchema.parse("operation-call:bob"),
+        startedAtTick: 1,
+      }),
+    };
+
+    const result = advanceHostedOperationBatch(world, fixture.registry, [
+      bobEntry,
+      aliceEntry,
+    ]);
+
+    expect(result.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "interaction_arbitrated",
+          worldTick: 9,
+          contenders: expect.arrayContaining([agentId, "bob"]),
+        }),
+      ]),
+    );
+  });
+
+  it("maps arbitration loss after a completion proposal through fail without re-ticking", () => {
+    const complete = vi.fn<HostedOperationRuntime["complete"]>(() => {
+      throw new Error("temporary completion failure");
+    });
+    const fail = vi.fn<HostedOperationRuntime["fail"]>(
+      (): OperationTerminalProposal => ({
+        effects: [],
+        result: { status: "failed", reason: "Fridge occupied" },
+      }),
+    );
+    const start = vi.fn(
+      (context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
+        kind: "started",
+        proposal: {
+          effects: [
+            {
+              type: "reserve_occupancy",
+              entityId: fridgeId,
+              agentId: context.agentId,
+              expectedObjectVersion: 0,
+            },
+          ],
+        },
+        nextState: operation.state,
+      }),
+    );
+    const fixture = fixtureRuntime({
+      duration: { kind: "fixed" },
+      start,
+      complete,
+      fail,
+    });
+    const world = runningWorld();
+    const bob = AgentIdSchema.parse("bob");
+    const result = advanceHostedOperationBatch(world, fixture.registry, [
+      { agentId: bob, operation: runtimeCall({ callId: OperationCallIdSchema.parse("operation-call:bob"), duration: { kind: "fixed", totalTicks: 1 } }) },
+      { agentId, operation: runtimeCall({ duration: { kind: "fixed", totalTicks: 1 } }) },
+    ]);
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(result.results.filter(({ result: item }) => item.kind === "termination_ready")).toHaveLength(1);
+    expect(result.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          result: expect.objectContaining({
+            kind: "termination_ready",
+            transaction: expect.objectContaining({ outcome: "failed", source: "arbitration_domain_failure" }),
+          }),
+        }),
+      ]),
+    );
   });
 
   it("keeps a completed tick pending when complete fails, then retries only complete", () => {
