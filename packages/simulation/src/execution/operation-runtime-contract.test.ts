@@ -67,7 +67,7 @@ const runtime: HostedOperationRuntime = {
   cancel: () => ({ effects: [], result: {} }),
   fuse: () => null,
   acknowledgeFuseResult: (_context, operation) => operation.state,
-  mapArbitrationFailure: (_operationCall, failure) =>
+  mapArbitrationFailure: (_context, _operationCall, failure) =>
     ({ kind: "unmapped", reasonCode: failure.reasonCode }),
 };
 

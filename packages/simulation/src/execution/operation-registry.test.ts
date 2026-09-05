@@ -130,12 +130,31 @@ describe("hosted operation registry", () => {
 
     expect(
       runtime.mapArbitrationFailure(
+        context,
         {
           ...call,
           hostDefinition: {
             kind: "agent",
             hostDefinitionId: "test.bob",
           },
+        },
+        OperationArbitrationFailureSchema.parse({
+          reasonCode: "resource_claimed",
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      code: "invalid_operation_call_binding",
+    });
+
+    expect(
+      runtime.mapArbitrationFailure(
+        context,
+        {
+          ...call,
+          host: { kind: "agent", hostEntityId: "bob" as never },
         },
         OperationArbitrationFailureSchema.parse({
           reasonCode: "resource_claimed",
@@ -200,6 +219,7 @@ describe("hosted operation registry", () => {
 
     expect(
       runtime.mapArbitrationFailure(
+        context,
         call,
         OperationArbitrationFailureSchema.parse({
           reasonCode: "resource_claimed",
@@ -221,7 +241,26 @@ describe("hosted operation registry", () => {
 
     expect(
       runtime.mapArbitrationFailure(
+        context,
         { ...call, operationId: "core.wait" as never },
+        OperationArbitrationFailureSchema.parse({
+          reasonCode: "resource_claimed",
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "technical_failure",
+      code: "invalid_operation_call_binding",
+    });
+
+    expect(
+      runtime.mapArbitrationFailure(
+        context,
+        {
+          ...call,
+          host: { kind: "furniture", hostEntityId: "wall-1" as never },
+        },
         OperationArbitrationFailureSchema.parse({
           reasonCode: "resource_claimed",
           resourceEntityId: "fridge-1",

@@ -415,9 +415,9 @@ export function createHostedObjectInteractionOperation<State>(
         result,
       );
     },
-    mapArbitrationFailure: (operation, failure) => {
+    mapArbitrationFailure: (context, operation, failure) => {
       try {
-        assertCallBinding(operation);
+        callBinding(context, operation);
       } catch (error) {
         return invalidOperationCallBinding(
           error instanceof Error ? error.message : String(error),

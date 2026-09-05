@@ -160,7 +160,7 @@ function legacyCoreRuntime(
     acknowledgeFuseResult: (_context, operationCall, result) =>
       options.acknowledgeFuseResult?.(operationCall.state, result) ??
       operationCall.state,
-    mapArbitrationFailure: (_operationCall, failure) =>
+    mapArbitrationFailure: (_context, _operationCall, failure) =>
       mapOperationArbitrationFailure(
         operation.arbitrationFailureMappings,
         hostedFailures(operation),
@@ -330,7 +330,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     }),
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
-    mapArbitrationFailure: (_operationCall, failure) =>
+    mapArbitrationFailure: (_context, _operationCall, failure) =>
       mapOperationArbitrationFailure({}, [], failure),
   };
 }
@@ -385,7 +385,7 @@ function unavailableRuntime(options: {
     cancel: () => ({ effects: [], result: {} }),
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
-    mapArbitrationFailure: (_operationCall, failure) =>
+    mapArbitrationFailure: (_context, _operationCall, failure) =>
       mapOperationArbitrationFailure({}, [], failure),
   };
 }
@@ -542,15 +542,15 @@ export function bindAgentOperationRuntime(
       assertCallBinding(context, operation);
       return implementation.acknowledgeFuseResult(context, operation, result);
     },
-    mapArbitrationFailure: (operation, failure) => {
+    mapArbitrationFailure: (context, operation, failure) => {
       try {
-        assertCallMetadataBinding(operation);
+        assertCallBinding(context, operation);
       } catch (error) {
         return invalidOperationCallBinding(
           error instanceof Error ? error.message : String(error),
         );
       }
-      return implementation.mapArbitrationFailure(operation, failure);
+      return implementation.mapArbitrationFailure(context, operation, failure);
     },
   };
   assertHostedOperationContract(

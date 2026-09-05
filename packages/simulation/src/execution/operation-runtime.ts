@@ -142,6 +142,7 @@ export interface HostedOperationRuntime {
     result: Readonly<JsonObject>,
   ): JsonObject;
   mapArbitrationFailure(
+    context: OperationRuntimeContext,
     operation: OperationRuntimeCall,
     failure: OperationArbitrationFailure,
   ): OperationArbitrationFailureMappingResult;
