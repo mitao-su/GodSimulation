@@ -4,6 +4,7 @@ import {
   assertHostedOperationContract,
   bindHostedInteractionDefinition,
   mapOperationArbitrationFailure,
+  type OperationStartResult,
   type InteractionDefinition,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
@@ -51,6 +52,40 @@ function invalidOperationCallBinding(message: string): OperationTechnicalFailure
     code: "invalid_operation_call_binding",
     message,
     retryable: false,
+  };
+}
+
+function hostedDomainFailure(
+  runtime: HostedOperationRuntime,
+  reasonCode: string,
+  summary: string,
+): OperationStartResult {
+  const declaration = runtime.domainFailures.find(
+    (failure) => failure.code === reasonCode,
+  );
+  if (!declaration) {
+    return {
+      kind: "technical_failure",
+      category: "plugin",
+      code: "undeclared_domain_failure",
+      message: `Interaction returned undeclared domain failure ${reasonCode}.`,
+      retryable: false,
+    };
+  }
+  const details = declaration.detailsSchema.safeParse({ summary });
+  if (!details.success) {
+    return {
+      kind: "technical_failure",
+      category: "plugin",
+      code: "invalid_domain_failure_details",
+      message: `Interaction domain failure ${reasonCode} returned invalid details.`,
+      retryable: false,
+    };
+  }
+  return {
+    kind: "domain_failure",
+    code: reasonCode,
+    details: details.data,
   };
 }
 
@@ -348,6 +383,25 @@ export function createHostedObjectInteractionOperation<State>(
     },
     start: (context, operation) => {
       const bound = callBinding(context, operation);
+      if (bound.context.distance !== 0) {
+        return hostedDomainFailure(
+          runtime,
+          "out_of_range",
+          `${bound.context.actor.agentId} is not at an interaction position for ${bound.context.object.entityId}`,
+        );
+      }
+      const availability = interaction.canStart(
+        bound.state,
+        bound.context,
+        bound.parameters,
+      );
+      if (!availability.available) {
+        return hostedDomainFailure(
+          runtime,
+          availability.reasonCode,
+          availability.summary,
+        );
+      }
       return hosted.start(
         bound.state,
         bound.context,
