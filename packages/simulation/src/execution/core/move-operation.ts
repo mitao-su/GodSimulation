@@ -243,6 +243,7 @@ export function createMoveOperation(): RegisteredOperation {
     taskSlots: ["BODY"],
     eventIgnore: [],
     publicBehavior: { kind: "visible", label: "moving" },
+    arbitrationFailureMappings: {},
     domainFailures: [
       { code: "unknown_target", summary: "Movement target does not exist" },
       { code: "no_known_route", summary: "No known route reaches the target" },

@@ -6,6 +6,7 @@ import {
 } from "@god-sim/plugin-sdk";
 import {
   JsonObjectSchema,
+  OperationArbitrationFailureSchema,
   type JsonObject,
   type OperationCallId,
 } from "@god-sim/protocol";
@@ -128,6 +129,55 @@ describe("hosted operation registry", () => {
         hostDefinitionId: "test.wall",
       }),
     ).toBeUndefined();
+  });
+
+  it("passes structured arbitration facts through the hosted object adapter", () => {
+    const runtime = hostedRegistry().getHostedOperation(
+      "object.test.fridge.use",
+      { kind: "furniture", hostDefinitionId: "test.fridge" },
+    );
+    if (!runtime) throw new Error("Missing hosted fridge runtime");
+
+    const world = simulationTestWorld();
+    const context = createOperationRuntimeContext(
+      world,
+      testPluginRegistry,
+      "alice" as never,
+    );
+    const host = {
+      kind: "furniture",
+      hostEntityId: "fridge-1" as never,
+    } as const;
+    const argumentsValue = JsonObjectSchema.parse({});
+    const call = runtimeCall(
+      runtime,
+      context,
+      host,
+      "operation-call:fridge-arbitration" as OperationCallId,
+      argumentsValue,
+      runtime.initialState(context, host, argumentsValue),
+    );
+
+    expect(
+      runtime.mapArbitrationFailure(
+        call,
+        OperationArbitrationFailureSchema.parse({
+          reasonCode: "resource_claimed",
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        }),
+      ),
+    ).toEqual({
+      kind: "mapped",
+      failure: {
+        kind: "domain_failure",
+        code: "occupied",
+        details: {
+          resourceEntityId: "fridge-1",
+          winnerAgentId: "bob",
+        },
+      },
+    });
   });
 
   it("rejects furniture lifecycle calls with mismatched binding metadata", () => {

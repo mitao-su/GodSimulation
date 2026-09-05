@@ -44,6 +44,7 @@ export const doorOpenInteraction: InteractionDefinition<DoorState> = {
   resolveDuration: () => ({ kind: "fixed", totalTicks: 3 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "opening the door" },
+  arbitrationFailureMappings: {},
   domainFailures: [
     {
       code: "already_open",
@@ -104,6 +105,7 @@ export const doorCloseInteraction: InteractionDefinition<DoorState> = {
   resolveDuration: () => ({ kind: "fixed", totalTicks: 3 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "closing the door" },
+  arbitrationFailureMappings: {},
   domainFailures: [
     {
       code: "already_closed",
@@ -157,6 +159,7 @@ export const doorLockInteraction: InteractionDefinition<DoorState> = {
   resolveDuration: () => ({ kind: "fixed", totalTicks: 2 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "locking the door" },
+  arbitrationFailureMappings: {},
   domainFailures: [
     {
       code: "must_close_first",
@@ -216,6 +219,7 @@ export const doorUnlockInteraction: InteractionDefinition<DoorState> = {
   resolveDuration: () => ({ kind: "fixed", totalTicks: 2 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "unlocking the door" },
+  arbitrationFailureMappings: {},
   domainFailures: [
     {
       code: "already_unlocked",

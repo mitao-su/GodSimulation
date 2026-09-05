@@ -102,6 +102,7 @@ function requiredParameterOperation() {
     }),
     eventIgnore: [],
     publicBehavior: { kind: "visible", label: "setting the fridge mode" },
+    arbitrationFailureMappings: {},
     domainFailures: [],
     resultSchema: z.object({}).strict(),
     canStart: () => ({ available: true }),

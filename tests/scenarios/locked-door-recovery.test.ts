@@ -103,6 +103,7 @@ const passageDefinition: ObjectDefinition<PassageState> = {
       resolveDuration: () => ({ kind: "fixed", totalTicks: 3 }),
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "raising the passage" },
+      arbitrationFailureMappings: {},
       domainFailures: [
         {
           code: "already_raised",

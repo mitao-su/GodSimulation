@@ -4,12 +4,18 @@ import {
   operationParametersJsonSchema,
   type InteractionDefinition,
 } from "@god-sim/plugin-sdk";
+import { AgentIdSchema, EntityIdSchema } from "@god-sim/protocol";
 
 import type { RefrigeratorState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z.object({ summary: z.string() }).strict();
+const failureDetailsSchema = z
+  .object({
+    resourceEntityId: EntityIdSchema,
+    winnerAgentId: AgentIdSchema,
+  })
+  .strict();
 
 function releaseIfHeld(
   state: Readonly<RefrigeratorState>,
@@ -56,6 +62,15 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
   resolveDuration: () => ({ kind: "fixed", totalTicks: 30 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "using the refrigerator" },
+  arbitrationFailureMappings: {
+    resource_claimed: {
+      failureCode: "occupied",
+      buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+        resourceEntityId,
+        winnerAgentId,
+      }),
+    },
+  },
   domainFailures: [
     {
       code: "occupied",

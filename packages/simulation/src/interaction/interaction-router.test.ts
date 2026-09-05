@@ -69,6 +69,7 @@ function countingResolverWorld() {
         },
         eventIgnore: [],
         publicBehavior: { kind: "visible", label: "using the guarded object" },
+        arbitrationFailureMappings: {},
         domainFailures: [],
         resultSchema: z.object({}).strict(),
         canStart: () => ({ available: true }),

@@ -52,6 +52,7 @@ function interactionDefinition(): InteractionDefinition<{ enabled: boolean }> {
     resolveDuration: () => ({ kind: "fixed", totalTicks: 1 }),
     eventIgnore: [],
     publicBehavior: { kind: "visible", label: "using the object" },
+    arbitrationFailureMappings: {},
     domainFailures: [],
     resultSchema: z.object({}).strict(),
     canStart: () => ({ available: true }),

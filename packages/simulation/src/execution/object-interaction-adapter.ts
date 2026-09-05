@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   assertHostedOperationContract,
   bindHostedInteractionDefinition,
+  mapOperationArbitrationFailure,
   type InteractionDefinition,
   type ObjectDefinition,
 } from "@god-sim/plugin-sdk";
@@ -103,6 +104,7 @@ export function createObjectInteractionOperation<State>(
     eventIgnore: interaction.eventIgnore,
     publicBehavior: interaction.publicBehavior,
     domainFailures: interaction.domainFailures,
+    arbitrationFailureMappings: interaction.arbitrationFailureMappings,
     resultSchema: interaction.resultSchema,
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => argumentsSchema,
@@ -307,6 +309,7 @@ export function createHostedObjectInteractionOperation<State>(
     eventIgnore: hosted.eventIgnore,
     publicBehavior: hosted.publicBehavior,
     domainFailures: hosted.domainFailures,
+    arbitrationFailureMappings: hosted.arbitrationFailureMappings,
     resultSchema: hosted.resultSchema,
     stateSchema: hosted.stateSchema,
     parametersSchema: hosted.parametersSchema,
@@ -395,6 +398,12 @@ export function createHostedObjectInteractionOperation<State>(
         result,
       );
     },
+    mapArbitrationFailure: (_operationCall, failure) =>
+      mapOperationArbitrationFailure(
+        hosted.arbitrationFailureMappings,
+        hosted.domainFailures,
+        failure,
+      ),
   };
   assertHostedOperationContract(
     `Object ${definition.id} interaction ${interaction.id}`,

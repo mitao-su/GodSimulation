@@ -5,6 +5,8 @@ import {
   CanonicalTaskTracksSchema,
   EntityIdSchema,
   JsonObjectSchema,
+  OperationArbitrationFailureReasonCodeSchema,
+  OperationArbitrationFailureSchema,
   OperationDomainFailureCodeSchema,
   OperationDomainFailureSchema,
   OperationDurationDeclarationSchema,
@@ -13,6 +15,8 @@ import {
   OperationTargetRequirementSchema,
   OperationTechnicalFailureSchema,
   type JsonObject,
+  type OperationArbitrationFailure,
+  type OperationArbitrationFailureReasonCode,
   type OperationDomainFailure,
   type OperationDomainFailureCode,
   type OperationDuration,
@@ -55,6 +59,36 @@ export type PublicBehaviorDeclaration = z.infer<
   typeof PublicBehaviorDeclarationSchema
 >;
 
+export type OperationArbitrationFailureForReason<
+  ReasonCode extends OperationArbitrationFailureReasonCode,
+> = Extract<OperationArbitrationFailure, { reasonCode: ReasonCode }>;
+
+export interface OperationArbitrationFailureMapping<
+  ReasonCode extends OperationArbitrationFailureReasonCode,
+  Details extends JsonObject = JsonObject,
+> {
+  readonly failureCode: OperationDomainFailureCode;
+  readonly buildDetails: (
+    failure: Readonly<OperationArbitrationFailureForReason<ReasonCode>>,
+  ) => Details;
+}
+
+export type OperationArbitrationFailureMappings = {
+  readonly [ReasonCode in OperationArbitrationFailureReasonCode]?:
+    OperationArbitrationFailureMapping<ReasonCode>;
+};
+
+export type OperationArbitrationFailureMappingResult =
+  | {
+      readonly kind: "mapped";
+      readonly failure: OperationDomainFailure;
+    }
+  | {
+      readonly kind: "unmapped";
+      readonly reasonCode: OperationArbitrationFailureReasonCode;
+    }
+  | OperationTechnicalFailure;
+
 export const OperationDomainFailureDefinitionSchema = z
   .object({
     code: OperationDomainFailureCodeSchema,
@@ -75,6 +109,7 @@ export interface OperationContract<
   readonly eventIgnore: readonly OperationEventIgnoreRule[];
   readonly publicBehavior: PublicBehaviorDeclaration;
   readonly domainFailures: readonly OperationDomainFailureDefinition[];
+  readonly arbitrationFailureMappings: OperationArbitrationFailureMappings;
   readonly resultSchema: z.ZodType<JsonObject>;
   resolveDuration(
     state: Readonly<State>,
@@ -232,6 +267,7 @@ export interface HostOperationContract<
   readonly eventIgnore: readonly OperationEventIgnoreRule[];
   readonly publicBehavior: PublicBehaviorDeclaration;
   readonly domainFailures: readonly HostedOperationDomainFailureDefinition[];
+  readonly arbitrationFailureMappings: OperationArbitrationFailureMappings;
   readonly resultSchema: z.ZodType<JsonObject>;
   readonly stateSchema: z.ZodType<OperationState>;
   initialState(
@@ -268,6 +304,7 @@ interface UnknownOperationContract {
   readonly eventIgnore?: unknown;
   readonly publicBehavior?: unknown;
   readonly domainFailures?: unknown;
+  readonly arbitrationFailureMappings?: unknown;
   readonly resultSchema?: unknown;
   readonly resolveDuration?: unknown;
   readonly fail?: unknown;
@@ -282,6 +319,138 @@ function isZodSchema(value: unknown): value is z.ZodType {
     "safeParse" in value &&
     typeof value.safeParse === "function"
   );
+}
+
+function arbitrationMappingTechnicalFailure(
+  code: string,
+  message: string,
+): OperationTechnicalFailure {
+  return {
+    kind: "technical_failure",
+    category: "plugin",
+    code,
+    message,
+    retryable: false,
+  };
+}
+
+function assertArbitrationFailureMappings(
+  label: string,
+  value: unknown,
+  failureCodes: ReadonlySet<string>,
+  manualFailureCodes?: ReadonlySet<string>,
+): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(label + " requires an arbitration failure mapping table");
+  }
+
+  for (const [reasonCode, candidate] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (!OperationArbitrationFailureReasonCodeSchema.safeParse(reasonCode).success) {
+      throw new Error(
+        `${label} contains an unknown arbitration failure reason ${reasonCode}`,
+      );
+    }
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      throw new Error(
+        `${label} arbitration failure ${reasonCode} has an invalid mapping`,
+      );
+    }
+    const mapping = candidate as Record<string, unknown>;
+    const unexpectedKeys = Object.keys(mapping).filter(
+      (key) => key !== "failureCode" && key !== "buildDetails",
+    );
+    if (unexpectedKeys.length > 0) {
+      throw new Error(
+        `${label} arbitration failure ${reasonCode} has unknown mapping fields`,
+      );
+    }
+    const failureCode = OperationDomainFailureCodeSchema.safeParse(
+      mapping["failureCode"],
+    );
+    if (!failureCode.success) {
+      throw new Error(
+        `${label} arbitration failure ${reasonCode} requires a valid failure code`,
+      );
+    }
+    if (!failureCodes.has(failureCode.data)) {
+      throw new Error(
+        `${label} arbitration failure ${reasonCode} references undeclared failure ${failureCode.data}`,
+      );
+    }
+    if (
+      manualFailureCodes !== undefined &&
+      !manualFailureCodes.has(failureCode.data)
+    ) {
+      throw new Error(
+        `${label} arbitration failure ${reasonCode} is missing from manual world preconditions: ${failureCode.data}`,
+      );
+    }
+    if (typeof mapping["buildDetails"] !== "function") {
+      throw new Error(
+        `${label} arbitration failure ${reasonCode} requires a details builder`,
+      );
+    }
+  }
+}
+
+export function mapOperationArbitrationFailure(
+  mappings: OperationArbitrationFailureMappings,
+  catalog: readonly HostedOperationDomainFailureDefinition[],
+  failureValue: unknown,
+): OperationArbitrationFailureMappingResult {
+  const failure = OperationArbitrationFailureSchema.safeParse(failureValue);
+  if (!failure.success) {
+    return arbitrationMappingTechnicalFailure(
+      "invalid_arbitration_failure",
+      "Operation received a malformed arbitration failure.",
+    );
+  }
+
+  const mapping = mappings[failure.data.reasonCode];
+  if (mapping === undefined) {
+    return { kind: "unmapped", reasonCode: failure.data.reasonCode };
+  }
+
+  const declaration = catalog.find((candidate) =>
+    candidate.code === mapping.failureCode,
+  );
+  if (declaration === undefined) {
+    return arbitrationMappingTechnicalFailure(
+      "undeclared_arbitration_failure_code",
+      `Arbitration failure ${failure.data.reasonCode} references an undeclared operation failure.`,
+    );
+  }
+
+  let details: unknown;
+  try {
+    details = mapping.buildDetails(failure.data);
+  } catch {
+    return arbitrationMappingTechnicalFailure(
+      "arbitration_failure_details_builder_failed",
+      `Arbitration failure ${failure.data.reasonCode} details builder failed.`,
+    );
+  }
+  const parsedDetails = declaration.detailsSchema.safeParse(details);
+  const normalizedDetails = parsedDetails.success
+    ? JsonObjectSchema.safeParse(parsedDetails.data)
+    : undefined;
+  if (!parsedDetails.success || !normalizedDetails?.success) {
+    return arbitrationMappingTechnicalFailure(
+      "invalid_arbitration_failure_details",
+      `Arbitration failure ${failure.data.reasonCode} produced invalid details.`,
+    );
+  }
+
+  return {
+    kind: "mapped",
+    failure: {
+      kind: "domain_failure",
+      code: mapping.failureCode,
+      details: normalizedDetails.data,
+    },
+  };
 }
 
 export function assertOperationContract(
@@ -316,6 +485,7 @@ export function assertOperationContract(
     }
     failureCodes.add(failure.code);
   }
+  assertArbitrationFailureMappings(label, definition.arbitrationFailureMappings, failureCodes);
   if (!isZodSchema(definition.resultSchema)) {
     throw new Error(label + " requires a result schema");
   }
@@ -574,6 +744,12 @@ export function assertHostedOperationContract(
     }
     manualFailureCodes.add(precondition.failureCode);
   }
+  assertArbitrationFailureMappings(
+    label,
+    definition.arbitrationFailureMappings,
+    failureCodes,
+    manualFailureCodes,
+  );
 }
 
 function operationTechnicalFailure(

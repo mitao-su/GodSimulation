@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   assertHostedOperationContract,
+  mapOperationArbitrationFailure,
   type AgentDefinition,
   type AgentOperationDefinition,
   type HostedOperationDomainFailureDefinition,
@@ -118,6 +119,7 @@ function legacyCoreRuntime(
     eventIgnore: operation.eventIgnore,
     publicBehavior: operation.publicBehavior,
     domainFailures: hostedFailures(operation),
+    arbitrationFailureMappings: operation.arbitrationFailureMappings,
     resultSchema: operation.resultSchema,
     stateSchema: operation.stateSchema,
     parametersSchema: options.parametersSchema,
@@ -147,6 +149,12 @@ function legacyCoreRuntime(
     acknowledgeFuseResult: (_context, operationCall, result) =>
       options.acknowledgeFuseResult?.(operationCall.state, result) ??
       operationCall.state,
+    mapArbitrationFailure: (_operationCall, failure) =>
+      mapOperationArbitrationFailure(
+        operation.arbitrationFailureMappings,
+        hostedFailures(operation),
+        failure,
+      ),
   };
 }
 
@@ -244,6 +252,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
         resultSchema: ReadUnavailableResultSchema,
       },
     ],
+    arbitrationFailureMappings: {},
     resultSchema: ReadOperationResultSchema,
     stateSchema: ReadOperationStateSchema,
     parametersSchema: ReadOperationArgumentsSchema,
@@ -310,6 +319,8 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     }),
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure: (_operationCall, failure) =>
+      mapOperationArbitrationFailure({}, [], failure),
   };
 }
 
@@ -341,6 +352,7 @@ function unavailableRuntime(options: {
     eventIgnore: [],
     publicBehavior: options.publicBehavior,
     domainFailures: [],
+    arbitrationFailureMappings: {},
     resultSchema: EMPTY_RESULT_SCHEMA,
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     parametersSchema: options.parametersSchema,
@@ -362,6 +374,8 @@ function unavailableRuntime(options: {
     cancel: () => ({ effects: [], result: {} }),
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure: (_operationCall, failure) =>
+      mapOperationArbitrationFailure({}, [], failure),
   };
 }
 

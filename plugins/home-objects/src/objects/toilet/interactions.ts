@@ -4,12 +4,18 @@ import {
   operationParametersJsonSchema,
   type InteractionDefinition,
 } from "@god-sim/plugin-sdk";
+import { AgentIdSchema, EntityIdSchema } from "@god-sim/protocol";
 
 import type { ToiletState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z.object({ summary: z.string() }).strict();
+const failureDetailsSchema = z
+  .object({
+    resourceEntityId: EntityIdSchema,
+    winnerAgentId: AgentIdSchema,
+  })
+  .strict();
 
 function releaseIfHeld(
   state: Readonly<ToiletState>,
@@ -54,6 +60,15 @@ export const useToiletInteraction: InteractionDefinition<ToiletState> = {
   resolveDuration: () => ({ kind: "fixed", totalTicks: 40 }),
   eventIgnore: [],
   publicBehavior: { kind: "visible", label: "using the toilet" },
+  arbitrationFailureMappings: {
+    resource_claimed: {
+      failureCode: "occupied",
+      buildDetails: ({ resourceEntityId, winnerAgentId }) => ({
+        resourceEntityId,
+        winnerAgentId,
+      }),
+    },
+  },
   domainFailures: [
     {
       code: "occupied",
