@@ -844,7 +844,7 @@ export function advanceHostedOperation(
   if (
     operation.duration.kind === "fixed" &&
     (!Number.isSafeInteger(operation.duration.totalTicks) ||
-      operation.duration.totalTicks <= 0)
+      operation.duration.totalTicks <= Number.MIN_VALUE)
   ) {
     return hostedTechnicalFailure(
       world,

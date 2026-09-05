@@ -372,6 +372,26 @@ describe("hosted operation lifecycle runner", () => {
     expect(fixture.calls.start).not.toHaveBeenCalled();
   });
 
+  it.each([0, -1])(
+    "rejects a fixed call with non-positive locked duration (%s)",
+    (totalTicks) => {
+      const fixture = fixtureRuntime();
+      const result = advanceHostedOperation(
+        runningWorld(),
+        fixture.registry,
+        agentId,
+        runtimeCall({ duration: { kind: "fixed", totalTicks } }),
+      );
+
+      expect(result).toMatchObject({
+        kind: "technical_failure",
+        failure: { code: "operation_duration_invalid" },
+        events: [],
+      });
+      expect(fixture.calls.start).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects progress overflow before invoking lifecycle code or effects", () => {
     const tick = vi.fn(
       (): OperationTickResult => ({
