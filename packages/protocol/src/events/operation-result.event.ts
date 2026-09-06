@@ -6,6 +6,7 @@ import {
   OperationIdSchema,
 } from "../identity/ids";
 import { JsonObjectSchema } from "../json/json-value";
+import { OperationTerminationSourceSchema } from "../execution/host-operation-contract";
 import { EventEnvelopeSchema } from "./event-envelope";
 import { OperationTerminationOutcomeSchema } from "./operation-terminated.event";
 
@@ -16,7 +17,7 @@ export const OperationResultEventSchema = EventEnvelopeSchema.extend({
   operationId: OperationIdSchema,
   terminal: z.boolean(),
   outcome: OperationTerminationOutcomeSchema.nullable(),
-  reasonCode: z.string().min(1).max(120),
+  reasonCode: OperationTerminationSourceSchema,
   result: JsonObjectSchema,
 })
   .strict()

@@ -140,6 +140,22 @@ describe("domain events", () => {
     });
     expect(
       DomainEventSchema.safeParse({
+        ...terminated,
+        reasonCode: "Error: operation could not complete",
+      }).success,
+    ).toBe(false);
+    expect(
+      DomainEventSchema.safeParse({
+        ...started,
+        type: "operation_result",
+        terminal: true,
+        outcome: "completed",
+        reasonCode: "Completed because everything looked good",
+        result: {},
+      }).success,
+    ).toBe(false);
+    expect(
+      DomainEventSchema.safeParse({
         ...started,
         taskSlots: ["BODY", "HEAD"],
       }).success,
