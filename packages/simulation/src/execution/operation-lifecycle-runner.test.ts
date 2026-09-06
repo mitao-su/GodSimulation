@@ -22,6 +22,7 @@ import {
   advanceHostedOperationBatch,
   resumeHostedOperationTermination,
 } from "./action-runner";
+import { commitProposal } from "../interaction/effect-committer";
 import {
   cancelOperationLifecycle,
   completeOperationLifecycle,
@@ -1313,5 +1314,114 @@ describe("hosted operation lifecycle runner", () => {
     expect(resumed).toMatchObject({ kind: "termination_ready", operation: { progressTicks: 2, state: { ticks: 1 } } });
     expect(tick).toHaveBeenCalledTimes(1);
     expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("resumes completion after projecting a pending proposal exactly once", () => {
+    const complete = vi
+      .fn<HostedOperationRuntime["complete"]>()
+      .mockImplementationOnce(() => {
+        throw new Error("temporary completion failure");
+      })
+      .mockImplementation((context) => ({
+        effects: [
+          {
+            type: "release_occupancy",
+            entityId: fridgeId,
+            agentId,
+            expectedObjectVersion: context.world.objects.get(fridgeId)?.version ?? -1,
+          },
+        ],
+        result: { status: "completed" },
+      }));
+    const tick = vi.fn(
+      (_context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationTickResult => ({
+        kind: "running",
+        proposal: {
+          effects: [
+            {
+              type: "reserve_occupancy",
+              entityId: fridgeId,
+              agentId,
+              expectedObjectVersion: 0,
+            },
+          ],
+        },
+        nextState: { ticks: z.number().parse(operation.state["ticks"]) + 1 },
+      }),
+    );
+    const fixture = fixtureRuntime({ duration: { kind: "fixed" }, tick, complete });
+    const world = runningWorld();
+    const operation = runtimeCall({
+      firstStepState: "started",
+      progressTicks: 1,
+      duration: { kind: "fixed", totalTicks: 2 },
+    });
+
+    const pending = advanceHostedOperation(world, fixture.registry, agentId, operation);
+    expect(pending).toMatchObject({
+      kind: "termination_pending",
+      pending: {
+        source: "duration_elapsed",
+        operation: { progressTicks: 2, state: { ticks: 1 } },
+        preTerminationProposal: {
+          phase: "tick",
+          proposal: {
+            effects: [
+              expect.objectContaining({
+                type: "reserve_occupancy",
+                expectedObjectVersion: 0,
+              }),
+            ],
+          },
+        },
+      },
+    });
+    if (pending.kind !== "termination_pending") throw new Error("Completion was not pending");
+
+    const resumed = resumeHostedOperationTermination(
+      world,
+      fixture.registry,
+      agentId,
+      pending.pending,
+    );
+    expect(resumed).toMatchObject({
+      kind: "termination_ready",
+      world: {
+        version: world.version + 1,
+        objects: expect.any(Map),
+      },
+      operation: { progressTicks: 2, state: { ticks: 1 } },
+      transaction: {
+        proposal: {
+          effects: [
+            expect.objectContaining({
+              type: "release_occupancy",
+              expectedObjectVersion: 1,
+            }),
+          ],
+        },
+      },
+    });
+    expect(resumed).not.toHaveProperty("preTerminationProposal");
+    expect(resumed.world.objects.get(fridgeId)).toMatchObject({
+      version: 1,
+      state: { holder: agentId },
+    });
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(2);
+
+    if (resumed.kind !== "termination_ready") throw new Error("Completion did not resume");
+    const terminated = commitProposal(
+      resumed.world,
+      fixture.registry,
+      { effects: resumed.transaction.proposal.effects },
+      { causationId: callId, correlationId: callId },
+    );
+    expect(terminated.accepted).toBe(true);
+    if (!terminated.accepted) throw new Error("Termination proposal was rejected");
+    expect(terminated.world.objects.get(fridgeId)).toMatchObject({
+      version: 2,
+      state: { holder: null },
+    });
   });
 });

@@ -636,13 +636,10 @@ export function resumeHostedOperationTermination(
   }
   return {
     kind: "termination_ready",
-    world,
+    world: completionWorld,
     operation: completed.operation,
     events: [],
     transaction: completed.transaction,
-    ...(pending.preTerminationProposal === undefined
-      ? {}
-      : { preTerminationProposal: pending.preTerminationProposal }),
   };
 }
 
