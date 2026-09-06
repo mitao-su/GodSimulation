@@ -42,7 +42,8 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
 
 const fridgeState = z.object({ holder: z.string().nullable() }).strict();
 type FridgeState = z.infer<typeof fridgeState>;
-const fridgeFailureDetailsSchema = z
+const fridgeFailureDetailsSchema = z.object({ summary: z.string() }).strict();
+const fridgeOccupiedFailureDetailsSchema = z
   .object({
     resourceEntityId: EntityIdSchema,
     winnerAgentId: AgentIdSchema,
@@ -87,6 +88,10 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         duration: { kind: "fixed" },
         worldPreconditions: [
           {
+            failureCode: "out_of_range",
+            description: "The character must be at the refrigerator interaction position.",
+          },
+          {
             failureCode: "occupied",
             description: "Another character may already be using the refrigerator.",
           },
@@ -110,9 +115,17 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       },
       domainFailures: [
         {
+          code: "out_of_range",
+          summary: "Fridge out of range",
+          detailsSchema: fridgeFailureDetailsSchema,
+          resultSchema: z
+            .object({ status: z.literal("failed") })
+            .strict(),
+        },
+        {
           code: "occupied",
           summary: "Fridge occupied",
-          detailsSchema: fridgeFailureDetailsSchema,
+          detailsSchema: fridgeOccupiedFailureDetailsSchema,
           resultSchema: z
             .object({ status: z.literal("failed") })
             .strict(),
@@ -124,7 +137,15 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
-          : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
+          : {
+              available: false,
+              reasonCode: "occupied",
+              summary: "Fridge occupied",
+              details: {
+                resourceEntityId: context.object.entityId,
+                winnerAgentId: AgentIdSchema.parse(state.holder),
+              },
+            },
       start: (_state, context) => ({
         effects: [
           {
@@ -192,6 +213,10 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         duration: { kind: "fixed" },
         worldPreconditions: [
           {
+            failureCode: "out_of_range",
+            description: "The character must be at the refrigerator interaction position.",
+          },
+          {
             failureCode: "occupied",
             description: "Another character may already be using the refrigerator.",
           },
@@ -222,9 +247,15 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       },
       domainFailures: [
         {
+          code: "out_of_range",
+          summary: "Fridge out of range",
+          detailsSchema: fridgeFailureDetailsSchema,
+          resultSchema: z.object({}).strict(),
+        },
+        {
           code: "occupied",
           summary: "Fridge occupied",
-          detailsSchema: fridgeFailureDetailsSchema,
+          detailsSchema: fridgeOccupiedFailureDetailsSchema,
           resultSchema: z.object({}).strict(),
         },
       ],
@@ -232,7 +263,15 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
-          : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
+          : {
+              available: false,
+              reasonCode: "occupied",
+              summary: "Fridge occupied",
+              details: {
+                resourceEntityId: context.object.entityId,
+                winnerAgentId: AgentIdSchema.parse(state.holder),
+              },
+            },
       start: (_state, context) => ({
         effects: [
           {
@@ -271,7 +310,12 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         ),
         target: { kind: "none" },
         duration: { kind: "fixed" },
-        worldPreconditions: [],
+        worldPreconditions: [
+          {
+            failureCode: "out_of_range",
+            description: "The character must be at the refrigerator interaction position.",
+          },
+        ],
       },
       target: { kind: "none" },
       duration: { kind: "fixed" },
@@ -287,7 +331,14 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       eventIgnore: [],
       publicBehavior: { kind: "visible", label: "configuring the fridge" },
       arbitrationFailureMappings: {},
-      domainFailures: [],
+      domainFailures: [
+        {
+          code: "out_of_range",
+          summary: "Fridge out of range",
+          detailsSchema: fridgeFailureDetailsSchema,
+          resultSchema: z.object({}).strict(),
+        },
+      ],
       resultSchema: z.object({}).strict(),
       canStart: () => ({ available: true }),
       start: () => ({ effects: [] }),

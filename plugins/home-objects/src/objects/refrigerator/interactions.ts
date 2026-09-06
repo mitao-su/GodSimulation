@@ -10,7 +10,8 @@ import type { RefrigeratorState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z
+const failureDetailsSchema = z.object({ summary: z.string() }).strict();
+const occupiedFailureDetailsSchema = z
   .object({
     resourceEntityId: EntityIdSchema,
     winnerAgentId: AgentIdSchema,
@@ -50,6 +51,10 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
     duration: { kind: "fixed" },
     worldPreconditions: [
       {
+        failureCode: "out_of_range",
+        description: "The character must be at the refrigerator interaction position.",
+      },
+      {
         failureCode: "occupied",
         description: "Another character may already be using the refrigerator.",
       },
@@ -73,9 +78,15 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
   },
   domainFailures: [
     {
+      code: "out_of_range",
+      summary: "The refrigerator is out of range",
+      detailsSchema: failureDetailsSchema,
+      resultSchema: emptyResultSchema,
+    },
+    {
       code: "occupied",
       summary: "The refrigerator is occupied",
-      detailsSchema: failureDetailsSchema,
+      detailsSchema: occupiedFailureDetailsSchema,
       resultSchema: emptyResultSchema,
     },
   ],
@@ -88,6 +99,10 @@ export const useRefrigeratorInteraction: InteractionDefinition<RefrigeratorState
       available: false,
       reasonCode: "occupied",
       summary: `The refrigerator is being used by ${state.occupiedBy}`,
+      details: {
+        resourceEntityId: context.object.entityId,
+        winnerAgentId: AgentIdSchema.parse(state.occupiedBy),
+      },
     };
   },
   start(state, context) {

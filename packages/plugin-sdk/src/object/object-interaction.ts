@@ -49,6 +49,7 @@ export const InteractionAvailabilitySchema = z.discriminatedUnion("available", [
       available: z.literal(false),
       reasonCode: z.string().min(1),
       summary: z.string().min(1).max(500),
+      details: JsonObjectSchema,
     })
     .strict(),
 ]);
