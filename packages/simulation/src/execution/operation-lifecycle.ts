@@ -12,6 +12,7 @@ import {
   createOperationRuntimeContext,
   type OperationRuntimeRegistry,
 } from "./operation-runtime";
+import { commitActiveOperationTermination } from "./operation-termination";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
 import { proposeInteraction } from "../interaction/interaction-router";
 import type { WorldState } from "../world/world-state";
@@ -124,45 +125,53 @@ export function recordOperationTermination(
   metadata: EventMetadata,
   resultOverride?: JsonObject,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
+  // 旧 action/release 管线在收集终止项时已从 activeOperations 移除调用。
+  // 先把调用放回局部候选世界，才能让清理与失败回滚都经过同一原子入口；
+  // 成功提交随后会再次由终止事务移除它。
+  const currentAgent = worldInput.agents.get(agentId);
+  const terminationWorld =
+    currentAgent && !currentAgent.activeOperations.has(operation.callId)
+      ? {
+          ...worldInput,
+          agents: new Map(worldInput.agents).set(agentId, {
+            ...currentAgent,
+            activeOperations: new Map(currentAgent.activeOperations).set(
+              operation.callId,
+              operation,
+            ),
+          }),
+        }
+      : worldInput;
   const runtime = registry.getOperation(operation.operationId);
-  if (!runtime) {
-    throw new Error(`Operation ${operation.operationId} is not registered`);
-  }
-  const context = createOperationRuntimeContext(worldInput, registry, agentId);
-  const candidate =
-    resultOverride === undefined
-      ? runtime.terminalResult(context, operation, outcome)
-      : resultOverride;
-  const result =
-    candidate === null
-      ? {}
-      : JsonObjectSchema.parse(runtime.resultSchema.parse(candidate));
-  const terminated = appendDomainEvent(
-    worldInput,
+  const failureCode =
+    outcome === "failed" && runtime
+      ? runtime.domainFailures.some((failure) => failure.code === reasonCode)
+        ? reasonCode
+        : reasonCode === "not_at_interaction_position" &&
+            runtime.domainFailures.some((failure) => failure.code === "out_of_range")
+          ? "out_of_range"
+          : undefined
+      : undefined;
+  const committed = commitActiveOperationTermination(
+    terminationWorld,
+    registry,
     {
-      type: "operation_terminated",
       agentId,
-      callId: operation.callId,
-      operationId: operation.operationId,
+      operation,
       outcome,
-      reasonCode,
+      source: reasonCode,
+      ...(failureCode === undefined ? {} : { failureCode }),
+      proposal: { effects: [] },
+      ...(resultOverride === undefined ? {} : { resultOverride }),
     },
     metadata,
   );
-  const receipt = appendResult(
-    terminated.world,
-    agentId,
-    operation,
-    true,
-    outcome,
-    reasonCode,
-    result,
-    metadata,
-  );
-  return {
-    world: receipt.world,
-    events: [terminated.event, receipt.event],
-  };
+  if (committed.kind === "technical_failure") {
+    throw new Error(
+      `Operation ${operation.callId} termination failed: ${committed.failure.code}: ${committed.failure.message}`,
+    );
+  }
+  return committed;
 }
 
 export function recordFuseResults(

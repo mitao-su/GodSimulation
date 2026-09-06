@@ -680,8 +680,12 @@ export function commitHostedOperationTermination(
   world: WorldState,
   registry: HostedOperationRuntimeRegistry,
   transaction: OperationTerminationTransaction,
+  operation?: OperationRuntimeCall,
 ): OperationTerminationResult {
-  return commitOperationTermination(world, registry, transaction);
+  const runtime = operation
+    ? registry.getHostedOperation(operation.operationId, operation.hostDefinition)
+    : undefined;
+  return commitOperationTermination(world, registry, transaction, undefined, runtime);
 }
 
 function transitionIntent(
@@ -956,6 +960,39 @@ export function advanceHostedOperationBatch(
       operation: failed.operation,
       events: [],
       transaction: failed.transaction,
+    });
+  }
+
+  // Terminal proposals are committed only after arbitration and all accepted
+  // transition proposals have been applied. This keeps completion, failure
+  // and cancellation on the same atomic termination path.
+  for (const entry of ordered) {
+    const prepared = processed.get(entry.operation.callId);
+    if (!prepared || prepared.kind !== "termination_ready") continue;
+    const terminated = commitHostedOperationTermination(
+      nextWorld,
+      registry,
+      prepared.transaction,
+      prepared.operation,
+    );
+    if (terminated.kind === "technical_failure") {
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(
+          nextWorld,
+          prepared.operation,
+          terminated.failure,
+          prepared.events,
+        ),
+      );
+      continue;
+    }
+    nextWorld = terminated.world;
+    events.push(...terminated.events);
+    processed.set(entry.operation.callId, {
+      ...prepared,
+      world: nextWorld,
+      events: [...prepared.events, ...terminated.events],
     });
   }
   return {

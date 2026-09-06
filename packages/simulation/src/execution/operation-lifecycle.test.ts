@@ -171,6 +171,14 @@ describe("operation lifecycle results", () => {
         result: { status: "completed" },
       }),
     ]);
+    expect(
+      result.world.agents.get("alice" as never)?.activeOperations.has(operation.callId),
+    ).toBe(false);
+    expect(
+      result.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
+    ).toHaveLength(1);
   });
 
   it("acknowledges delivered move observations only after a continued decision releases", () => {
@@ -299,6 +307,14 @@ describe("operation lifecycle results", () => {
         result: { nearby: [] },
       }),
     ]);
+    expect(
+      released.world.agents.get("alice" as never)?.activeOperations.has(operation.callId),
+    ).toBe(false);
+    expect(
+      released.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
+    ).toHaveLength(1);
   });
 
   it("returns the plugin failure result after failure effects commit", () => {
@@ -357,6 +373,28 @@ describe("operation lifecycle results", () => {
         result: { status: "failed" },
       }),
     ]);
+    expect(
+      result.world.agents.get("alice" as never)?.activeOperations.has(operation.callId),
+    ).toBe(false);
+    const releaseEventIndex = result.events.findIndex(
+      (event) =>
+        event.type === "object_state_changed" &&
+        event.entityId === "fridge-1" &&
+        event.state !== null &&
+        typeof event.state === "object" &&
+        !Array.isArray(event.state) &&
+        (event.state as Record<string, unknown>)["holder"] === null,
+    );
+    const terminalEventIndex = result.events.findIndex(
+      (event) => event.type === "operation_result" && event.callId === operation.callId,
+    );
+    expect(releaseEventIndex).toBeGreaterThanOrEqual(0);
+    expect(terminalEventIndex).toBeGreaterThan(releaseEventIndex);
+    expect(
+      result.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
+    ).toHaveLength(1);
   });
 
   it("returns a deduplicated summary of everything seen during a move", () => {

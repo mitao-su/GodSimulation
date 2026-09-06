@@ -754,7 +754,7 @@ describe("hosted operation lifecycle runner", () => {
     });
   });
 
-  it("defers start effects to batch commit and leaves terminal effects for the P2 transaction", () => {
+  it("commits start and terminal effects through the batch termination path", () => {
     const start = vi.fn(
       (_context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationStartResult => ({
         kind: "started",
@@ -821,7 +821,14 @@ describe("hosted operation lifecycle runner", () => {
       version: 1,
       state: { holder: agentId },
     });
-    expect(result.world.agents.get(agentId)?.bladder).toBe(beforeBladder);
+    expect(result.world.agents.get(agentId)?.bladder).not.toBe(beforeBladder);
+    expect(result.world.agents.get(agentId)?.bladder).toBe(0);
+    expect(result.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "operation_terminated", outcome: "completed" }),
+        expect.objectContaining({ type: "operation_result", terminal: true, outcome: "completed" }),
+      ]),
+    );
   });
 
   it("keeps the call recoverable when lifecycle state or effects are invalid", () => {
