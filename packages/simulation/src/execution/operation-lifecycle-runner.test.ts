@@ -1407,6 +1407,17 @@ describe("hosted operation lifecycle runner", () => {
       version: 1,
       state: { holder: agentId },
     });
+    expect(resumed.events).toHaveLength(1);
+    expect(resumed.events).toEqual([
+      expect.objectContaining({
+        type: "object_state_changed",
+        entityId: fridgeId,
+        objectVersion: 1,
+        worldVersion: world.version + 1,
+        sequence: world.lastEventSequence + 1,
+      }),
+    ]);
+    expect(resumed.events.at(-1)?.sequence).toBe(resumed.world.lastEventSequence);
     expect(tick).toHaveBeenCalledTimes(1);
     expect(complete).toHaveBeenCalledTimes(2);
 
@@ -1419,6 +1430,14 @@ describe("hosted operation lifecycle runner", () => {
     );
     expect(terminated.accepted).toBe(true);
     if (!terminated.accepted) throw new Error("Termination proposal was rejected");
+    expect(terminated.events).toHaveLength(1);
+    expect(terminated.events[0]).toMatchObject({
+      type: "object_state_changed",
+      entityId: fridgeId,
+      objectVersion: 2,
+      sequence: resumed.world.lastEventSequence + 1,
+    });
+    expect(terminated.events.at(-1)?.sequence).toBe(terminated.world.lastEventSequence);
     expect(terminated.world.objects.get(fridgeId)).toMatchObject({
       version: 2,
       state: { holder: null },

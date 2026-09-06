@@ -526,7 +526,13 @@ function projectLifecycleProposal(
   operation: OperationRuntimeCall,
   proposal: OperationLifecycleTransitionResult["proposal"],
   phase: "start" | "tick",
-): WorldState | HostedOperationTechnicalFailureResult {
+):
+  | {
+      readonly kind: "projected";
+      readonly world: WorldState;
+      readonly events: readonly DomainEvent[];
+    }
+  | HostedOperationTechnicalFailureResult {
   try {
     const projected = commitProposal(world, registry, proposal, {
       causationId: `${operation.callId}:${phase}:${world.tick}`,
@@ -544,7 +550,7 @@ function projectLifecycleProposal(
         ),
       );
     }
-    return projected.world;
+    return { kind: "projected", world: projected.world, events: projected.events };
   } catch (error) {
     const description = error instanceof Error ? error.message : String(error);
     return hostedTechnicalFailure(
@@ -609,6 +615,7 @@ export function resumeHostedOperationTermination(
   pending: HostedOperationTerminationPendingResult["pending"],
 ): HostedOperationAdvanceResult {
   let completionWorld = world;
+  let completionEvents: readonly DomainEvent[] = [];
   if (pending.preTerminationProposal) {
     const projected = projectLifecycleProposal(
       world,
@@ -617,8 +624,9 @@ export function resumeHostedOperationTermination(
       pending.preTerminationProposal.proposal,
       pending.preTerminationProposal.phase,
     );
-    if ("kind" in projected) return projected;
-    completionWorld = projected;
+    if (projected.kind === "technical_failure") return projected;
+    completionWorld = projected.world;
+    completionEvents = projected.events;
   }
   const completed = completeOperationLifecycle(
     { world: completionWorld, registry, agentId, operation: pending.operation },
@@ -638,7 +646,7 @@ export function resumeHostedOperationTermination(
     kind: "termination_ready",
     world: completionWorld,
     operation: completed.operation,
-    events: [],
+    events: completionEvents,
     transaction: completed.transaction,
   };
 }
@@ -1089,8 +1097,8 @@ export function advanceHostedOperation(
       step.proposal,
       transitionPhase,
     );
-    if ("kind" in projected) return projected;
-    evaluationWorld = projected;
+    if (projected.kind === "technical_failure") return projected;
+    evaluationWorld = projected.world;
   }
 
   const progressed = { ...advancedOperation, progressTicks: nextProgress };
