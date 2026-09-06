@@ -131,6 +131,7 @@ function applyAgentDecisionPlan(
   world: WorldState,
   registry: OperationRuntimeRegistry,
   plan: AgentDecisionPlan,
+  pendingOperationResults: AgentState["pendingOperationResults"] = [],
 ): AgentState {
   const cycle = world.decisionCycle;
   if (!cycle) throw new Error("No decision cycle is active");
@@ -199,7 +200,7 @@ function applyAgentDecisionPlan(
     ...agent,
     taskTracks: taskTracks as TaskTracks,
     activeOperations,
-    pendingOperationResults: [],
+    pendingOperationResults,
   };
   assertCurrentCallsMatchTracks(next);
   return next;
@@ -338,9 +339,24 @@ export function releaseDecisionCycle(
   const candidateWorld = cancellation.world;
   const preparedAgents = new Map<AgentId, AgentState>();
   for (const plan of plans) {
+    const cancelledCallIds = new Set(
+      cancellationLifecycles
+        .filter((lifecycle) => lifecycle.agentId === plan.agentId)
+        .map((lifecycle) => lifecycle.operation.callId),
+    );
+    const terminalCancellationResults = candidateWorld
+      .agents.get(plan.agentId)!
+      .pendingOperationResults.filter(
+        (result) => result.terminal && cancelledCallIds.has(result.callId),
+      );
     preparedAgents.set(
       plan.agentId,
-      applyAgentDecisionPlan(candidateWorld, registry, plan),
+      applyAgentDecisionPlan(
+        candidateWorld,
+        registry,
+        plan,
+        terminalCancellationResults,
+      ),
     );
   }
 

@@ -458,6 +458,12 @@ describe("decision release policy", () => {
 
   it("commits the cancel lifecycle before replacing a started operation", () => {
     const running = worldWithStartedFridgeUse();
+    const cancelledCallId = running.agents
+      .get("alice" as never)!
+      .taskTracks.BODY;
+    if (cancelledCallId.kind !== "operation") {
+      throw new Error("Expected the fridge use call on BODY");
+    }
     const thinking = requestDecisions(running, [
       {
         agentId: "alice" as never,
@@ -490,6 +496,17 @@ describe("decision release policy", () => {
       version: 2,
       state: { holder: null },
     });
+    expect(
+      released.world.agents.get("alice" as never)?.pendingOperationResults,
+    ).toEqual([
+      expect.objectContaining({
+        callId: cancelledCallId.callId,
+        terminal: true,
+        outcome: "cancelled",
+        reasonCode: "task_replaced",
+        result: { status: "cancelled" },
+      }),
+    ]);
     expect(released.events).toEqual([
       expect.objectContaining({
         type: "object_state_changed",
