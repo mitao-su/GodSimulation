@@ -57,6 +57,7 @@ export function createObserveOperation(): RegisteredOperation {
             available: false,
             reasonCode: "target_not_visible",
             summary: `${targetEntityId ?? "Target"} is not currently visible`,
+            details: { summary: `${targetEntityId ?? "Target"} is not currently visible` },
           };
     },
     resolveDuration: (context) => ({

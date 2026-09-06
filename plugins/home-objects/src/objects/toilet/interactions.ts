@@ -10,15 +10,13 @@ import type { ToiletState } from "./state";
 
 const noArgumentsSchema = z.object({}).strict();
 const emptyResultSchema = z.object({}).strict();
-const failureDetailsSchema = z.union([
-  z.object({ summary: z.string() }).strict(),
-  z
-    .object({
-      resourceEntityId: EntityIdSchema,
-      winnerAgentId: AgentIdSchema,
-    })
-    .strict(),
-]);
+const failureDetailsSchema = z.object({ summary: z.string() }).strict();
+const occupiedFailureDetailsSchema = z
+  .object({
+    resourceEntityId: EntityIdSchema,
+    winnerAgentId: AgentIdSchema,
+  })
+  .strict();
 
 function releaseIfHeld(
   state: Readonly<ToiletState>,
@@ -86,7 +84,7 @@ export const useToiletInteraction: InteractionDefinition<ToiletState> = {
     {
       code: "occupied",
       summary: "The toilet is occupied",
-      detailsSchema: failureDetailsSchema,
+      detailsSchema: occupiedFailureDetailsSchema,
       resultSchema: emptyResultSchema,
     },
   ],
@@ -99,6 +97,10 @@ export const useToiletInteraction: InteractionDefinition<ToiletState> = {
       available: false,
       reasonCode: "occupied",
       summary: `The toilet is being used by ${state.occupiedBy}`,
+      details: {
+        resourceEntityId: context.object.entityId,
+        winnerAgentId: AgentIdSchema.parse(state.occupiedBy),
+      },
     };
   },
   start(state, context) {

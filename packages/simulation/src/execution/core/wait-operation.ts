@@ -63,6 +63,9 @@ export function createWaitOperation(): RegisteredOperation {
             available: false,
             reasonCode: "invalid_duration",
             summary: `Wait duration must not exceed ${context.world.simulationRulesLock.rules.operations.wait.maxDurationTicks} ticks`,
+            details: {
+              summary: `Wait duration must not exceed ${context.world.simulationRulesLock.rules.operations.wait.maxDurationTicks} ticks`,
+            },
           },
     resolveDuration: (_context, value) => ({
       kind: "fixed",

@@ -17,7 +17,7 @@ const noEffects = (): EffectProposal => ({ effects: [] });
 const noFuseReceipt = () => null;
 
 function unavailable(reasonCode: string, summary: string): InteractionAvailability {
-  return { available: false, reasonCode, summary };
+  return { available: false, reasonCode, summary, details: { summary } };
 }
 
 export const doorOpenInteraction: InteractionDefinition<DoorState> = {

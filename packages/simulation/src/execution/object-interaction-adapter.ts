@@ -58,7 +58,7 @@ function invalidOperationCallBinding(message: string): OperationTechnicalFailure
 function hostedDomainFailure(
   runtime: HostedOperationRuntime,
   reasonCode: string,
-  summary: string,
+  details: JsonObject,
 ): OperationStartResult {
   const declaration = runtime.domainFailures.find(
     (failure) => failure.code === reasonCode,
@@ -72,8 +72,8 @@ function hostedDomainFailure(
       retryable: false,
     };
   }
-  const details = declaration.detailsSchema.safeParse({ summary });
-  if (!details.success) {
+  const parsedDetails = declaration.detailsSchema.safeParse(details);
+  if (!parsedDetails.success) {
     return {
       kind: "technical_failure",
       category: "plugin",
@@ -85,7 +85,7 @@ function hostedDomainFailure(
   return {
     kind: "domain_failure",
     code: reasonCode,
-    details: details.data,
+    details: parsedDetails.data,
   };
 }
 
@@ -181,6 +181,7 @@ export function createObjectInteractionOperation<State>(
           available: false,
           reasonCode: "unknown_target",
           summary: `No ${definition.displayName} target is bound to ${id}`,
+          details: { summary: `No ${definition.displayName} target is bound to ${id}` },
         };
       }
       if (binding.interactionContext.distance !== 0) {
@@ -188,6 +189,7 @@ export function createObjectInteractionOperation<State>(
           available: false,
           reasonCode: "out_of_range",
           summary: `${binding.object.id} is outside interaction range`,
+          details: { summary: `${binding.object.id} is outside interaction range` },
         };
       }
       return interaction.canStart(
@@ -387,7 +389,9 @@ export function createHostedObjectInteractionOperation<State>(
         return hostedDomainFailure(
           runtime,
           "out_of_range",
-          `${bound.context.actor.agentId} is not at an interaction position for ${bound.context.object.entityId}`,
+          {
+            summary: `${bound.context.actor.agentId} is not at an interaction position for ${bound.context.object.entityId}`,
+          },
         );
       }
       const availability = interaction.canStart(
@@ -399,7 +403,7 @@ export function createHostedObjectInteractionOperation<State>(
         return hostedDomainFailure(
           runtime,
           availability.reasonCode,
-          availability.summary,
+          availability.details,
         );
       }
       return hosted.start(

@@ -125,9 +125,15 @@ const passageDefinition: ObjectDefinition<PassageState> = {
               available: false,
               reasonCode: "already_raised",
               summary: "Passage is already raised",
+              details: {},
             }
           : state.sealed
-          ? { available: false, reasonCode: "sealed", summary: "Passage is sealed" }
+          ? {
+              available: false,
+              reasonCode: "sealed",
+              summary: "Passage is sealed",
+              details: {},
+            }
           : { available: true },
       complete: (state, context) => ({
         effects: [

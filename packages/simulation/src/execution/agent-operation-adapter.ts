@@ -124,6 +124,7 @@ function moveStartAvailability(
       available: false as const,
       reasonCode: "unknown_target",
       summary: "The movement target does not exist",
+      details: { summary: "The movement target does not exist" },
     };
   }
   if (!targetDefinition.capabilities.includes("approachable")) {
@@ -131,6 +132,7 @@ function moveStartAvailability(
       available: false as const,
       reasonCode: "movement_blocked",
       summary: "The movement target is not approachable",
+      details: { summary: "The movement target is not approachable" },
     };
   }
   const operation = createMoveOperation();
@@ -160,6 +162,7 @@ function observeStartAvailability(
       available: false as const,
       reasonCode: "target_not_visible",
       summary: `${targetEntityId ?? "Target"} is not currently visible`,
+      details: { summary: `${targetEntityId ?? "Target"} is not currently visible` },
     };
   }
   return { available: true as const };
@@ -177,6 +180,7 @@ function waitStartAvailability(
       available: false as const,
       reasonCode: "invalid_duration",
       summary: `Wait duration must not exceed ${max} ticks`,
+      details: { summary: `Wait duration must not exceed ${max} ticks` },
     };
   }
   return { available: true as const };
@@ -726,6 +730,9 @@ export function restrictLegacyAgentOperationToMounts(
             available: false,
             reasonCode: "operation_not_mounted",
             summary: `Operation ${operation.id} is not mounted on this character definition`,
+            details: {
+              summary: `Operation ${operation.id} is not mounted on this character definition`,
+            },
           },
   };
 }

@@ -283,6 +283,7 @@ export function createMoveOperation(): RegisteredOperation {
             available: false,
             reasonCode: route.reasonCode,
             summary: route.summary,
+            details: { summary: route.summary },
           };
     },
     resolveDuration: () => ({ kind: "indeterminate" }),

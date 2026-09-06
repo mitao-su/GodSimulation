@@ -42,15 +42,13 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
 
 const fridgeState = z.object({ holder: z.string().nullable() }).strict();
 type FridgeState = z.infer<typeof fridgeState>;
-const fridgeFailureDetailsSchema = z.union([
-  z.object({ summary: z.string() }).strict(),
-  z
-    .object({
-      resourceEntityId: EntityIdSchema,
-      winnerAgentId: AgentIdSchema,
-    })
-    .strict(),
-]);
+const fridgeFailureDetailsSchema = z.object({ summary: z.string() }).strict();
+const fridgeOccupiedFailureDetailsSchema = z
+  .object({
+    resourceEntityId: EntityIdSchema,
+    winnerAgentId: AgentIdSchema,
+  })
+  .strict();
 
 const fridgeDefinition: ObjectDefinition<FridgeState> = {
   id: "test.fridge",
@@ -119,7 +117,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         {
           code: "out_of_range",
           summary: "Fridge out of range",
-          detailsSchema: z.object({ summary: z.string() }).strict(),
+          detailsSchema: fridgeFailureDetailsSchema,
           resultSchema: z
             .object({ status: z.literal("failed") })
             .strict(),
@@ -127,7 +125,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         {
           code: "occupied",
           summary: "Fridge occupied",
-          detailsSchema: fridgeFailureDetailsSchema,
+          detailsSchema: fridgeOccupiedFailureDetailsSchema,
           resultSchema: z
             .object({ status: z.literal("failed") })
             .strict(),
@@ -139,7 +137,15 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
-          : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
+          : {
+              available: false,
+              reasonCode: "occupied",
+              summary: "Fridge occupied",
+              details: {
+                resourceEntityId: context.object.entityId,
+                winnerAgentId: AgentIdSchema.parse(state.holder),
+              },
+            },
       start: (_state, context) => ({
         effects: [
           {
@@ -243,13 +249,13 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         {
           code: "out_of_range",
           summary: "Fridge out of range",
-          detailsSchema: z.object({ summary: z.string() }).strict(),
+          detailsSchema: fridgeFailureDetailsSchema,
           resultSchema: z.object({}).strict(),
         },
         {
           code: "occupied",
           summary: "Fridge occupied",
-          detailsSchema: fridgeFailureDetailsSchema,
+          detailsSchema: fridgeOccupiedFailureDetailsSchema,
           resultSchema: z.object({}).strict(),
         },
       ],
@@ -257,7 +263,15 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       canStart: (state, context) =>
         state.holder === null || state.holder === context.actor.agentId
           ? { available: true }
-          : { available: false, reasonCode: "occupied", summary: "Fridge occupied" },
+          : {
+              available: false,
+              reasonCode: "occupied",
+              summary: "Fridge occupied",
+              details: {
+                resourceEntityId: context.object.entityId,
+                winnerAgentId: AgentIdSchema.parse(state.holder),
+              },
+            },
       start: (_state, context) => ({
         effects: [
           {
@@ -321,7 +335,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
         {
           code: "out_of_range",
           summary: "Fridge out of range",
-          detailsSchema: z.object({ summary: z.string() }).strict(),
+          detailsSchema: fridgeFailureDetailsSchema,
           resultSchema: z.object({}).strict(),
         },
       ],

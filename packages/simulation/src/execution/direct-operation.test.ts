@@ -157,7 +157,7 @@ describe("direct operation invocation", () => {
     });
   });
 
-  it("establishes an occupied furniture call and fails at start", () => {
+  it("passes typed canStart details to a strict domain failure schema", () => {
     const registry = testPluginRegistry;
     const world = worldAtFridge({ holder: "bob" });
     const prepared = preparedOperation(
@@ -174,6 +174,10 @@ describe("direct operation invocation", () => {
     expect(startPrepared(world, registry, prepared)).toMatchObject({
       kind: "domain_failure",
       code: "occupied",
+      details: {
+        resourceEntityId: fridgeId,
+        winnerAgentId: bobId,
+      },
     });
   });
 
