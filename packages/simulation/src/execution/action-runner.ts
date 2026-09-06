@@ -27,12 +27,20 @@ import type {
   OperationRuntimeCall,
   OperationTerminationTransaction,
 } from "./operation-runtime";
+import {
+  commitOperationTermination,
+  type OperationTerminationResult,
+} from "./operation-termination";
 import { operationCallIdsInTrackOrder } from "./task-tracks";
 import {
   arbitrateInteractionBatch,
   type InteractionIntent,
 } from "../interaction/effect-arbiter";
 import { commitProposal } from "../interaction/effect-committer";
+import {
+  clearActiveOperation,
+  type ActiveOperationCleanupResult,
+} from "./operation-state";
 import { appendDomainEvent } from "../engine/event-writer";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
@@ -387,17 +395,15 @@ export function terminateOperation(
   agentId: AgentId,
   callId: OperationCallId,
 ): WorldState {
-  const agent = world.agents.get(agentId);
-  if (!agent?.activeOperations.has(callId)) {
-    throw new Error(`Operation ${callId} is not active for ${agentId}`);
+  const result: ActiveOperationCleanupResult = clearActiveOperation(
+    world,
+    agentId,
+    callId,
+  );
+  if (result.kind === "technical_failure") {
+    throw new Error(result.failure.message);
   }
-  return {
-    ...world,
-    agents: new Map(world.agents).set(
-      agentId,
-      clearOperation(agent, callId),
-    ),
-  };
+  return result.world;
 }
 
 export function replaceActiveOperation(
@@ -664,6 +670,18 @@ export interface HostedOperationBatchResult {
     readonly callId: OperationCallId;
     readonly result: HostedOperationAdvanceResult;
   }[];
+}
+
+/**
+ * 在世界边界提交生命周期运行器准备好的终止事务。
+ * 运行器只准备事务；只有此入口可以应用终态效果、释放轨道并记录终态结果。
+ */
+export function commitHostedOperationTermination(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  transaction: OperationTerminationTransaction,
+): OperationTerminationResult {
+  return commitOperationTermination(world, registry, transaction);
 }
 
 function transitionIntent(
