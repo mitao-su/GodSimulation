@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { OperationTerminationTransaction } from "./operation-runtime";
-import { commitOperationTermination } from "./operation-termination";
+import {
+  commitActiveOperationTerminations,
+  commitOperationTermination,
+} from "./operation-termination";
 import type { ActiveOperation } from "./operation";
 import {
   simulationTestWorld,
@@ -232,6 +235,61 @@ describe("atomic operation termination", () => {
         (result) => result.callId === operation.callId && result.terminal,
       ),
     ).toHaveLength(1);
+  });
+
+  it("keeps every call unchanged when one member of a termination batch rejects", () => {
+    const firstOperation = waitOperation("operation-call:atomic:batch-first");
+    const secondOperation: ActiveOperation = {
+      ...waitOperation("operation-call:atomic:batch-second"),
+      operationId: "object.test.fridge.use" as never,
+      arguments: { targetEntityId: "fridge-1", parameters: {} },
+    };
+    const base = worldWith(firstOperation);
+    const agent = base.agents.get(agentId)!;
+    const world = {
+      ...base,
+      agents: new Map(base.agents).set(agentId, {
+        ...agent,
+        activeOperations: new Map([
+          [firstOperation.callId, firstOperation],
+          [secondOperation.callId, secondOperation],
+        ]),
+      }),
+    };
+    const result = commitActiveOperationTerminations(world, testPluginRegistry, [
+      {
+        agentId,
+        operation: firstOperation,
+        outcome: "completed",
+        source: "operation_completed",
+        proposal: { effects: [] },
+      },
+      {
+        agentId,
+        operation: secondOperation,
+        outcome: "cancelled",
+        source: "task_replaced",
+        proposal: {
+          effects: [
+            {
+              type: "release_occupancy",
+              entityId: "fridge-1" as never,
+              agentId,
+              expectedObjectVersion: 99,
+            },
+          ],
+        },
+        resultOverride: { status: "cancelled" },
+      },
+    ]);
+
+    expect(result).toMatchObject({
+      kind: "technical_failure",
+      failure: { code: "termination_effect_rejected" },
+    });
+    expect(world.agents.get(agentId)?.activeOperations.has(firstOperation.callId)).toBe(true);
+    expect(world.agents.get(agentId)?.activeOperations.has(secondOperation.callId)).toBe(true);
+    expect(world.agents.get(agentId)?.pendingOperationResults).toHaveLength(0);
   });
 
   it("can close a hosted call whose active-call store is owned by its caller", () => {

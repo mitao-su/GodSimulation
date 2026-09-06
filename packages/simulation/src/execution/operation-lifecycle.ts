@@ -124,6 +124,7 @@ export function recordOperationTermination(
   reasonCode: string,
   metadata: EventMetadata,
   resultOverride?: JsonObject,
+  proposal?: EffectProposal,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
   // 旧 action/release 管线在收集终止项时已从 activeOperations 移除调用。
   // 先把调用放回局部候选世界，才能让清理与失败回滚都经过同一原子入口；
@@ -161,7 +162,7 @@ export function recordOperationTermination(
       outcome,
       source: reasonCode,
       ...(failureCode === undefined ? {} : { failureCode }),
-      proposal: { effects: [] },
+      proposal: proposal ?? { effects: [] },
       ...(resultOverride === undefined ? {} : { resultOverride }),
     },
     metadata,

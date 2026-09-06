@@ -7,11 +7,12 @@ import {
   type ResolvedTaskSelection,
   type TaskTrack,
 } from "@god-sim/protocol";
+import type { EffectProposal } from "@god-sim/plugin-sdk";
 
 import {
   operationInteractionLifecycleProposal,
-  recordOperationTermination,
 } from "../execution/operation-lifecycle";
+import { commitActiveOperationTerminations } from "../execution/operation-termination";
 import { prepareOperationCall } from "../execution/operation-planner";
 import {
   createOperationRuntimeContext,
@@ -20,7 +21,6 @@ import {
 import type { ActiveOperation } from "../execution/operation";
 import type { TaskTrackState, TaskTracks } from "../execution/task-tracks";
 import { appendDomainEvent } from "../engine/event-writer";
-import { commitProposal } from "../interaction/effect-committer";
 import type {
   AgentState,
   DecisionCycleState,
@@ -45,6 +45,7 @@ interface CancellationLifecycle {
   readonly agentId: AgentId;
   readonly operation: ActiveOperation;
   readonly result: JsonObject | null;
+  readonly effects: EffectProposal["effects"];
 }
 
 export function allDecisionResultsAccepted(cycle: DecisionCycleState): boolean {
@@ -282,18 +283,23 @@ export function releaseDecisionCycle(
     plans.push(analyzeTaskDecision(world, agentId, request));
   }
 
+  const acknowledgedWorld = acknowledgeFuseResults(
+    world,
+    registry,
+    plans.map((plan) => plan.agentId),
+  );
   const cancellationLifecycles: CancellationLifecycle[] = [];
-  const cancellationEffects = plans.flatMap((plan) => {
-    const agent = world.agents.get(plan.agentId)!;
-    return [...plan.removedCallIds]
+  plans.forEach((plan) => {
+    const agent = acknowledgedWorld.agents.get(plan.agentId)!;
+    [...plan.removedCallIds]
       .sort((left, right) => left.localeCompare(right))
-      .flatMap((callId) => {
+      .forEach((callId) => {
         const operation = agent.activeOperations.get(callId);
         if (!operation) {
           throw new Error(`Cannot cancel missing operation ${callId}`);
         }
         const lifecycle = operationInteractionLifecycleProposal(
-          world,
+          acknowledgedWorld,
           registry,
           agent.id,
           operation,
@@ -303,30 +309,33 @@ export function releaseDecisionCycle(
           agentId: agent.id,
           operation,
           result: lifecycle.result,
+          effects: lifecycle.effects,
         });
-        return lifecycle.effects;
       });
   });
-  const cancellation = commitProposal(
-    world,
+  const cancellation = commitActiveOperationTerminations(
+    acknowledgedWorld,
     registry,
-    { effects: cancellationEffects },
+    cancellationLifecycles.map((lifecycle) => ({
+      agentId: lifecycle.agentId,
+      operation: lifecycle.operation,
+      outcome: "cancelled" as const,
+      source: "task_replaced",
+      proposal: { effects: lifecycle.effects },
+      ...(lifecycle.result === null ? {} : { resultOverride: lifecycle.result }),
+    })),
     {
       causationId: `release:${cycle.id}`,
       correlationId: cycle.id,
     },
   );
-  if (!cancellation.accepted) {
+  if (cancellation.kind === "technical_failure") {
     throw new Error(
-      `Operation cancellation failed: ${cancellation.reason.code}: ${cancellation.reason.message}`,
+      `Operation cancellation failed: ${cancellation.failure.code}: ${cancellation.failure.message}`,
     );
   }
 
-  const candidateWorld = acknowledgeFuseResults(
-    cancellation.world,
-    registry,
-    plans.map((plan) => plan.agentId),
-  );
+  const candidateWorld = cancellation.world;
   const preparedAgents = new Map<AgentId, AgentState>();
   for (const plan of plans) {
     preparedAgents.set(
@@ -349,35 +358,6 @@ export function releaseDecisionCycle(
     causationId: `release:${cycle.id}`,
     correlationId: cycle.id,
   };
-
-  for (const plan of [...plans].sort((left, right) =>
-    left.agentId.localeCompare(right.agentId),
-  )) {
-    const previousAgent = candidateWorld.agents.get(plan.agentId)!;
-    for (const callId of [...plan.removedCallIds].sort((left, right) =>
-      left.localeCompare(right),
-    )) {
-      const operation = previousAgent.activeOperations.get(callId);
-      if (!operation) throw new Error(`Cannot terminate missing operation ${callId}`);
-      const lifecycle = cancellationLifecycles.find(
-        (candidate) =>
-          candidate.agentId === plan.agentId &&
-          candidate.operation.callId === callId,
-      );
-      const written = recordOperationTermination(
-        releasedWorld,
-        registry,
-        plan.agentId,
-        operation,
-        "cancelled",
-        "task_replaced",
-        lifecycleMetadata,
-        lifecycle?.result ?? undefined,
-      );
-      releasedWorld = written.world;
-      events.push(...written.events);
-    }
-  }
 
   for (const plan of [...plans].sort((left, right) =>
     left.agentId.localeCompare(right.agentId),

@@ -132,6 +132,8 @@ interface TerminalCommitInput {
   readonly result: JsonObject;
 }
 
+export type ActiveOperationTerminationBatchRequest = ActiveOperationTerminationRequest;
+
 function validateTerminalTransaction(
   registry: OperationRuntimeRegistry,
   transaction: OperationTerminationTransaction,
@@ -184,27 +186,41 @@ function validateTerminalTransaction(
 function commitTerminalParts(
   worldInput: WorldState,
   registry: OperationRuntimeRegistry,
-  input: TerminalCommitInput,
+  inputs: readonly TerminalCommitInput[],
   metadata?: EventMetadata,
 ): OperationTerminationResult {
-  const agent = worldInput.agents.get(input.agentId);
-  if (!agent) {
-    return failure(
-      "termination_agent_missing",
-      `Cannot terminate ${input.callId}: agent ${input.agentId} does not exist.`,
-      false,
-    );
+  if (inputs.length === 0) {
+    return { kind: "committed", world: worldInput, events: [] };
   }
-  if (
-    agent.pendingOperationResults.some(
-      (result) => result.callId === input.callId && result.terminal,
-    )
-  ) {
-    return failure(
-      "termination_already_committed",
-      `Operation ${input.callId} already has a terminal result.`,
-      false,
-    );
+  const seenCalls = new Set<OperationCallId>();
+  for (const input of inputs) {
+    const agent = worldInput.agents.get(input.agentId);
+    if (!agent) {
+      return failure(
+        "termination_agent_missing",
+        `Cannot terminate ${input.callId}: agent ${input.agentId} does not exist.`,
+        false,
+      );
+    }
+    if (seenCalls.has(input.callId)) {
+      return failure(
+        "termination_duplicate_call",
+        `Operation ${input.callId} appears more than once in one termination batch.`,
+        false,
+      );
+    }
+    seenCalls.add(input.callId);
+    if (
+      agent.pendingOperationResults.some(
+        (result) => result.callId === input.callId && result.terminal,
+      )
+    ) {
+      return failure(
+        "termination_already_committed",
+        `Operation ${input.callId} already has a terminal result.`,
+        false,
+      );
+    }
   }
 
   let committed;
@@ -212,8 +228,8 @@ function commitTerminalParts(
     committed = commitProposal(
       worldInput,
       registry,
-      { effects: input.proposal.effects },
-      metadataFor(input.callId, worldInput.tick, metadata),
+      { effects: inputs.flatMap((input) => input.proposal.effects) },
+      metadataFor(inputs[0]!.callId, worldInput.tick, metadata),
     );
   } catch (error) {
     return failure(
@@ -232,50 +248,51 @@ function commitTerminalParts(
     );
   }
 
-  const cleaned = input.activeOperation
-    ? clearActiveOperation(committed.world, input.agentId, input.callId)
-    : { kind: "cleaned" as const, world: committed.world };
-  if (cleaned.kind === "technical_failure") return cleaned;
-
-  const eventMetadata = metadataFor(input.callId, worldInput.tick, metadata);
-  try {
-    const terminated = appendDomainEvent(
-      cleaned.world,
-      {
-        type: "operation_terminated",
-        agentId: input.agentId,
-        callId: input.callId,
-        operationId: input.operationId,
-        outcome: input.outcome,
-        reasonCode: input.source,
-      },
-      eventMetadata,
-    );
-    const resultEvent = appendDomainEvent(
-      terminated.world,
-      {
-        type: "operation_result",
-        agentId: input.agentId,
-        callId: input.callId,
-        operationId: input.operationId,
-        terminal: true,
-        outcome: input.outcome,
-        reasonCode: input.source,
-        result: input.result,
-      },
-      eventMetadata,
-    );
-    const resultAgent = resultEvent.world.agents.get(input.agentId);
-    if (!resultAgent) {
-      return failure(
-        "termination_agent_missing",
-        `Agent ${input.agentId} disappeared while recording termination.`,
-        false,
-      );
+  let nextWorld = committed.world;
+  const events: DomainEvent[] = [...committed.events];
+  const eventMetadata = metadataFor(inputs[0]!.callId, worldInput.tick, metadata);
+  for (const input of inputs) {
+    if (input.activeOperation) {
+      const cleaned = clearActiveOperation(nextWorld, input.agentId, input.callId);
+      if (cleaned.kind === "technical_failure") return cleaned;
+      nextWorld = cleaned.world;
     }
-    return {
-      kind: "committed",
-      world: {
+    try {
+      const terminated = appendDomainEvent(
+        nextWorld,
+        {
+          type: "operation_terminated",
+          agentId: input.agentId,
+          callId: input.callId,
+          operationId: input.operationId,
+          outcome: input.outcome,
+          reasonCode: input.source,
+        },
+        eventMetadata,
+      );
+      const resultEvent = appendDomainEvent(
+        terminated.world,
+        {
+          type: "operation_result",
+          agentId: input.agentId,
+          callId: input.callId,
+          operationId: input.operationId,
+          terminal: true,
+          outcome: input.outcome,
+          reasonCode: input.source,
+          result: input.result,
+        },
+        eventMetadata,
+      );
+      const resultAgent = resultEvent.world.agents.get(input.agentId);
+      if (!resultAgent) {
+        return failure(
+          "termination_agent_missing",
+          `Agent ${input.agentId} disappeared while recording termination.`,
+          false,
+        );
+      }
+      nextWorld = {
         ...resultEvent.world,
         agents: new Map(resultEvent.world.agents).set(input.agentId, {
           ...resultAgent,
@@ -292,17 +309,89 @@ function commitTerminalParts(
             },
           ],
         }),
-      },
-      events: [...committed.events, terminated.event, resultEvent.event],
-    };
-  } catch (error) {
-    return failure(
-      "termination_event_exception",
-      `Terminal event commit threw: ${error instanceof Error ? error.message : String(error)}`,
-      true,
-      "protocol",
-    );
+      };
+      events.push(terminated.event, resultEvent.event);
+    } catch (error) {
+      return failure(
+        "termination_event_exception",
+        `Terminal event commit threw: ${error instanceof Error ? error.message : String(error)}`,
+        true,
+        "protocol",
+      );
+    }
   }
+  return { kind: "committed", world: nextWorld, events };
+}
+
+function prepareActiveTermination(
+  worldInput: WorldState,
+  registry: OperationRuntimeRegistry,
+  request: ActiveOperationTerminationRequest,
+):
+  | { readonly kind: "prepared"; readonly input: TerminalCommitInput }
+  | { readonly kind: "technical_failure"; readonly failure: OperationTechnicalFailure } {
+  const active = worldInput.agents
+    .get(request.agentId)
+    ?.activeOperations.get(request.operation.callId);
+  if (
+    active &&
+    (active.callId !== request.operation.callId ||
+      active.operationId !== request.operation.operationId)
+  ) {
+    return {
+      kind: "technical_failure",
+      failure: operationTechnicalFailure(
+        "protocol",
+        "termination_call_mismatch",
+        `Operation ${request.operation.callId} does not match the active call.`,
+        false,
+      ),
+    };
+  }
+  const result = terminalResultForActiveOperation(worldInput, registry, request);
+  if (result.kind === "failure") {
+    return { kind: "technical_failure", failure: result.failure };
+  }
+  const transaction: OperationTerminationTransaction =
+    request.outcome === "failed"
+      ? {
+          agentId: request.agentId,
+          callId: request.operation.callId,
+          operationId: request.operation.operationId,
+          outcome: "failed",
+          source: request.source,
+          terminatedAtTick: worldInput.tick,
+          failure: {
+            kind: "domain_failure",
+            code: (request.failureCode ?? request.source) as never,
+            details: {},
+          },
+          proposal: { effects: request.proposal.effects, result: result.value },
+        }
+      : {
+          agentId: request.agentId,
+          callId: request.operation.callId,
+          operationId: request.operation.operationId,
+          outcome: request.outcome,
+          source: request.source,
+          terminatedAtTick: worldInput.tick,
+          proposal: { effects: request.proposal.effects, result: result.value },
+        };
+  const validated = validateTerminalTransaction(registry, transaction);
+  if (validated.kind === "technical_failure") return validated;
+  return {
+    kind: "prepared",
+    input: {
+      agentId: request.agentId,
+      callId: request.operation.callId,
+      operationId: request.operation.operationId,
+      outcome: request.outcome,
+      source: request.source,
+      proposal: request.proposal,
+      result: validated.result,
+      ...(active === undefined ? {} : { activeOperation: request.operation }),
+    },
+  };
 }
 
 /**
@@ -342,7 +431,7 @@ export function commitOperationTermination(
   return commitTerminalParts(
     worldInput,
     registry,
-    input,
+    [input],
     metadata,
   );
 }
@@ -354,64 +443,29 @@ export function commitActiveOperationTermination(
   request: ActiveOperationTerminationRequest,
   metadata?: EventMetadata,
 ): OperationTerminationResult {
-  const active = worldInput.agents
-    .get(request.agentId)
-    ?.activeOperations.get(request.operation.callId);
-  if (active &&
-    (active.callId !== request.operation.callId ||
-      active.operationId !== request.operation.operationId)) {
-    return failure(
-      "termination_call_missing",
-      `Operation ${request.operation.callId} is not active for ${request.agentId}.`,
-      false,
-    );
-  }
-  const result = terminalResultForActiveOperation(worldInput, registry, request);
-  if (result.kind === "failure") {
-    return { kind: "technical_failure", failure: result.failure };
-  }
-  const transaction: OperationTerminationTransaction =
-    request.outcome === "failed"
-      ? {
-          agentId: request.agentId,
-          callId: request.operation.callId,
-          operationId: request.operation.operationId,
-          outcome: "failed",
-          source: request.source,
-          terminatedAtTick: worldInput.tick,
-          failure: {
-            kind: "domain_failure",
-            code: (request.failureCode ?? request.source) as never,
-            details: {},
-          },
-          proposal: { effects: request.proposal.effects, result: result.value },
-        }
-      : {
-          agentId: request.agentId,
-          callId: request.operation.callId,
-          operationId: request.operation.operationId,
-          outcome: request.outcome,
-          source: request.source,
-          terminatedAtTick: worldInput.tick,
-          proposal: { effects: request.proposal.effects, result: result.value },
-        };
-  const validated = validateTerminalTransaction(registry, transaction);
-  if (validated.kind === "technical_failure") return validated;
+  const prepared = prepareActiveTermination(worldInput, registry, request);
+  if (prepared.kind === "technical_failure") return prepared;
   return commitTerminalParts(
     worldInput,
     registry,
-    {
-      agentId: request.agentId,
-      callId: request.operation.callId,
-      operationId: request.operation.operationId,
-      outcome: request.outcome,
-      source: request.source,
-      proposal: request.proposal,
-      result: validated.result,
-      ...(active === undefined ? {} : { activeOperation: request.operation }),
-    },
+    [prepared.input],
     metadata,
   );
+}
+
+export function commitActiveOperationTerminations(
+  worldInput: WorldState,
+  registry: OperationRuntimeRegistry,
+  requests: readonly ActiveOperationTerminationBatchRequest[],
+  metadata?: EventMetadata,
+): OperationTerminationResult {
+  const prepared: TerminalCommitInput[] = [];
+  for (const request of requests) {
+    const result = prepareActiveTermination(worldInput, registry, request);
+    if (result.kind === "technical_failure") return result;
+    prepared.push(result.input);
+  }
+  return commitTerminalParts(worldInput, registry, prepared, metadata);
 }
 
 export const atomicOperationTerminationPort: AtomicOperationTerminationPort = {

@@ -7,13 +7,13 @@ import {
   type EventId,
   type JsonObject,
 } from "@god-sim/protocol";
+import type { EffectProposal } from "@god-sim/plugin-sdk";
 
 import {
   advanceOperations,
   markInteractionCompleted,
   markInteractionStarted,
   replaceActiveOperation,
-  terminateOperation,
   type AgentOperationFailure,
   type CompletedOperation,
   type InteractionCompletionRequest,
@@ -72,6 +72,7 @@ interface FailedOperationTermination {
   readonly operation: ActiveOperation;
   readonly reasonCode: string;
   readonly result: JsonObject | null;
+  readonly proposal: EffectProposal;
 }
 
 function eventMetadata(causationId: string, correlationId = causationId) {
@@ -630,10 +631,12 @@ function applyOperationFailureLifecycles(
   readonly world: WorldState;
   readonly events: readonly DomainEvent[];
   readonly results: ReadonlyMap<string, JsonObject | null>;
+  readonly proposals: ReadonlyMap<string, EffectProposal>;
 } {
-  let world = worldInput;
+  const world = worldInput;
   const events: DomainEvent[] = [];
   const results = new Map<string, JsonObject | null>();
+  const proposals = new Map<string, EffectProposal>();
   const handled = new Set<string>();
 
   for (const item of failures) {
@@ -654,23 +657,11 @@ function applyOperationFailureLifecycles(
       "fail",
       item.failure.code,
     );
-    const committed = commitProposal(
-      world,
-      registry,
-      { effects: proposal.effects },
-      eventMetadata(`${item.failure.actionId}:fail`, item.failure.callId),
-    );
-    if (!committed.accepted) {
-      throw new Error(
-        `Operation failure lifecycle ${item.failure.callId} could not commit: ${committed.reason.code}: ${committed.reason.message}`,
-      );
-    }
-    world = committed.world;
-    events.push(...committed.events);
     results.set(key, proposal.result);
+    proposals.set(key, { effects: proposal.effects });
   }
 
-  return { world, events, results };
+  return { world, events, results, proposals };
 }
 
 function recoverFailedOperations(
@@ -678,12 +669,15 @@ function recoverFailedOperations(
   registry: SimulationRegistry,
   failures: readonly RecordedOperationFailure[],
   lifecycleResults: ReadonlyMap<string, JsonObject | null>,
+  lifecycleProposals: ReadonlyMap<string, EffectProposal>,
 ): {
   readonly world: WorldState;
+  readonly events: readonly DomainEvent[];
   readonly needs: readonly DecisionNeed[];
   readonly terminations: readonly FailedOperationTermination[];
 } {
   let world = worldInput;
+  const events: DomainEvent[] = [];
   const needs: DecisionNeed[] = [];
   const terminations: FailedOperationTermination[] = [];
   const handled = new Set<string>();
@@ -727,6 +721,22 @@ function recoverFailedOperations(
           }),
         };
         if (recovered.kind === "replanned") {
+          const lifecycleProposal = lifecycleProposals.get(key);
+          if (lifecycleProposal && lifecycleProposal.effects.length > 0) {
+            const committed = commitProposal(
+              world,
+              registry,
+              lifecycleProposal,
+              eventMetadata(`${item.failure.actionId}:fail`, item.failure.callId),
+            );
+            if (!committed.accepted) {
+              throw new Error(
+                `Operation failure lifecycle ${item.failure.callId} could not commit: ${committed.reason.code}: ${committed.reason.message}`,
+              );
+            }
+            world = committed.world;
+            events.push(...committed.events);
+          }
           world = replaceActiveOperation(
             world,
             item.agentId,
@@ -734,16 +744,12 @@ function recoverFailedOperations(
           );
           continue;
         }
-        world = terminateOperation(
-          world,
-          item.agentId,
-          item.failure.callId,
-        );
         terminations.push({
           agentId: item.agentId,
           operation,
           reasonCode: recovered.reasonCode,
           result: lifecycleResults.get(key) ?? null,
+          proposal: lifecycleProposals.get(key) ?? { effects: [] },
         });
         needs.push({
           agentId: item.agentId,
@@ -756,16 +762,12 @@ function recoverFailedOperations(
       }
     }
 
-    world = terminateOperation(
-      world,
-      item.agentId,
-      item.failure.callId,
-    );
     terminations.push({
       agentId: item.agentId,
       operation,
       reasonCode: item.failure.code,
       result: lifecycleResults.get(key) ?? null,
+      proposal: lifecycleProposals.get(key) ?? { effects: [] },
     });
     needs.push({
       agentId: item.agentId,
@@ -775,7 +777,7 @@ function recoverFailedOperations(
       },
     });
   }
-  return { world, needs, terminations };
+  return { world, events, needs, terminations };
 }
 
 function activeOperationsAtTickStart(world: WorldState): Map<string, ActiveOperation> {
@@ -843,8 +845,10 @@ export function runTickPipeline(
     registry,
     recorded.failures,
     failureLifecycles.results,
+    failureLifecycles.proposals,
   );
   world = failed.world;
+  events.push(...failed.events);
   for (const need of failed.needs) {
     addDecisionNeed(needs, need.agentId, need.reason);
   }
@@ -863,6 +867,7 @@ export function runTickPipeline(
       termination.reasonCode,
       eventMetadata(termination.operation.callId),
       termination.result ?? undefined,
+      termination.proposal,
     );
     world = written.world;
     events.push(...written.events);
