@@ -261,6 +261,7 @@ export function loadWorldDefinition(
       reviewRequired: options.reviewRequired ?? true,
       randomState: (options.seed ?? 1) >>> 0,
       lastEventSequence: 0,
+      terminalOperationCallIds: new Set(),
       pluginLockHash: PluginLockHashSchema.parse(
         options.pluginLockHash ?? DEFAULT_PLUGIN_LOCK_HASH,
       ),

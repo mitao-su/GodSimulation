@@ -18,6 +18,7 @@ function world(mode: WorldMode, tick = 12): WorldState {
     reviewRequired: true,
     randomState: 123,
     lastEventSequence: 0,
+    terminalOperationCallIds: new Set(),
     pluginLockHash: "0".repeat(64) as PluginLockHash,
     simulationRulesLock: testSimulationRulesLock,
     history: { mode: "strict", causalFromSequence: 1 },

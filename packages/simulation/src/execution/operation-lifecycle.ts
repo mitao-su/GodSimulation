@@ -3,6 +3,7 @@ import {
   type AgentId,
   type DomainEvent,
   type JsonObject,
+  type OperationDomainFailure,
   type OperationResultContext,
 } from "@god-sim/protocol";
 import type { EffectProposal } from "@god-sim/plugin-sdk";
@@ -13,6 +14,7 @@ import {
   type OperationRuntimeRegistry,
 } from "./operation-runtime";
 import { commitActiveOperationTermination } from "./operation-termination";
+import { OperationTechnicalFailureError } from "./operation-failure-classifier";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
 import { proposeInteraction } from "../interaction/interaction-router";
 import type { WorldState } from "../world/world-state";
@@ -125,6 +127,7 @@ export function recordOperationTermination(
   metadata: EventMetadata,
   resultOverride?: JsonObject,
   proposal?: EffectProposal,
+  failure?: OperationDomainFailure,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
   // 旧 action/release 管线在收集终止项时已从 activeOperations 移除调用。
   // 先把调用放回局部候选世界，才能让清理与失败回滚都经过同一原子入口；
@@ -143,16 +146,6 @@ export function recordOperationTermination(
           }),
         }
       : worldInput;
-  const runtime = registry.getOperation(operation.operationId);
-  const failureCode =
-    outcome === "failed" && runtime
-      ? runtime.domainFailures.some((failure) => failure.code === reasonCode)
-        ? reasonCode
-        : reasonCode === "not_at_interaction_position" &&
-            runtime.domainFailures.some((failure) => failure.code === "out_of_range")
-          ? "out_of_range"
-          : undefined
-      : undefined;
   const committed = commitActiveOperationTermination(
     terminationWorld,
     registry,
@@ -161,16 +154,14 @@ export function recordOperationTermination(
       operation,
       outcome,
       source: reasonCode,
-      ...(failureCode === undefined ? {} : { failureCode }),
+      ...(failure === undefined ? {} : { failure }),
       proposal: proposal ?? { effects: [] },
       ...(resultOverride === undefined ? {} : { resultOverride }),
     },
     metadata,
   );
   if (committed.kind === "technical_failure") {
-    throw new Error(
-      `Operation ${operation.callId} termination failed: ${committed.failure.code}: ${committed.failure.message}`,
-    );
+    throw new OperationTechnicalFailureError(committed.failure);
   }
   return committed;
 }

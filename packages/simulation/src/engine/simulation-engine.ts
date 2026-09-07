@@ -53,6 +53,7 @@ import {
   type DecisionNeed,
 } from "./tick-pipeline";
 import { projectWorldView } from "./view-projector";
+import { OperationTechnicalFailureError } from "../execution/operation-failure-classifier";
 
 export interface SimulationOptions {
   readonly worldDefinition: unknown;
@@ -277,6 +278,24 @@ class DeterministicSimulationEngine implements SimulationEngine {
   }
 
   tick(): WorldView {
+    try {
+      return this.#tickInternal();
+    } catch (error) {
+      if (!(error instanceof OperationTechnicalFailureError)) throw error;
+      const recorded = this.reportTechnicalFailure({
+        id: `failure:operation:${this.#world.lastEventSequence + 1}`,
+        category: error.failure.category,
+        code: error.failure.code,
+        message: error.failure.message,
+        retryable: error.failure.retryable,
+        occurredAtRealTime: new Date().toISOString(),
+      });
+      if (!recorded.accepted) throw new Error(recorded.reason);
+      return this.getView();
+    }
+  }
+
+  #tickInternal(): WorldView {
     if (this.#stopped) return this.getView();
     const before = this.#world;
     const wasRunning = before.mode === "RUNNING";

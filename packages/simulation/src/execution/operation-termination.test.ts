@@ -67,7 +67,11 @@ function transaction(
       outcome,
       source,
       terminatedAtTick: 0,
-      failure: { kind: "domain_failure", code: "occupied", details: {} },
+      failure: {
+        kind: "domain_failure",
+        code: "occupied",
+        details: { resourceEntityId: "fridge-1", winnerAgentId: "bob" },
+      },
       proposal,
     };
   }
@@ -224,7 +228,14 @@ describe("atomic operation termination", () => {
     const first = commitOperationTermination(world, testPluginRegistry, tx);
     expect(first.kind).toBe("committed");
     if (first.kind !== "committed") return;
-    const second = commitOperationTermination(first.world, testPluginRegistry, tx);
+    const consumedReceiptWorld = {
+      ...first.world,
+      agents: new Map(first.world.agents).set(agentId, {
+        ...first.world.agents.get(agentId)!,
+        pendingOperationResults: [],
+      }),
+    };
+    const second = commitOperationTermination(consumedReceiptWorld, testPluginRegistry, tx);
     expect(second.kind).toBe("technical_failure");
     expect(second).toMatchObject({ failure: { code: "termination_already_committed" } });
     expect(
@@ -235,6 +246,32 @@ describe("atomic operation termination", () => {
         (result) => result.callId === operation.callId && result.terminal,
       ),
     ).toHaveLength(1);
+  });
+
+  it("rejects a failed transaction without failure-specific details", () => {
+    const operation: ActiveOperation = {
+      ...waitOperation("operation-call:atomic:missing-details"),
+      operationId: "object.test.fridge.use" as never,
+      arguments: { targetEntityId: "fridge-1", parameters: {} },
+    };
+    const result = commitOperationTermination(
+      worldWith(operation),
+      testPluginRegistry,
+      {
+        agentId,
+        callId: operation.callId,
+        operationId: operation.operationId,
+        outcome: "failed",
+        source: "occupied",
+        terminatedAtTick: 0,
+        failure: { kind: "domain_failure", code: "occupied", details: {} },
+        proposal: { effects: [], result: { status: "failed" } },
+      },
+    );
+    expect(result).toMatchObject({
+      kind: "technical_failure",
+      failure: { code: "invalid_domain_failure_details" },
+    });
   });
 
   it("keeps every call unchanged when one member of a termination batch rejects", () => {

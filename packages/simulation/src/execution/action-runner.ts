@@ -68,6 +68,7 @@ export interface OperationFailure {
   readonly entityId?: EntityId;
   readonly purpose?: OperationInteractionPurpose;
   readonly summary: string;
+  readonly details?: JsonObject;
 }
 
 export interface AgentOperationFailure {

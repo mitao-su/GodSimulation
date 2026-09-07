@@ -369,7 +369,7 @@ describe("operation lifecycle results", () => {
         callId: operation.callId,
         terminal: true,
         outcome: "failed",
-        reasonCode: "not_at_interaction_position",
+        reasonCode: "out_of_range",
         result: { status: "failed" },
       }),
     ]);

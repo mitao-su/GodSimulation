@@ -6,6 +6,7 @@ import {
   type EntityId,
   type EventId,
   type JsonObject,
+  type OperationDomainFailure,
 } from "@god-sim/protocol";
 import type { EffectProposal } from "@god-sim/plugin-sdk";
 
@@ -73,6 +74,7 @@ interface FailedOperationTermination {
   readonly reasonCode: string;
   readonly result: JsonObject | null;
   readonly proposal: EffectProposal;
+  readonly failure: OperationDomainFailure;
 }
 
 function eventMetadata(causationId: string, correlationId = causationId) {
@@ -102,6 +104,7 @@ function interactionFailure(
   reasonCode: string,
   summary: string,
   entityId?: EntityId,
+  details?: JsonObject,
 ): AgentOperationFailure {
   return {
     agentId,
@@ -112,6 +115,7 @@ function interactionFailure(
       purpose,
       summary,
       ...(entityId === undefined ? {} : { entityId }),
+      ...(details === undefined ? {} : { details }),
     },
   };
 }
@@ -197,6 +201,7 @@ function completeInteraction(
         proposed.reasonCode,
         proposed.summary,
         request.entityId,
+        proposed.details,
       ),
     );
     return { world, events, failures, completedOperations };
@@ -381,9 +386,10 @@ function processInteractions(
           intent.callId,
           intent.actionId,
           intent.purpose,
-          proposed.reasonCode,
-          proposed.summary,
-          decision.entityId,
+        proposed.reasonCode,
+        proposed.summary,
+        decision.entityId,
+        proposed.details,
         ),
       );
       continue;
@@ -750,6 +756,11 @@ function recoverFailedOperations(
           reasonCode: recovered.reasonCode,
           result: lifecycleResults.get(key) ?? null,
           proposal: lifecycleProposals.get(key) ?? { effects: [] },
+          failure: {
+            kind: "domain_failure",
+            code: recovered.reasonCode as never,
+            details: item.failure.details ?? { summary: item.failure.summary },
+          },
         });
         needs.push({
           agentId: item.agentId,
@@ -768,6 +779,11 @@ function recoverFailedOperations(
       reasonCode: item.failure.code,
       result: lifecycleResults.get(key) ?? null,
       proposal: lifecycleProposals.get(key) ?? { effects: [] },
+      failure: {
+        kind: "domain_failure",
+        code: item.failure.code as never,
+        details: item.failure.details ?? { summary: item.failure.summary },
+      },
     });
     needs.push({
       agentId: item.agentId,
@@ -868,6 +884,7 @@ export function runTickPipeline(
       eventMetadata(termination.operation.callId),
       termination.result ?? undefined,
       termination.proposal,
+      termination.failure,
     );
     world = written.world;
     events.push(...written.events);

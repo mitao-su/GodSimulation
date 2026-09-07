@@ -78,6 +78,8 @@ export interface WorldState {
   readonly reviewRequired: boolean;
   readonly randomState: number;
   readonly lastEventSequence: number;
+  /** 运行时不可消费的终态调用账本；P3 再接入线上快照。 */
+  readonly terminalOperationCallIds: ReadonlySet<OperationCallId>;
   readonly pluginLockHash: PluginLockHash;
   readonly simulationRulesLock: SimulationRulesLock;
   readonly history: WorldHistory;

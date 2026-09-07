@@ -1,19 +1,29 @@
+import {
+  JsonObjectSchema,
+  OperationDomainFailureSchema,
+} from "@god-sim/protocol";
 import type {
   AgentId,
   DomainEvent,
   JsonObject,
   OperationCallId,
+  OperationDomainFailure,
   OperationId,
   OperationTechnicalFailure,
 } from "@god-sim/protocol";
 import type { EffectProposal } from "@god-sim/plugin-sdk";
 
 import type { ActiveOperation } from "./operation";
-import { operationTechnicalFailure, validateOperationResult } from "./operation-failure-classifier";
+import {
+  operationTechnicalFailure,
+  validateDeclaredOperationFailure,
+  validateOperationResult,
+} from "./operation-failure-classifier";
 import { clearActiveOperation } from "./operation-state";
 import type {
   AtomicOperationTerminationPort,
   HostedOperationRuntime,
+  HostedOperationRegistry,
   HostedOperationRuntimeRegistry,
   OperationRuntimeRegistry,
   OperationTerminationTransaction,
@@ -38,7 +48,7 @@ export interface ActiveOperationTerminationRequest {
   readonly operation: ActiveOperation;
   readonly outcome: "completed" | "failed" | "cancelled";
   readonly source: string;
-  readonly failureCode?: string;
+  readonly failure?: OperationDomainFailure;
   readonly proposal: EffectProposal;
   readonly resultOverride?: JsonObject;
 }
@@ -121,6 +131,34 @@ function terminalResultForActiveOperation(
     : { kind: "value", value: validated.value };
 }
 
+function hostedRuntimeForActiveOperation(
+  world: WorldState,
+  registry: OperationRuntimeRegistry,
+  agentId: AgentId,
+  operation: ActiveOperation,
+): HostedOperationRuntime | undefined {
+  const hostedRegistry = registry as OperationRuntimeRegistry &
+    Partial<HostedOperationRegistry>;
+  const targetEntityId = operation.arguments["targetEntityId"];
+  if (typeof targetEntityId === "string") {
+    const object = world.objects.get(targetEntityId as never);
+    if (object) {
+      return hostedRegistry.getHostedOperation?.(operation.operationId, {
+        kind: "furniture",
+        hostDefinitionId: object.definitionId,
+      });
+    }
+  }
+  const agent = world.agents.get(agentId);
+  const definitionId = agent?.definitionId;
+  return definitionId === undefined
+    ? undefined
+    : hostedRegistry.getHostedOperation?.(operation.operationId, {
+        kind: "agent",
+        hostDefinitionId: definitionId,
+      });
+}
+
 interface TerminalCommitInput {
   readonly agentId: AgentId;
   readonly callId: OperationCallId;
@@ -153,21 +191,24 @@ function validateTerminalTransaction(
       ),
     };
   }
+  let candidateResult: unknown = transaction.proposal.result;
   if (transaction.outcome === "failed") {
-    const declaration = runtime.domainFailures.find(
-      (candidate) => candidate.code === transaction.failure.code,
-    );
-    if (!declaration) {
-      return {
-        kind: "technical_failure",
-        failure: operationTechnicalFailure(
-          "protocol",
-          "undeclared_domain_failure",
-          `Operation returned undeclared domain failure ${transaction.failure.code}.`,
-          false,
-        ),
-      };
-    }
+    const catalog = runtime.domainFailures;
+    const declared = catalog.every(
+      (entry) => "detailsSchema" in entry && "resultSchema" in entry,
+    )
+      ? validateDeclaredOperationFailure(
+          catalog as HostedOperationRuntime["domainFailures"],
+          transaction.failure,
+          transaction.proposal.result,
+        )
+      : validateLegacyOperationFailure(
+          catalog,
+          transaction.failure,
+          transaction.proposal.result,
+        );
+    if (declared.kind === "technical_failure") return declared;
+    candidateResult = declared.value.result;
   }
   const result = validateOperationResult(
     transaction.outcome === "completed"
@@ -176,11 +217,57 @@ function validateTerminalTransaction(
         ? "cancel"
         : "fail",
     runtime.resultSchema,
-    transaction.proposal.result,
+    candidateResult,
   );
   return result.kind === "technical_failure"
     ? result
     : { kind: "valid", result: result.value };
+}
+
+function validateLegacyOperationFailure(
+  catalog: readonly { readonly code: string; readonly summary: string }[],
+  failureValue: unknown,
+  resultValue: unknown,
+):
+  | { readonly kind: "returned"; readonly value: { readonly failure: OperationDomainFailure; readonly result: JsonObject } }
+  | { readonly kind: "technical_failure"; readonly failure: OperationTechnicalFailure } {
+  const parsed = OperationDomainFailureSchema.safeParse(failureValue);
+  if (!parsed.success) {
+    return {
+      kind: "technical_failure",
+      failure: operationTechnicalFailure(
+        "protocol",
+        "invalid_domain_failure",
+        "A failed operation did not provide a valid domain failure.",
+        false,
+      ),
+    };
+  }
+  if (!catalog.some((entry) => entry.code === parsed.data.code)) {
+    return {
+      kind: "technical_failure",
+      failure: operationTechnicalFailure(
+        "protocol",
+        "undeclared_domain_failure",
+        `Operation returned undeclared domain failure ${parsed.data.code}.`,
+        false,
+      ),
+    };
+  }
+  const details = JsonObjectSchema.safeParse(parsed.data.details);
+  const result = JsonObjectSchema.safeParse(resultValue);
+  if (!details.success || !result.success) {
+    return {
+      kind: "technical_failure",
+      failure: operationTechnicalFailure(
+        "protocol",
+        "invalid_domain_failure_payload",
+        "A legacy operation returned an invalid domain failure payload.",
+        false,
+      ),
+    };
+  }
+  return { kind: "returned", value: { failure: { ...parsed.data, details: details.data }, result: result.data } };
 }
 
 function commitTerminalParts(
@@ -210,11 +297,7 @@ function commitTerminalParts(
       );
     }
     seenCalls.add(input.callId);
-    if (
-      agent.pendingOperationResults.some(
-        (result) => result.callId === input.callId && result.terminal,
-      )
-    ) {
+    if (worldInput.terminalOperationCallIds.has(input.callId)) {
       return failure(
         "termination_already_committed",
         `Operation ${input.callId} already has a terminal result.`,
@@ -320,6 +403,9 @@ function commitTerminalParts(
       );
     }
   }
+  const terminalOperationCallIds = new Set(nextWorld.terminalOperationCallIds);
+  for (const input of inputs) terminalOperationCallIds.add(input.callId);
+  nextWorld = { ...nextWorld, terminalOperationCallIds };
   return { kind: "committed", world: nextWorld, events };
 }
 
@@ -352,6 +438,17 @@ function prepareActiveTermination(
   if (result.kind === "failure") {
     return { kind: "technical_failure", failure: result.failure };
   }
+  if (request.outcome === "failed" && request.failure === undefined) {
+    return {
+      kind: "technical_failure",
+      failure: operationTechnicalFailure(
+        "protocol",
+        "missing_domain_failure",
+        `Failed operation ${request.operation.callId} did not provide a typed domain failure.`,
+        false,
+      ),
+    };
+  }
   const transaction: OperationTerminationTransaction =
     request.outcome === "failed"
       ? {
@@ -361,11 +458,7 @@ function prepareActiveTermination(
           outcome: "failed",
           source: request.source,
           terminatedAtTick: worldInput.tick,
-          failure: {
-            kind: "domain_failure",
-            code: (request.failureCode ?? request.source) as never,
-            details: {},
-          },
+          failure: request.failure!,
           proposal: { effects: request.proposal.effects, result: result.value },
         }
       : {
@@ -377,7 +470,16 @@ function prepareActiveTermination(
           terminatedAtTick: worldInput.tick,
           proposal: { effects: request.proposal.effects, result: result.value },
         };
-  const validated = validateTerminalTransaction(registry, transaction);
+  const validated = validateTerminalTransaction(
+    registry,
+    transaction,
+    hostedRuntimeForActiveOperation(
+      worldInput,
+      registry,
+      request.agentId,
+      request.operation,
+    ),
+  );
   if (validated.kind === "technical_failure") return validated;
   return {
     kind: "prepared",

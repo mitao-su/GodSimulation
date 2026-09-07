@@ -13,6 +13,7 @@ import {
   operationInteractionLifecycleProposal,
 } from "../execution/operation-lifecycle";
 import { commitActiveOperationTerminations } from "../execution/operation-termination";
+import { OperationTechnicalFailureError } from "../execution/operation-failure-classifier";
 import { prepareOperationCall } from "../execution/operation-planner";
 import {
   createOperationRuntimeContext,
@@ -331,9 +332,7 @@ export function releaseDecisionCycle(
     },
   );
   if (cancellation.kind === "technical_failure") {
-    throw new Error(
-      `Operation cancellation failed: ${cancellation.failure.code}: ${cancellation.failure.message}`,
-    );
+    throw new OperationTechnicalFailureError(cancellation.failure);
   }
 
   const candidateWorld = cancellation.world;

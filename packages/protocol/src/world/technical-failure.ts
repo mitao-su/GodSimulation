@@ -15,6 +15,7 @@ export const TechnicalFailureSchema = z
   .object({
     id: z.string().min(1),
     category: TechnicalFailureCategorySchema,
+    code: z.string().min(1).max(120).regex(/^[a-z][a-z0-9_]*$/).optional(),
     message: z.string().min(1).max(2_000),
     requestId: RequestIdSchema.optional(),
     retryable: z.boolean(),

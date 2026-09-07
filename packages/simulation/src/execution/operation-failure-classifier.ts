@@ -30,6 +30,17 @@ export type OperationLifecycleInvocationResult<Result> =
       readonly failure: OperationTechnicalFailure;
     };
 
+/** 保留 operation 技术失败结构，跨 simulation engine/worker 边界传播。 */
+export class OperationTechnicalFailureError extends Error {
+  readonly failure: OperationTechnicalFailure;
+
+  constructor(failure: OperationTechnicalFailure) {
+    super(`${failure.code}: ${failure.message}`);
+    this.name = "OperationTechnicalFailureError";
+    this.failure = failure;
+  }
+}
+
 function boundedMessage(message: string): string {
   return message.slice(0, TECHNICAL_FAILURE_MESSAGE_LIMIT);
 }
