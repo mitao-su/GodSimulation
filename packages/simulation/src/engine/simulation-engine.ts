@@ -282,6 +282,10 @@ class DeterministicSimulationEngine implements SimulationEngine {
       return this.#tickInternal();
     } catch (error) {
       if (!(error instanceof OperationTechnicalFailureError)) throw error;
+      if (error.committed) {
+        this.#world = error.committed.world;
+        this.#recordEvents(error.committed.events);
+      }
       const recorded = this.reportTechnicalFailure({
         id: `failure:operation:${this.#world.lastEventSequence + 1}`,
         category: error.failure.category,

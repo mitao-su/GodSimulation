@@ -44,6 +44,7 @@ import {
 import type { WorldState } from "../world/world-state";
 import type { ActiveOperation } from "./operation";
 import { runTickPipeline } from "../engine/tick-pipeline";
+import { OperationTechnicalFailureError } from "./operation-failure-classifier";
 
 const agentId = AgentIdSchema.parse("alice");
 const operationId = OperationIdSchema.parse("furniture.test.fridge.lifecycle");
@@ -331,6 +332,89 @@ describe("hosted operation lifecycle runner", () => {
         (event) => event.type === "operation_result" && event.callId === operation.callId,
       ),
     ).toHaveLength(1);
+  });
+
+  it("preserves committed tick facts when terminal commit fails in the engine path", () => {
+    const start = vi.fn(
+      (context: OperationRuntimeContext): OperationStartResult => ({
+        kind: "started",
+        proposal: {
+          effects: [
+            {
+              type: "reserve_occupancy",
+              entityId: fridgeId,
+              agentId: context.agentId,
+              expectedObjectVersion: 0,
+            },
+          ],
+        },
+        nextState: { ticks: 0 },
+      }),
+    );
+    const complete = vi.fn<HostedOperationRuntime["complete"]>(() => ({
+      effects: [
+        {
+          type: "release_occupancy",
+          entityId: fridgeId,
+          agentId,
+          expectedObjectVersion: 0,
+        },
+      ],
+      result: { status: "completed" },
+    }));
+    const fixture = fixtureRuntime({
+      duration: { kind: "fixed" },
+      start,
+      complete,
+    });
+    const operation = runtimeCall({
+      duration: { kind: "fixed", totalTicks: 1 },
+    });
+    const base = runningWorld();
+    const agent = base.agents.get(agentId)!;
+    const world: WorldState = {
+      ...base,
+      agents: new Map(base.agents).set(agentId, {
+        ...agent,
+        taskTracks: {
+          HEAD: { kind: "empty" },
+          BODY: { kind: "operation", callId: operation.callId },
+        },
+        activeOperations: new Map([
+          [operation.callId, operation as unknown as ActiveOperation],
+        ]),
+      }),
+    };
+
+    let thrown: unknown;
+    try {
+      runTickPipeline(world, fixture.registry);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(OperationTechnicalFailureError);
+    const failure = thrown as OperationTechnicalFailureError;
+    expect(failure.failure).toMatchObject({
+      code: "termination_effect_rejected",
+      retryable: true,
+    });
+    expect(failure.committed?.world.tick).toBe(world.tick + 1);
+    expect(failure.committed?.world.objects.get(fridgeId)).toMatchObject({
+      version: 1,
+      state: { holder: agentId },
+    });
+    expect(
+      failure.committed?.world.agents.get(agentId)?.activeOperations.has(operation.callId),
+    ).toBe(true);
+    expect(
+      failure.committed?.events.some((event) => event.type === "object_state_changed"),
+    ).toBe(true);
+    expect(
+      failure.committed?.events.some((event) => event.type === "operation_result"),
+    ).toBe(false);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it("does not run start twice when an already-started call is at its completion boundary", () => {

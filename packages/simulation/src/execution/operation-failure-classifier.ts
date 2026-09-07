@@ -5,6 +5,7 @@ import {
   OperationDomainFailureSchema,
   OperationTechnicalFailureSchema,
   type JsonObject,
+  type DomainEvent,
   type OperationDomainFailure,
   type OperationTechnicalFailure,
 } from "@god-sim/protocol";
@@ -12,6 +13,7 @@ import {
   validateOperationDomainFailureOutcome,
   type HostedOperationDomainFailureDefinition,
 } from "@god-sim/plugin-sdk";
+import type { WorldState } from "../world/world-state";
 
 const TECHNICAL_FAILURE_MESSAGE_LIMIT = 2_000;
 
@@ -30,14 +32,24 @@ export type OperationLifecycleInvocationResult<Result> =
       readonly failure: OperationTechnicalFailure;
     };
 
+export interface OperationTechnicalFailureContext {
+  readonly world: WorldState;
+  readonly events: readonly DomainEvent[];
+}
+
 /** 保留 operation 技术失败结构，跨 simulation engine/worker 边界传播。 */
 export class OperationTechnicalFailureError extends Error {
   readonly failure: OperationTechnicalFailure;
+  readonly committed: OperationTechnicalFailureContext | undefined;
 
-  constructor(failure: OperationTechnicalFailure) {
+  constructor(
+    failure: OperationTechnicalFailure,
+    committed?: OperationTechnicalFailureContext,
+  ) {
     super(`${failure.code}: ${failure.message}`);
     this.name = "OperationTechnicalFailureError";
     this.failure = failure;
+    this.committed = committed;
   }
 }
 

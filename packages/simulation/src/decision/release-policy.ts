@@ -1,5 +1,6 @@
 import {
   OperationCallIdSchema,
+  JsonObjectSchema,
   resolveTaskDecision,
   type AgentId,
   type DomainEvent,
@@ -13,10 +14,15 @@ import {
   operationInteractionLifecycleProposal,
 } from "../execution/operation-lifecycle";
 import { commitActiveOperationTerminations } from "../execution/operation-termination";
-import { OperationTechnicalFailureError } from "../execution/operation-failure-classifier";
+import {
+  OperationTechnicalFailureError,
+  operationTechnicalFailure,
+} from "../execution/operation-failure-classifier";
 import { prepareOperationCall } from "../execution/operation-planner";
 import {
   createOperationRuntimeContext,
+  isOperationRuntimeCall,
+  type HostedOperationRegistry,
   type OperationRuntimeRegistry,
 } from "../execution/operation-runtime";
 import type { ActiveOperation } from "../execution/operation";
@@ -228,15 +234,95 @@ function acknowledgeFuseResults(
           `Pending result ${receipt.callId} does not match an active operation`,
         );
       }
-      const runtime = registry.getOperation(operation.operationId);
-      if (!runtime) {
-        throw new Error(`Operation ${operation.operationId} is not registered`);
+      let acknowledged: ActiveOperation;
+      if (isOperationRuntimeCall(operation)) {
+        const hostedRegistry = registry as OperationRuntimeRegistry &
+          Partial<HostedOperationRegistry>;
+        if (!hostedRegistry.getHostedOperation) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_registry_unavailable",
+              `Hosted operation ${operation.operationId} cannot acknowledge a fuse receipt without a hosted registry.`,
+              false,
+            ),
+          );
+        }
+        let runtime;
+        try {
+          runtime = hostedRegistry.getHostedOperation(
+            operation.operationId,
+            operation.hostDefinition,
+          );
+        } catch (error) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_runtime_lookup_exception",
+              `Hosted operation runtime lookup threw: ${error instanceof Error ? error.message : String(error)}`,
+              false,
+            ),
+          );
+        }
+        if (!runtime) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_runtime_missing",
+              `No hosted runtime is registered for ${operation.operationId}.`,
+              false,
+            ),
+          );
+        }
+        let nextState: unknown;
+        try {
+          nextState = runtime.acknowledgeFuseResult(
+            createOperationRuntimeContext(world, registry, agentId),
+            operation,
+            receipt.result,
+          );
+        } catch (error) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "plugin",
+              "fuse_acknowledge_exception",
+              `Hosted fuse acknowledgement threw: ${error instanceof Error ? error.message : String(error)}`,
+              true,
+            ),
+          );
+        }
+        let parsedState;
+        try {
+          const parsed = runtime.stateSchema.safeParse(nextState);
+          const normalized = parsed.success
+            ? JsonObjectSchema.safeParse(parsed.data)
+            : undefined;
+          if (!parsed.success || !normalized?.success) {
+            throw new Error("Hosted fuse acknowledgement returned invalid state");
+          }
+          parsedState = normalized.data;
+        } catch (error) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "plugin",
+              "fuse_acknowledge_state_invalid",
+              `Hosted fuse acknowledgement returned invalid state: ${error instanceof Error ? error.message : String(error)}`,
+              false,
+            ),
+          );
+        }
+        acknowledged = { ...operation, state: parsedState };
+      } else {
+        const runtime = registry.getOperation(operation.operationId);
+        if (!runtime) {
+          throw new Error(`Operation ${operation.operationId} is not registered`);
+        }
+        acknowledged = runtime.acknowledgeFuseResult(
+          createOperationRuntimeContext(world, registry, agentId),
+          operation,
+          receipt,
+        );
       }
-      const acknowledged = runtime.acknowledgeFuseResult(
-        createOperationRuntimeContext(world, registry, agentId),
-        operation,
-        receipt,
-      );
       currentAgent = {
         ...currentAgent,
         activeOperations: new Map(currentAgent.activeOperations).set(
@@ -332,7 +418,10 @@ export function releaseDecisionCycle(
     },
   );
   if (cancellation.kind === "technical_failure") {
-    throw new OperationTechnicalFailureError(cancellation.failure);
+    throw new OperationTechnicalFailureError(cancellation.failure, {
+      world: acknowledgedWorld,
+      events: [],
+    });
   }
 
   const candidateWorld = cancellation.world;

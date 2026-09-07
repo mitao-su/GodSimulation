@@ -88,6 +88,16 @@ function eventMetadata(causationId: string, correlationId = causationId) {
   return { causationId, correlationId };
 }
 
+function rethrowWithCommittedTick(
+  error: unknown,
+  world: WorldState,
+  events: readonly DomainEvent[],
+): never {
+  if (!(error instanceof OperationTechnicalFailureError)) throw error;
+  if (error.committed) throw error;
+  throw new OperationTechnicalFailureError(error.failure, { world, events });
+}
+
 function perceptionMetadata(
   worldTick: number,
   candidate: PerceptionCandidate,
@@ -876,12 +886,19 @@ export function runTickPipeline(
 
   if (hostedOperations.length > 0) {
     const hosted = advanceHostedOperationBatch(world, registry, hostedOperations);
+    const appliedHostedWorld = applyHostedOperationBatchResult(hosted);
     for (const entry of hosted.results) {
       if (entry.result.kind === "technical_failure") {
-        throw new OperationTechnicalFailureError(entry.result.failure);
+        throw new OperationTechnicalFailureError(entry.result.failure, {
+          world: appliedHostedWorld,
+          events: [...events, ...hosted.events],
+        });
       }
       if (entry.result.kind === "termination_pending") {
-        throw new OperationTechnicalFailureError(entry.result.failure);
+        throw new OperationTechnicalFailureError(entry.result.failure, {
+          world: appliedHostedWorld,
+          events: [...events, ...hosted.events],
+        });
       }
       if (
         entry.result.kind === "termination_ready" ||
@@ -898,7 +915,7 @@ export function runTickPipeline(
         }
       }
     }
-    world = applyHostedOperationBatchResult(hosted);
+    world = appliedHostedWorld;
     events.push(...hosted.events);
   }
   const recorded = recordOperationFailures(world, [
@@ -940,20 +957,24 @@ export function runTickPipeline(
       left.agentId.localeCompare(right.agentId) ||
       left.operation.callId.localeCompare(right.operation.callId),
   )) {
-    const written = recordOperationTermination(
-      world,
-      registry,
-      termination.agentId,
-      termination.operation,
-      "failed",
-      termination.reasonCode,
-      eventMetadata(termination.operation.callId),
-      termination.result ?? undefined,
-      termination.proposal,
-      termination.failure,
-    );
-    world = written.world;
-    events.push(...written.events);
+    try {
+      const written = recordOperationTermination(
+        world,
+        registry,
+        termination.agentId,
+        termination.operation,
+        "failed",
+        termination.reasonCode,
+        eventMetadata(termination.operation.callId),
+        termination.result ?? undefined,
+        termination.proposal,
+        termination.failure,
+      );
+      world = written.world;
+      events.push(...written.events);
+    } catch (error) {
+      rethrowWithCommittedTick(error, world, events);
+    }
   }
 
   const completedByCall = new Map<string, CompletedOperation>();
@@ -986,18 +1007,22 @@ export function runTickPipeline(
           perception.observationsByAgent.get(completed.agentId) ?? [],
         )
       : snapshot;
-    const written = recordOperationTermination(
-      world,
-      registry,
-      completed.agentId,
-      operation,
-      "completed",
-      "operation_completed",
-      eventMetadata(completed.callId),
-      completed.result,
-    );
-    world = written.world;
-    events.push(...written.events);
+    try {
+      const written = recordOperationTermination(
+        world,
+        registry,
+        completed.agentId,
+        operation,
+        "completed",
+        "operation_completed",
+        eventMetadata(completed.callId),
+        completed.result,
+      );
+      world = written.world;
+      events.push(...written.events);
+    } catch (error) {
+      rethrowWithCommittedTick(error, world, events);
+    }
     addDecisionNeed(needs, completed.agentId, {
       code: "operation_completed",
       summary: `${completed.label} completed`,

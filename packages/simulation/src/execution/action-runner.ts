@@ -29,8 +29,7 @@ import type {
 } from "./operation-runtime";
 import { isOperationRuntimeCall } from "./operation-runtime";
 import {
-  commitOperationTermination,
-  type OperationTerminationResult,
+  commitHostedOperationTerminations,
 } from "./operation-termination";
 import { operationCallIdsInTrackOrder } from "./task-tracks";
 import {
@@ -704,22 +703,6 @@ export function applyHostedOperationBatchResult(
   return { ...batch.world, agents };
 }
 
-/**
- * 在世界边界提交生命周期运行器准备好的终止事务。
- * 运行器只准备事务；只有此入口可以应用终态效果、释放轨道并记录终态结果。
- */
-export function commitHostedOperationTermination(
-  world: WorldState,
-  registry: HostedOperationRuntimeRegistry,
-  transaction: OperationTerminationTransaction,
-  operation?: OperationRuntimeCall,
-): OperationTerminationResult {
-  const runtime = operation
-    ? registry.getHostedOperation(operation.operationId, operation.hostDefinition)
-    : undefined;
-  return commitOperationTermination(world, registry, transaction, undefined, runtime);
-}
-
 function transitionIntent(
   entry: HostedOperationBatchEntry,
   proposal: OperationLifecycleTransitionResult["proposal"],
@@ -995,37 +978,47 @@ export function advanceHostedOperationBatch(
     });
   }
 
-  // Terminal proposals are committed only after arbitration and all accepted
-  // transition proposals have been applied. This keeps completion, failure
-  // and cancellation on the same atomic termination path.
-  for (const entry of ordered) {
+  // Validate and commit every terminal proposal as one transaction. A failure
+  // therefore leaves every terminal call active and produces no partial
+  // cleanup/result effects for this batch.
+  const terminalEntries = ordered.flatMap((entry) => {
     const prepared = processed.get(entry.operation.callId);
-    if (!prepared || prepared.kind !== "termination_ready") continue;
-    const terminated = commitHostedOperationTermination(
+    return prepared?.kind === "termination_ready"
+      ? [{ entry, prepared }]
+      : [];
+  });
+  if (terminalEntries.length > 0) {
+    const terminated = commitHostedOperationTerminations(
       nextWorld,
       registry,
-      prepared.transaction,
-      prepared.operation,
+      terminalEntries.map(({ prepared }) => ({
+        transaction: prepared.transaction,
+        operation: prepared.operation,
+      })),
     );
     if (terminated.kind === "technical_failure") {
-      processed.set(
-        entry.operation.callId,
-        hostedTechnicalFailure(
-          nextWorld,
-          prepared.operation,
-          terminated.failure,
-          prepared.events,
-        ),
-      );
-      continue;
+      for (const { entry, prepared } of terminalEntries) {
+        processed.set(
+          entry.operation.callId,
+          hostedTechnicalFailure(
+            nextWorld,
+            prepared.operation,
+            terminated.failure,
+            prepared.events,
+          ),
+        );
+      }
+    } else {
+      nextWorld = terminated.world;
+      events.push(...terminated.events);
+      for (const { entry, prepared } of terminalEntries) {
+        processed.set(entry.operation.callId, {
+          ...prepared,
+          world: nextWorld,
+          events: [...prepared.events, ...terminated.events],
+        });
+      }
     }
-    nextWorld = terminated.world;
-    events.push(...terminated.events);
-    processed.set(entry.operation.callId, {
-      ...prepared,
-      world: nextWorld,
-      events: [...prepared.events, ...terminated.events],
-    });
   }
   return {
     world: nextWorld,

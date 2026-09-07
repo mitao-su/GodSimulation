@@ -26,6 +26,7 @@ import type {
   HostedOperationRegistry,
   HostedOperationRuntimeRegistry,
   OperationRuntimeRegistry,
+  OperationRuntimeCall,
   OperationTerminationTransaction,
 } from "./operation-runtime";
 import { isOperationRuntimeCall } from "./operation-runtime";
@@ -73,6 +74,18 @@ function failure(
   retryable = true,
   category: OperationTechnicalFailure["category"] = "protocol",
 ): OperationTerminationResult {
+  return {
+    kind: "technical_failure",
+    failure: operationTechnicalFailure(category, code, message, retryable),
+  };
+}
+
+function failureValue(
+  code: string,
+  message: string,
+  retryable = true,
+  category: OperationTechnicalFailure["category"] = "protocol",
+): { readonly kind: "technical_failure"; readonly failure: OperationTechnicalFailure } {
   return {
     kind: "technical_failure",
     failure: operationTechnicalFailure(category, code, message, retryable),
@@ -172,6 +185,11 @@ interface TerminalCommitInput {
 }
 
 export type ActiveOperationTerminationBatchRequest = ActiveOperationTerminationRequest;
+
+export interface HostedOperationTerminationRequest {
+  readonly transaction: OperationTerminationTransaction;
+  readonly operation?: OperationRuntimeCall;
+}
 
 function validateTerminalTransaction(
   registry: OperationRuntimeRegistry,
@@ -511,25 +529,47 @@ export function commitOperationTermination(
   metadata?: EventMetadata,
   runtimeOverride?: HostedOperationRuntime,
 ): OperationTerminationResult {
+  const prepared = prepareHostedOperationTerminationRequest(
+    worldInput,
+    registry,
+    { transaction },
+    runtimeOverride,
+  );
+  if (prepared.kind === "technical_failure") return prepared;
+  return commitTerminalParts(worldInput, registry, [prepared.input], metadata);
+}
+
+function prepareHostedOperationTerminationRequest(
+  worldInput: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  request: HostedOperationTerminationRequest,
+  runtimeOverride?: HostedOperationRuntime,
+):
+  | { readonly kind: "prepared"; readonly input: TerminalCommitInput }
+  | { readonly kind: "technical_failure"; readonly failure: OperationTechnicalFailure } {
+  const { transaction } = request;
   const active = worldInput.agents
     .get(transaction.agentId)
     ?.activeOperations.get(transaction.callId);
   if (active && active.operationId !== transaction.operationId) {
-    return failure(
+    return failureValue(
       "termination_operation_mismatch",
       `Operation ${transaction.callId} is ${active.operationId}, not ${transaction.operationId}.`,
       false,
     );
   }
   let activeHostedRuntime: HostedOperationRuntime | undefined;
-  if (active && isOperationRuntimeCall(active)) {
+  const boundOperation = active && isOperationRuntimeCall(active)
+    ? active
+    : request.operation;
+  if (boundOperation) {
     try {
       activeHostedRuntime = registry.getHostedOperation(
-        active.operationId,
-        active.hostDefinition,
+        boundOperation.operationId,
+        boundOperation.hostDefinition,
       );
     } catch (error) {
-      return failure(
+      return failureValue(
         "termination_runtime_lookup_exception",
         `Hosted runtime lookup threw: ${error instanceof Error ? error.message : String(error)}`,
         false,
@@ -553,12 +593,30 @@ export function commitOperationTermination(
     result: validated.result,
     ...(active === undefined ? {} : { activeOperation: active }),
   };
-  return commitTerminalParts(
-    worldInput,
-    registry,
-    [input],
-    metadata,
-  );
+  return { kind: "prepared", input };
+}
+
+/**
+ * 将同一 Tick 准备好的 hosted 终态一次提交。所有 runtime、Schema、调用
+ * 绑定先完整校验，随后才进入唯一的效果/清理/事件提交段。
+ */
+export function commitHostedOperationTerminations(
+  worldInput: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  requests: readonly HostedOperationTerminationRequest[],
+  metadata?: EventMetadata,
+): OperationTerminationResult {
+  const prepared: TerminalCommitInput[] = [];
+  for (const request of requests) {
+    const validated = prepareHostedOperationTerminationRequest(
+      worldInput,
+      registry,
+      request,
+    );
+    if (validated.kind === "technical_failure") return validated;
+    prepared.push(validated.input);
+  }
+  return commitTerminalParts(worldInput, registry, prepared, metadata);
 }
 
 /** The compatibility bridge used by the existing ActiveOperation pipeline. */
