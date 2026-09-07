@@ -78,8 +78,11 @@ export interface WorldState {
   readonly reviewRequired: boolean;
   readonly randomState: number;
   readonly lastEventSequence: number;
-  /** 运行时不可消费的终态调用账本；P3 再接入线上快照。 */
-  readonly terminalOperationCallIds: ReadonlySet<OperationCallId>;
+  /**
+   * P2 进程内的不可消费终态调用账本。它尚未进入线上快照；P3 负责
+   * 持久化和恢复后的去重，因此恢复的旧快照可不带这个运行时字段。
+   */
+  readonly terminalOperationCallIds?: ReadonlySet<OperationCallId>;
   readonly pluginLockHash: PluginLockHash;
   readonly simulationRulesLock: SimulationRulesLock;
   readonly history: WorldHistory;

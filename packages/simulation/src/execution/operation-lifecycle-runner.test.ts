@@ -42,6 +42,8 @@ import {
   testPluginRegistry,
 } from "../testing/simulation-test-fixtures";
 import type { WorldState } from "../world/world-state";
+import type { ActiveOperation } from "./operation";
+import { runTickPipeline } from "../engine/tick-pipeline";
 
 const agentId = AgentIdSchema.parse("alice");
 const operationId = OperationIdSchema.parse("furniture.test.fridge.lifecycle");
@@ -281,6 +283,54 @@ describe("hosted operation lifecycle runner", () => {
     expect(fixture.calls.tick).toHaveBeenCalledTimes(1);
     expect(fixture.calls.complete).toHaveBeenCalledTimes(1);
     expect(fixture.calls.resolveDuration).not.toHaveBeenCalled();
+  });
+
+  it("advances hosted calls through the production tick pipeline", () => {
+    const fixture = fixtureRuntime();
+    const operation = runtimeCall();
+    const base = runningWorld();
+    const agent = base.agents.get(agentId)!;
+    const world: WorldState = {
+      ...base,
+      agents: new Map(base.agents).set(agentId, {
+        ...agent,
+        taskTracks: {
+          HEAD: { kind: "empty" },
+          BODY: { kind: "operation", callId: operation.callId },
+        },
+        activeOperations: new Map([
+          [operation.callId, operation as unknown as ActiveOperation],
+        ]),
+      }),
+    };
+
+    const first = runTickPipeline(world, fixture.registry);
+    const firstOperation = first.world.agents
+      .get(agentId)
+      ?.activeOperations.get(operation.callId);
+    expect(fixture.calls.start).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.tick).not.toHaveBeenCalled();
+    expect(firstOperation).toMatchObject({
+      firstStepState: "started",
+      progressTicks: 1,
+    });
+    expect(
+      first.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
+    ).toHaveLength(0);
+
+    const second = runTickPipeline(first.world, fixture.registry);
+    expect(fixture.calls.start).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.tick).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.complete).toHaveBeenCalledTimes(1);
+    expect(second.world.agents.get(agentId)?.activeOperations.has(operation.callId)).toBe(false);
+    expect(second.world.agents.get(agentId)?.taskTracks.BODY).toEqual({ kind: "empty" });
+    expect(
+      second.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
+    ).toHaveLength(1);
   });
 
   it("does not run start twice when an already-started call is at its completion boundary", () => {

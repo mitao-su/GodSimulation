@@ -28,6 +28,7 @@ import type {
   OperationRuntimeRegistry,
   OperationTerminationTransaction,
 } from "./operation-runtime";
+import { isOperationRuntimeCall } from "./operation-runtime";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
 import { commitProposal } from "../interaction/effect-committer";
 import type { WorldState } from "../world/world-state";
@@ -297,7 +298,7 @@ function commitTerminalParts(
       );
     }
     seenCalls.add(input.callId);
-    if (worldInput.terminalOperationCallIds.has(input.callId)) {
+    if (worldInput.terminalOperationCallIds?.has(input.callId) ?? false) {
       return failure(
         "termination_already_committed",
         `Operation ${input.callId} already has a terminal result.`,
@@ -403,7 +404,9 @@ function commitTerminalParts(
       );
     }
   }
-  const terminalOperationCallIds = new Set(nextWorld.terminalOperationCallIds);
+  const terminalOperationCallIds = new Set(
+    nextWorld.terminalOperationCallIds ?? [],
+  );
   for (const input of inputs) terminalOperationCallIds.add(input.callId);
   nextWorld = { ...nextWorld, terminalOperationCallIds };
   return { kind: "committed", world: nextWorld, events };
@@ -518,7 +521,27 @@ export function commitOperationTermination(
       false,
     );
   }
-  const validated = validateTerminalTransaction(registry, transaction, runtimeOverride);
+  let activeHostedRuntime: HostedOperationRuntime | undefined;
+  if (active && isOperationRuntimeCall(active)) {
+    try {
+      activeHostedRuntime = registry.getHostedOperation(
+        active.operationId,
+        active.hostDefinition,
+      );
+    } catch (error) {
+      return failure(
+        "termination_runtime_lookup_exception",
+        `Hosted runtime lookup threw: ${error instanceof Error ? error.message : String(error)}`,
+        false,
+        "configuration",
+      );
+    }
+  }
+  const validated = validateTerminalTransaction(
+    registry,
+    transaction,
+    runtimeOverride ?? activeHostedRuntime,
+  );
   if (validated.kind === "technical_failure") return validated;
   const input: TerminalCommitInput = {
     agentId: transaction.agentId,

@@ -303,7 +303,6 @@ export function restoreWorldSnapshot(
     reviewRequired: state.reviewRequired,
     randomState: state.randomState,
     lastEventSequence: snapshot.lastEventSequence,
-    terminalOperationCallIds: new Set(),
     pluginLockHash: snapshot.pluginLockHash,
     simulationRulesLock: configuredRulesLock,
     history,

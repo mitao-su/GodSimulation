@@ -11,10 +11,17 @@ import type { EffectProposal } from "@god-sim/plugin-sdk";
 import type { ActiveOperation, OperationObservation } from "./operation";
 import {
   createOperationRuntimeContext,
+  isOperationRuntimeCall,
+  type HostedOperationRegistry,
+  type HostedOperationRuntimeRegistry,
   type OperationRuntimeRegistry,
 } from "./operation-runtime";
+import { fuseOperationLifecycle } from "./operation-lifecycle-runner";
 import { commitActiveOperationTermination } from "./operation-termination";
-import { OperationTechnicalFailureError } from "./operation-failure-classifier";
+import {
+  OperationTechnicalFailureError,
+  operationTechnicalFailure,
+} from "./operation-failure-classifier";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
 import { proposeInteraction } from "../interaction/interaction-router";
 import type { WorldState } from "../world/world-state";
@@ -168,7 +175,7 @@ export function recordOperationTermination(
 
 export function recordFuseResults(
   worldInput: WorldState,
-  registry: OperationRuntimeRegistry,
+  registry: OperationRuntimeRegistry & Partial<HostedOperationRegistry>,
   agentIds: readonly AgentId[],
   metadata: EventMetadata,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
@@ -182,6 +189,41 @@ export function recordFuseResults(
     for (const operation of [...agent.activeOperations.values()].sort(
       (left, right) => left.callId.localeCompare(right.callId),
     )) {
+      if (isOperationRuntimeCall(operation)) {
+        if (!registry.getHostedOperation) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_registry_unavailable",
+              `Hosted operation ${operation.operationId} cannot be fused without a hosted registry.`,
+              false,
+            ),
+          );
+        }
+        const fused = fuseOperationLifecycle({
+          world,
+          registry: registry as HostedOperationRuntimeRegistry,
+          agentId,
+          operation,
+        });
+        if (fused.kind === "technical_failure") {
+          throw new OperationTechnicalFailureError(fused.failure);
+        }
+        if (fused.kind === "no_result") continue;
+        const written = appendResult(
+          world,
+          agentId,
+          fused.operation as unknown as ActiveOperation,
+          false,
+          null,
+          "world_fused",
+          fused.result,
+          metadata,
+        );
+        world = written.world;
+        events.push(written.event);
+        continue;
+      }
       const runtime = registry.getOperation(operation.operationId);
       if (!runtime) {
         throw new Error(`Operation ${operation.operationId} is not registered`);

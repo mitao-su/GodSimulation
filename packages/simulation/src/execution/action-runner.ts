@@ -27,6 +27,7 @@ import type {
   OperationRuntimeCall,
   OperationTerminationTransaction,
 } from "./operation-runtime";
+import { isOperationRuntimeCall } from "./operation-runtime";
 import {
   commitOperationTermination,
   type OperationTerminationResult,
@@ -208,6 +209,10 @@ export function advanceOperations(
       if (!operation) {
         throw new Error(`Task track references missing operation ${callId}`);
       }
+      // W1-IF hosted calls are advanced by the hosted batch below the
+      // legacy action runner. They share the active-call table but do not
+      // have a legacy action plan to interpret here.
+      if (isOperationRuntimeCall(operation)) continue;
       const action = operation.plan.actions[operation.plan.currentActionIndex];
       if (!action) {
         agent = clearOperation(agent, callId);
@@ -671,6 +676,32 @@ export interface HostedOperationBatchResult {
     readonly callId: OperationCallId;
     readonly result: HostedOperationAdvanceResult;
   }[];
+}
+
+/**
+ * 将 hosted runner 的非终态调用状态写回唯一 active-call 表。
+ * 终态调用已由批量终止事务清理；技术失败则保留当前调用，交由引擎
+ * 抛出结构化失败并冻结世界。这里不创建第二个 hosted 状态容器。
+ */
+export function applyHostedOperationBatchResult(
+  batch: HostedOperationBatchResult,
+): WorldState {
+  const agents = new Map(batch.world.agents);
+  for (const entry of batch.results) {
+    if (entry.result.kind !== "running" && entry.result.kind !== "termination_pending") {
+      continue;
+    }
+    const agent = agents.get(entry.agentId);
+    if (!agent || !agent.activeOperations.has(entry.callId)) continue;
+    agents.set(entry.agentId, {
+      ...agent,
+      activeOperations: new Map(agent.activeOperations).set(
+        entry.callId,
+        entry.result.operation as unknown as ActiveOperation,
+      ),
+    });
+  }
+  return { ...batch.world, agents };
 }
 
 /**

@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { OperationTerminationTransaction } from "./operation-runtime";
 import {
+  atomicOperationTerminationPort,
   commitActiveOperationTerminations,
   commitOperationTermination,
 } from "./operation-termination";
+import { prepareDirectOperationCall } from "./operation-planner";
 import type { ActiveOperation } from "./operation";
 import {
   simulationTestWorld,
@@ -345,6 +347,67 @@ describe("atomic operation termination", () => {
         ?.pendingOperationResults.filter(
           (item) => item.callId === operation.callId && item.terminal,
         ),
+    ).toHaveLength(1);
+  });
+
+  it("resolves a hosted-only runtime through the exported termination port", () => {
+    const prepared = prepareDirectOperationCall(
+      simulationTestWorld(),
+      testPluginRegistry,
+      agentId,
+      "BODY",
+      {
+        kind: "operation",
+        operationId: "object.test.fridge.use" as never,
+        hostEntityId: "fridge-1" as never,
+        arguments: {},
+      },
+      "operation-call:atomic:hosted-only" as never,
+    );
+    expect(prepared.kind).toBe("prepared");
+    if (prepared.kind !== "prepared") return;
+    const operation = prepared.operation;
+    const base = simulationTestWorld();
+    const agent = base.agents.get(agentId)!;
+    const world = {
+      ...base,
+      mode: "RUNNING" as const,
+      agents: new Map(base.agents).set(agentId, {
+        ...agent,
+        taskTracks: {
+          HEAD: { kind: "empty" as const },
+          BODY: { kind: "operation" as const, callId: operation.callId },
+        },
+        activeOperations: new Map([
+          [operation.callId, operation as unknown as ActiveOperation],
+        ]),
+      }),
+    };
+    const hostedOnlyRegistry = {
+      ...testPluginRegistry,
+      getOperation: () => undefined,
+    };
+    const result = atomicOperationTerminationPort.commitTermination(
+      world,
+      hostedOnlyRegistry,
+      {
+        agentId,
+        callId: operation.callId,
+        operationId: operation.operationId,
+        outcome: "completed",
+        source: "operation_completed",
+        terminatedAtTick: world.tick,
+        proposal: { effects: [], result: { status: "completed" } },
+      },
+    );
+
+    expect(result.kind).toBe("committed");
+    if (result.kind !== "committed") return;
+    expect(result.world.agents.get(agentId)?.activeOperations.has(operation.callId)).toBe(false);
+    expect(
+      result.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
     ).toHaveLength(1);
   });
 });

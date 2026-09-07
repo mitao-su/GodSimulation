@@ -11,6 +11,8 @@ import {
 import type { EffectProposal } from "@god-sim/plugin-sdk";
 
 import {
+  advanceHostedOperationBatch,
+  applyHostedOperationBatchResult,
   advanceOperations,
   markInteractionCompleted,
   markInteractionStarted,
@@ -20,7 +22,12 @@ import {
   type InteractionCompletionRequest,
   type OperationAdvanceResult,
 } from "../execution/action-runner";
+import { OperationTechnicalFailureError } from "../execution/operation-failure-classifier";
 import { recoverBlockedOperation } from "../execution/local-recovery";
+import {
+  isOperationRuntimeCall,
+  type OperationRuntimeCall,
+} from "../execution/operation-runtime";
 import {
   accumulateOperationObservations,
   operationInteractionLifecycleProposal,
@@ -546,7 +553,25 @@ export function refreshAllPerceptions(
     events.push(...recorded.events);
     const agent = world.agents.get(agentId);
     if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
-    const conflict = detectPlanConflict(agent, recorded.changes);
+    // Hosted W1-IF calls share the active-call table but have no legacy action
+    // plan.  The hosted runner owns their world-condition checks, so exclude
+    // only those tracks from the legacy perception conflict detector.
+    const conflictAgent = {
+      ...agent,
+      taskTracks: {
+        HEAD:
+          agent.taskTracks.HEAD.kind === "operation" &&
+          isOperationRuntimeCall(agent.activeOperations.get(agent.taskTracks.HEAD.callId))
+            ? ({ kind: "empty" } as const)
+            : agent.taskTracks.HEAD,
+        BODY:
+          agent.taskTracks.BODY.kind === "operation" &&
+          isOperationRuntimeCall(agent.activeOperations.get(agent.taskTracks.BODY.callId))
+            ? ({ kind: "empty" } as const)
+            : agent.taskTracks.BODY,
+      },
+    };
+    const conflict = detectPlanConflict(conflictAgent, recorded.changes);
     if (conflict) {
       conflicts.push({
         agentId,
@@ -806,6 +831,18 @@ function activeOperationsAtTickStart(world: WorldState): Map<string, ActiveOpera
   return operations;
 }
 
+function hostedOperationsAtTickStart(
+  world: WorldState,
+): readonly { readonly agentId: AgentId; readonly operation: OperationRuntimeCall }[] {
+  const entries: { readonly agentId: AgentId; readonly operation: OperationRuntimeCall }[] = [];
+  for (const [agentId, agent] of world.agents) {
+    for (const operation of agent.activeOperations.values()) {
+      if (isOperationRuntimeCall(operation)) entries.push({ agentId, operation });
+    }
+  }
+  return entries;
+}
+
 export function runTickPipeline(
   worldInput: WorldState,
   registry: SimulationRegistry,
@@ -818,6 +855,7 @@ export function runTickPipeline(
   const events: DomainEvent[] = [];
   const needs = new Map<AgentId, DecisionNeed>();
   const operationSnapshots = activeOperationsAtTickStart(world);
+  const hostedOperations = hostedOperationsAtTickStart(world);
 
   const bladder = advanceBladderNeeds(world);
   const recordedNeeds = recordNeedCrossings(bladder.world, bladder.crossings);
@@ -835,6 +873,34 @@ export function runTickPipeline(
   const interactions = processInteractions(world, registry, operations);
   world = interactions.world;
   events.push(...interactions.events);
+
+  if (hostedOperations.length > 0) {
+    const hosted = advanceHostedOperationBatch(world, registry, hostedOperations);
+    for (const entry of hosted.results) {
+      if (entry.result.kind === "technical_failure") {
+        throw new OperationTechnicalFailureError(entry.result.failure);
+      }
+      if (entry.result.kind === "termination_pending") {
+        throw new OperationTechnicalFailureError(entry.result.failure);
+      }
+      if (
+        entry.result.kind === "termination_ready" ||
+        entry.result.kind === "running"
+      ) {
+        if (entry.result.kind === "termination_ready") {
+          addDecisionNeed(needs, entry.agentId, {
+            code:
+              entry.result.transaction.outcome === "completed"
+                ? "operation_completed"
+                : entry.result.transaction.source,
+            summary: `Hosted operation ${entry.callId} terminated`,
+          });
+        }
+      }
+    }
+    world = applyHostedOperationBatchResult(hosted);
+    events.push(...hosted.events);
+  }
   const recorded = recordOperationFailures(world, [
     ...operations.failures,
     ...interactions.failures,
