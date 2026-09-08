@@ -29,7 +29,7 @@ import {
 } from "../decision/decision-gate";
 import { buildTaskOptions } from "../execution/operation-catalog";
 import { recordFuseResults } from "../execution/operation-lifecycle";
-import { createHostedOperationTerminationRetryStore } from "../execution/action-runner";
+import { retryPendingHostedOperationTerminations } from "../execution/action-runner";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
 import {
   loadWorldDefinition,
@@ -159,8 +159,6 @@ function initialPerceptionMetadata(candidate: PerceptionCandidate) {
 class DeterministicSimulationEngine implements SimulationEngine {
   #world: WorldState;
   readonly #registry: SimulationRegistry;
-  /** P2 进程内终态提交重试；P3 再将其纳入快照恢复边界。 */
-  readonly #hostedTerminationRetries = createHostedOperationTerminationRetryStore();
   readonly #commandQueue: WorldCommand[] = [];
   readonly #decisionQueue = new Map<string, AdoptedDecision>();
   #eventOutbox: DomainEvent[] = [];
@@ -312,11 +310,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
     this.#commitBufferedDecisions();
 
     if (wasRunning && this.#world.mode === "RUNNING" && !this.#stopped) {
-      const result = runTickPipeline(
-        this.#world,
-        this.#registry,
-        this.#hostedTerminationRetries,
-      );
+      const result = runTickPipeline(this.#world, this.#registry);
       this.#world = result.world;
       this.#recordEvents(result.events);
       if (result.decisionNeeds.length > 0) this.#requestDecisionCycle(result.decisionNeeds);
@@ -529,16 +523,39 @@ class DeterministicSimulationEngine implements SimulationEngine {
           if (!failure.retryable) {
             throw new Error(`Technical failure ${command.failureId} is not retryable`);
           }
-          if (!this.#world.suspendedMode) {
+          const suspendedMode = this.#world.suspendedMode;
+          if (!suspendedMode) {
             throw new Error(`Technical failure ${command.failureId} has no suspended mode`);
           }
+          const retried = retryPendingHostedOperationTerminations(
+            this.#world,
+            this.#registry,
+          );
+          if (retried.kind === "technical_failure") {
+            throw new OperationTechnicalFailureError(retried.failure);
+          }
+          this.#world = retried.world;
+          this.#recordEvents(retried.events);
           const recovered = {
             ...this.#world,
             version: this.#world.version + 1,
-            mode: this.#world.suspendedMode,
+            mode: suspendedMode,
             suspendedMode: null,
             technicalFailure: null,
           };
+          this.#world = recovered;
+          if (retried.agentIds.length > 0) {
+            this.#requestDecisionCycle(
+              retried.agentIds.map((agentId) => ({
+                agentId,
+                reason: {
+                  code: "operation_terminated",
+                  summary: "Hosted operation terminated after retry",
+                },
+              })),
+            );
+            break;
+          }
           const cycleId = recovered.decisionCycle?.id;
           const released = applyReleasePolicy(recovered, this.#registry);
           if (

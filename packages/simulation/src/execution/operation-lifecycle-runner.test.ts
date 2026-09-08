@@ -20,7 +20,6 @@ import {
 import {
   advanceHostedOperation,
   advanceHostedOperationBatch,
-  createHostedOperationTerminationRetryStore,
   resumeHostedOperationTermination,
 } from "./action-runner";
 import { commitProposal } from "../interaction/effect-committer";
@@ -402,15 +401,13 @@ describe("hosted operation lifecycle runner", () => {
         return getObject(definitionId);
       },
     };
-    const terminationRetries = createHostedOperationTerminationRetryStore();
-
-    const firstTick = runTickPipeline(world, registry, terminationRetries);
+    const firstTick = runTickPipeline(world, registry);
     expect(fixture.calls.start).toHaveBeenCalledTimes(1);
     expect(fixture.calls.tick).not.toHaveBeenCalled();
 
     let thrown: unknown;
     try {
-      runTickPipeline(firstTick.world, registry, terminationRetries);
+      runTickPipeline(firstTick.world, registry);
     } catch (error) {
       thrown = error;
     }
@@ -430,6 +427,12 @@ describe("hosted operation lifecycle runner", () => {
       failure.committed?.world.agents.get(agentId)?.activeOperations.has(operation.callId),
     ).toBe(true);
     expect(
+      failure.committed?.world.pendingOperationTerminations?.get(operation.callId),
+    ).toMatchObject({
+      agentId,
+      transaction: { outcome: "completed" },
+    });
+    expect(
       firstTick.events.some((event) => event.type === "object_state_changed"),
     ).toBe(true);
     expect(
@@ -442,7 +445,6 @@ describe("hosted operation lifecycle runner", () => {
     const retry = runTickPipeline(
       failure.committed!.world,
       registry,
-      terminationRetries,
     );
     const retryAgent = retry.world.agents.get(agentId)!;
     expect(retryAgent.activeOperations.has(operation.callId)).toBe(false);
@@ -460,6 +462,44 @@ describe("hosted operation lifecycle runner", () => {
         (result) => result.callId === operation.callId && result.terminal,
       ),
     ).toHaveLength(1);
+  });
+
+  it("defers other terminal calls when one hosted call fails technically", () => {
+    const fixture = fixtureRuntime();
+    const good = runtimeCall({
+      callId: OperationCallIdSchema.parse("operation-call:good"),
+      duration: { kind: "fixed", totalTicks: 1 },
+    });
+    const bad = runtimeCall({
+      callId: OperationCallIdSchema.parse("operation-call:bad"),
+      duration: { kind: "fixed", totalTicks: 1 },
+      state: { ticks: -1 },
+    });
+
+    const result = advanceHostedOperationBatch(runningWorld(), fixture.registry, [
+      { agentId, operation: bad },
+      { agentId, operation: good },
+    ]);
+
+    expect(result.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          callId: good.callId,
+          result: expect.objectContaining({
+            kind: "technical_failure",
+            failure: expect.objectContaining({
+              code: "operation_batch_deferred_by_technical_failure",
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(result.world.pendingOperationTerminations?.has(good.callId)).toBe(true);
+    expect(
+      result.events.filter(
+        (event) => event.type === "operation_result" && event.callId === good.callId,
+      ),
+    ).toHaveLength(0);
   });
 
   it("does not run start twice when an already-started call is at its completion boundary", () => {

@@ -13,7 +13,6 @@ import type { EffectProposal } from "@god-sim/plugin-sdk";
 import {
   advanceHostedOperationBatch,
   applyHostedOperationBatchResult,
-  type HostedOperationTerminationRetryStore,
   advanceOperations,
   markInteractionCompleted,
   markInteractionStarted,
@@ -857,7 +856,6 @@ function hostedOperationsAtTickStart(
 export function runTickPipeline(
   worldInput: WorldState,
   registry: SimulationRegistry,
-  hostedTerminationRetries?: HostedOperationTerminationRetryStore,
 ): TickPipelineResult {
   if (worldInput.mode !== "RUNNING") {
     return { world: worldInput, events: [], decisionNeeds: [] };
@@ -891,7 +889,6 @@ export function runTickPipeline(
       world,
       registry,
       hostedOperations,
-      hostedTerminationRetries,
     );
     const appliedHostedWorld = applyHostedOperationBatchResult(hosted);
     for (const entry of hosted.results) {
