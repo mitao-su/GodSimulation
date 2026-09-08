@@ -84,6 +84,21 @@ export interface OperationRuntimeCall {
   readonly state: JsonObject;
 }
 
+/**
+ * 运行时 active-call 表在旧快照格式切换期间仍由 legacy ActiveOperation
+ * 承载。这个结构判别只识别 W1-IF 调用，不读取宿主或 operation 的业务规则。
+ */
+export function isOperationRuntimeCall(value: unknown): value is OperationRuntimeCall {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    "host" in candidate &&
+    "hostDefinition" in candidate &&
+    "firstStepState" in candidate &&
+    !("plan" in candidate)
+  );
+}
+
 export interface HostedOperationRuntime {
   readonly id: OperationId;
   readonly displayName: string;

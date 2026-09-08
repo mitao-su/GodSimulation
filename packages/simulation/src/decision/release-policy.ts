@@ -1,26 +1,36 @@
 import {
   OperationCallIdSchema,
+  JsonObjectSchema,
   resolveTaskDecision,
   type AgentId,
   type DomainEvent,
-  type JsonObject,
   type ResolvedTaskSelection,
   type TaskTrack,
 } from "@god-sim/protocol";
 
 import {
   operationInteractionLifecycleProposal,
-  recordOperationTermination,
 } from "../execution/operation-lifecycle";
+import { cancelOperationLifecycle } from "../execution/operation-lifecycle-runner";
+import {
+  commitOperationTerminations,
+  type OperationTerminationBatchRequest,
+} from "../execution/operation-termination";
+import {
+  OperationTechnicalFailureError,
+  operationTechnicalFailure,
+} from "../execution/operation-failure-classifier";
 import { prepareOperationCall } from "../execution/operation-planner";
 import {
   createOperationRuntimeContext,
+  isOperationRuntimeCall,
+  type HostedOperationRegistry,
+  type HostedOperationRuntimeRegistry,
   type OperationRuntimeRegistry,
 } from "../execution/operation-runtime";
 import type { ActiveOperation } from "../execution/operation";
 import type { TaskTrackState, TaskTracks } from "../execution/task-tracks";
 import { appendDomainEvent } from "../engine/event-writer";
-import { commitProposal } from "../interaction/effect-committer";
 import type {
   AgentState,
   DecisionCycleState,
@@ -43,8 +53,8 @@ interface AgentDecisionPlan {
 
 interface CancellationLifecycle {
   readonly agentId: AgentId;
-  readonly operation: ActiveOperation;
-  readonly result: JsonObject | null;
+  readonly callId: ActiveOperation["callId"];
+  readonly request: OperationTerminationBatchRequest;
 }
 
 export function allDecisionResultsAccepted(cycle: DecisionCycleState): boolean {
@@ -130,6 +140,7 @@ function applyAgentDecisionPlan(
   world: WorldState,
   registry: OperationRuntimeRegistry,
   plan: AgentDecisionPlan,
+  pendingOperationResults: AgentState["pendingOperationResults"] = [],
 ): AgentState {
   const cycle = world.decisionCycle;
   if (!cycle) throw new Error("No decision cycle is active");
@@ -198,7 +209,7 @@ function applyAgentDecisionPlan(
     ...agent,
     taskTracks: taskTracks as TaskTracks,
     activeOperations,
-    pendingOperationResults: [],
+    pendingOperationResults,
   };
   assertCurrentCallsMatchTracks(next);
   return next;
@@ -225,15 +236,95 @@ function acknowledgeFuseResults(
           `Pending result ${receipt.callId} does not match an active operation`,
         );
       }
-      const runtime = registry.getOperation(operation.operationId);
-      if (!runtime) {
-        throw new Error(`Operation ${operation.operationId} is not registered`);
+      let acknowledged: ActiveOperation;
+      if (isOperationRuntimeCall(operation)) {
+        const hostedRegistry = registry as OperationRuntimeRegistry &
+          Partial<HostedOperationRegistry>;
+        if (!hostedRegistry.getHostedOperation) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_registry_unavailable",
+              `Hosted operation ${operation.operationId} cannot acknowledge a fuse receipt without a hosted registry.`,
+              false,
+            ),
+          );
+        }
+        let runtime;
+        try {
+          runtime = hostedRegistry.getHostedOperation(
+            operation.operationId,
+            operation.hostDefinition,
+          );
+        } catch (error) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_runtime_lookup_exception",
+              `Hosted operation runtime lookup threw: ${error instanceof Error ? error.message : String(error)}`,
+              false,
+            ),
+          );
+        }
+        if (!runtime) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_runtime_missing",
+              `No hosted runtime is registered for ${operation.operationId}.`,
+              false,
+            ),
+          );
+        }
+        let nextState: unknown;
+        try {
+          nextState = runtime.acknowledgeFuseResult(
+            createOperationRuntimeContext(world, registry, agentId),
+            operation,
+            receipt.result,
+          );
+        } catch (error) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "plugin",
+              "fuse_acknowledge_exception",
+              `Hosted fuse acknowledgement threw: ${error instanceof Error ? error.message : String(error)}`,
+              true,
+            ),
+          );
+        }
+        let parsedState;
+        try {
+          const parsed = runtime.stateSchema.safeParse(nextState);
+          const normalized = parsed.success
+            ? JsonObjectSchema.safeParse(parsed.data)
+            : undefined;
+          if (!parsed.success || !normalized?.success) {
+            throw new Error("Hosted fuse acknowledgement returned invalid state");
+          }
+          parsedState = normalized.data;
+        } catch (error) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "plugin",
+              "fuse_acknowledge_state_invalid",
+              `Hosted fuse acknowledgement returned invalid state: ${error instanceof Error ? error.message : String(error)}`,
+              false,
+            ),
+          );
+        }
+        acknowledged = { ...operation, state: parsedState };
+      } else {
+        const runtime = registry.getOperation(operation.operationId);
+        if (!runtime) {
+          throw new Error(`Operation ${operation.operationId} is not registered`);
+        }
+        acknowledged = runtime.acknowledgeFuseResult(
+          createOperationRuntimeContext(world, registry, agentId),
+          operation,
+          receipt,
+        );
       }
-      const acknowledged = runtime.acknowledgeFuseResult(
-        createOperationRuntimeContext(world, registry, agentId),
-        operation,
-        receipt,
-      );
       currentAgent = {
         ...currentAgent,
         activeOperations: new Map(currentAgent.activeOperations).set(
@@ -282,18 +373,64 @@ export function releaseDecisionCycle(
     plans.push(analyzeTaskDecision(world, agentId, request));
   }
 
+  const acknowledgedWorld = acknowledgeFuseResults(
+    world,
+    registry,
+    plans.map((plan) => plan.agentId),
+  );
   const cancellationLifecycles: CancellationLifecycle[] = [];
-  const cancellationEffects = plans.flatMap((plan) => {
-    const agent = world.agents.get(plan.agentId)!;
-    return [...plan.removedCallIds]
+  plans.forEach((plan) => {
+    const agent = acknowledgedWorld.agents.get(plan.agentId)!;
+    [...plan.removedCallIds]
       .sort((left, right) => left.localeCompare(right))
-      .flatMap((callId) => {
+      .forEach((callId) => {
         const operation = agent.activeOperations.get(callId);
         if (!operation) {
           throw new Error(`Cannot cancel missing operation ${callId}`);
         }
+        if (isOperationRuntimeCall(operation)) {
+          const hostedRegistry = registry as OperationRuntimeRegistry &
+            Partial<HostedOperationRegistry>;
+          if (!hostedRegistry.getHostedOperation) {
+            throw new OperationTechnicalFailureError(
+              operationTechnicalFailure(
+                "configuration",
+                "hosted_operation_registry_unavailable",
+                `Hosted operation ${operation.operationId} cannot be cancelled without a hosted registry.`,
+                false,
+              ),
+            );
+          }
+          const lifecycle = cancelOperationLifecycle(
+            {
+              world: acknowledgedWorld,
+              registry: registry as HostedOperationRuntimeRegistry,
+              agentId: agent.id,
+              operation,
+            },
+            "task_replaced",
+          );
+          if (lifecycle.kind === "technical_failure") {
+            throw new OperationTechnicalFailureError(lifecycle.failure, {
+              world: acknowledgedWorld,
+              events: [],
+            });
+          }
+          cancellationLifecycles.push({
+            agentId: agent.id,
+            callId: operation.callId,
+            request: {
+              kind: "hosted",
+              request: {
+                transaction: lifecycle.transaction,
+                operation: lifecycle.operation,
+              },
+            },
+          });
+          return;
+        }
         const lifecycle = operationInteractionLifecycleProposal(
-          world,
+          acknowledgedWorld,
           registry,
           agent.id,
           operation,
@@ -301,37 +438,58 @@ export function releaseDecisionCycle(
         );
         cancellationLifecycles.push({
           agentId: agent.id,
-          operation,
-          result: lifecycle.result,
+          callId: operation.callId,
+          request: {
+            kind: "active",
+            request: {
+              agentId: agent.id,
+              operation,
+              outcome: "cancelled",
+              source: "task_replaced",
+              proposal: { effects: lifecycle.effects },
+              ...(lifecycle.result === null ? {} : { resultOverride: lifecycle.result }),
+            },
+          },
         });
-        return lifecycle.effects;
       });
   });
-  const cancellation = commitProposal(
-    world,
-    registry,
-    { effects: cancellationEffects },
+  const cancellation = commitOperationTerminations(
+    acknowledgedWorld,
+    registry as HostedOperationRuntimeRegistry,
+    cancellationLifecycles.map((lifecycle) => lifecycle.request),
     {
       causationId: `release:${cycle.id}`,
       correlationId: cycle.id,
     },
   );
-  if (!cancellation.accepted) {
-    throw new Error(
-      `Operation cancellation failed: ${cancellation.reason.code}: ${cancellation.reason.message}`,
-    );
+  if (cancellation.kind === "technical_failure") {
+    throw new OperationTechnicalFailureError(cancellation.failure, {
+      world: acknowledgedWorld,
+      events: [],
+    });
   }
 
-  const candidateWorld = acknowledgeFuseResults(
-    cancellation.world,
-    registry,
-    plans.map((plan) => plan.agentId),
-  );
+  const candidateWorld = cancellation.world;
   const preparedAgents = new Map<AgentId, AgentState>();
   for (const plan of plans) {
+    const cancelledCallIds = new Set(
+      cancellationLifecycles
+        .filter((lifecycle) => lifecycle.agentId === plan.agentId)
+        .map((lifecycle) => lifecycle.callId),
+    );
+    const terminalCancellationResults = candidateWorld
+      .agents.get(plan.agentId)!
+      .pendingOperationResults.filter(
+        (result) => result.terminal && cancelledCallIds.has(result.callId),
+      );
     preparedAgents.set(
       plan.agentId,
-      applyAgentDecisionPlan(candidateWorld, registry, plan),
+      applyAgentDecisionPlan(
+        candidateWorld,
+        registry,
+        plan,
+        terminalCancellationResults,
+      ),
     );
   }
 
@@ -349,35 +507,6 @@ export function releaseDecisionCycle(
     causationId: `release:${cycle.id}`,
     correlationId: cycle.id,
   };
-
-  for (const plan of [...plans].sort((left, right) =>
-    left.agentId.localeCompare(right.agentId),
-  )) {
-    const previousAgent = candidateWorld.agents.get(plan.agentId)!;
-    for (const callId of [...plan.removedCallIds].sort((left, right) =>
-      left.localeCompare(right),
-    )) {
-      const operation = previousAgent.activeOperations.get(callId);
-      if (!operation) throw new Error(`Cannot terminate missing operation ${callId}`);
-      const lifecycle = cancellationLifecycles.find(
-        (candidate) =>
-          candidate.agentId === plan.agentId &&
-          candidate.operation.callId === callId,
-      );
-      const written = recordOperationTermination(
-        releasedWorld,
-        registry,
-        plan.agentId,
-        operation,
-        "cancelled",
-        "task_replaced",
-        lifecycleMetadata,
-        lifecycle?.result ?? undefined,
-      );
-      releasedWorld = written.world;
-      events.push(...written.events);
-    }
-  }
 
   for (const plan of [...plans].sort((left, right) =>
     left.agentId.localeCompare(right.agentId),

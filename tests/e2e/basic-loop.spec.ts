@@ -28,7 +28,9 @@ test("runs the semantic move and interaction loop", async ({ page }, testInfo) =
   await expect(page.getByRole("button", { name: "放行世界" })).toBeEnabled();
   await page.getByRole("button", { name: "放行世界" }).click();
 
-  await expect(page.getByText("Move to Refrigerator completed", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Move to Refrigerator completed", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("决策等待放行", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "放行世界" }).click();
   await expect(page.getByText("Use refrigerator", { exact: true }).first()).toBeVisible();

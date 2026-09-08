@@ -7,6 +7,7 @@ import {
   type WorkerToHostMessage,
 } from "@god-sim/protocol";
 import type { GamePlugin } from "@god-sim/plugin-sdk";
+import { OperationTechnicalFailureError } from "@god-sim/simulation";
 
 import { WorldSession } from "../runtime/world-session";
 
@@ -103,12 +104,17 @@ export class WorkerMessageHandler {
 
   #emitFailure(error: unknown, category: "protocol" | "worker"): void {
     this.#failureSequence += 1;
+    const operationFailure =
+      error instanceof OperationTechnicalFailureError
+        ? error.failure
+        : undefined;
     const message = error instanceof Error ? error.message : String(error);
     const failure = TechnicalFailureSchema.parse({
-      id: `failure:${category}:${this.#failureSequence}`,
-      category,
+      id: `failure:${operationFailure?.category ?? category}:${this.#failureSequence}`,
+      category: operationFailure?.category ?? category,
+      ...(operationFailure?.code === undefined ? {} : { code: operationFailure.code }),
       message: message.slice(0, 2_000),
-      retryable: false,
+      retryable: operationFailure?.retryable ?? false,
       occurredAtRealTime: this.#now(),
     });
     this.#session?.block(failure);

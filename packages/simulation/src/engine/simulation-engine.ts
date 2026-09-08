@@ -29,6 +29,7 @@ import {
 } from "../decision/decision-gate";
 import { buildTaskOptions } from "../execution/operation-catalog";
 import { recordFuseResults } from "../execution/operation-lifecycle";
+import { retryPendingHostedOperationTerminations } from "../execution/action-runner";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
 import {
   loadWorldDefinition,
@@ -53,6 +54,7 @@ import {
   type DecisionNeed,
 } from "./tick-pipeline";
 import { projectWorldView } from "./view-projector";
+import { OperationTechnicalFailureError } from "../execution/operation-failure-classifier";
 
 export interface SimulationOptions {
   readonly worldDefinition: unknown;
@@ -277,6 +279,28 @@ class DeterministicSimulationEngine implements SimulationEngine {
   }
 
   tick(): WorldView {
+    try {
+      return this.#tickInternal();
+    } catch (error) {
+      if (!(error instanceof OperationTechnicalFailureError)) throw error;
+      if (error.committed) {
+        this.#world = error.committed.world;
+        this.#recordEvents(error.committed.events);
+      }
+      const recorded = this.reportTechnicalFailure({
+        id: `failure:operation:${this.#world.lastEventSequence + 1}`,
+        category: error.failure.category,
+        code: error.failure.code,
+        message: error.failure.message,
+        retryable: error.failure.retryable,
+        occurredAtRealTime: new Date().toISOString(),
+      });
+      if (!recorded.accepted) throw new Error(recorded.reason);
+      return this.getView();
+    }
+  }
+
+  #tickInternal(): WorldView {
     if (this.#stopped) return this.getView();
     const before = this.#world;
     const wasRunning = before.mode === "RUNNING";
@@ -499,16 +523,39 @@ class DeterministicSimulationEngine implements SimulationEngine {
           if (!failure.retryable) {
             throw new Error(`Technical failure ${command.failureId} is not retryable`);
           }
-          if (!this.#world.suspendedMode) {
+          const suspendedMode = this.#world.suspendedMode;
+          if (!suspendedMode) {
             throw new Error(`Technical failure ${command.failureId} has no suspended mode`);
           }
+          const retried = retryPendingHostedOperationTerminations(
+            this.#world,
+            this.#registry,
+          );
+          if (retried.kind === "technical_failure") {
+            throw new OperationTechnicalFailureError(retried.failure);
+          }
+          this.#world = retried.world;
+          this.#recordEvents(retried.events);
           const recovered = {
             ...this.#world,
             version: this.#world.version + 1,
-            mode: this.#world.suspendedMode,
+            mode: suspendedMode,
             suspendedMode: null,
             technicalFailure: null,
           };
+          this.#world = recovered;
+          if (retried.agentIds.length > 0) {
+            this.#requestDecisionCycle(
+              retried.agentIds.map((agentId) => ({
+                agentId,
+                reason: {
+                  code: "operation_terminated",
+                  summary: "Hosted operation terminated after retry",
+                },
+              })),
+            );
+            break;
+          }
           const cycleId = recovered.decisionCycle?.id;
           const released = applyReleasePolicy(recovered, this.#registry);
           if (

@@ -9,6 +9,8 @@ export * from "./execution/operation-catalog";
 export * from "./execution/operation-planner";
 export * from "./execution/operation-registry";
 export * from "./execution/operation-runtime";
+export * from "./execution/operation-termination";
+export * from "./execution/operation-failure-classifier";
 export * from "./execution/operation-snapshot-contract";
 export * from "./execution/object-interaction-adapter";
 export * from "./execution/core/move-operation";

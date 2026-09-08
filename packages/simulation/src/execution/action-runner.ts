@@ -27,16 +27,27 @@ import type {
   OperationRuntimeCall,
   OperationTerminationTransaction,
 } from "./operation-runtime";
+import { isOperationRuntimeCall } from "./operation-runtime";
+import {
+  commitHostedOperationTerminations,
+} from "./operation-termination";
 import { operationCallIdsInTrackOrder } from "./task-tracks";
 import {
   arbitrateInteractionBatch,
   type InteractionIntent,
 } from "../interaction/effect-arbiter";
 import { commitProposal } from "../interaction/effect-committer";
+import {
+  clearActiveOperation,
+  type ActiveOperationCleanupResult,
+} from "./operation-state";
 import { appendDomainEvent } from "../engine/event-writer";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { SpatialIndex } from "../world/spatial-index";
-import type { AgentState, WorldState } from "../world/world-state";
+import type {
+  AgentState,
+  WorldState,
+} from "../world/world-state";
 
 export interface ActionInteractionIntent extends InteractionIntent {
   readonly callId: OperationCallId;
@@ -60,6 +71,7 @@ export interface OperationFailure {
   readonly entityId?: EntityId;
   readonly purpose?: OperationInteractionPurpose;
   readonly summary: string;
+  readonly details?: JsonObject;
 }
 
 export interface AgentOperationFailure {
@@ -199,6 +211,10 @@ export function advanceOperations(
       if (!operation) {
         throw new Error(`Task track references missing operation ${callId}`);
       }
+      // W1-IF hosted calls are advanced by the hosted batch below the
+      // legacy action runner. They share the active-call table but do not
+      // have a legacy action plan to interpret here.
+      if (isOperationRuntimeCall(operation)) continue;
       const action = operation.plan.actions[operation.plan.currentActionIndex];
       if (!action) {
         agent = clearOperation(agent, callId);
@@ -387,17 +403,15 @@ export function terminateOperation(
   agentId: AgentId,
   callId: OperationCallId,
 ): WorldState {
-  const agent = world.agents.get(agentId);
-  if (!agent?.activeOperations.has(callId)) {
-    throw new Error(`Operation ${callId} is not active for ${agentId}`);
+  const result: ActiveOperationCleanupResult = clearActiveOperation(
+    world,
+    agentId,
+    callId,
+  );
+  if (result.kind === "technical_failure") {
+    throw new Error(result.failure.message);
   }
-  return {
-    ...world,
-    agents: new Map(world.agents).set(
-      agentId,
-      clearOperation(agent, callId),
-    ),
-  };
+  return result.world;
 }
 
 export function replaceActiveOperation(
@@ -666,6 +680,108 @@ export interface HostedOperationBatchResult {
   }[];
 }
 
+export type HostedTerminationRetryResult =
+  | {
+      readonly kind: "committed";
+      readonly world: WorldState;
+      readonly events: readonly DomainEvent[];
+      readonly agentIds: readonly AgentId[];
+    }
+  | {
+      readonly kind: "technical_failure";
+      readonly failure: OperationTechnicalFailure;
+    };
+
+/** 在恢复命令处理阶段直接提交冻结终止事务，不推进模拟时钟。 */
+export function retryPendingHostedOperationTerminations(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+): HostedTerminationRetryResult {
+  const pending = [...(world.pendingOperationTerminations?.entries() ?? [])].sort(
+    ([left], [right]) =>
+      left.localeCompare(right),
+  );
+  if (pending.length === 0) {
+    return { kind: "committed", world, events: [], agentIds: [] };
+  }
+  let retryWorld = world;
+  const retryEvents: DomainEvent[] = [];
+  const ready: Array<{ operation: OperationRuntimeCall; transaction: OperationTerminationTransaction }> = [];
+  const readyAgents: AgentId[] = [];
+  for (const [, value] of pending) {
+    if (value.kind === "complete_pending") {
+      const resumed = resumeHostedOperationTermination(
+        retryWorld,
+        registry,
+        value.agentId,
+        {
+          outcome: "completed",
+          source: value.source,
+          operation: value.operation,
+          ...(value.preTerminationProposal === undefined ? {} : { preTerminationProposal: value.preTerminationProposal }),
+        },
+      );
+      if (resumed.kind === "termination_pending") {
+        return { kind: "technical_failure", failure: resumed.failure };
+      }
+      if (resumed.kind !== "termination_ready") {
+        return {
+          kind: "technical_failure",
+          failure: operationTechnicalFailure("protocol", "operation_termination_retry_incomplete", "Pending completion did not produce a termination transaction.", true),
+        };
+      }
+      retryWorld = resumed.world;
+      retryEvents.push(...resumed.events);
+      ready.push({ operation: resumed.operation, transaction: resumed.transaction });
+      readyAgents.push(value.agentId);
+    } else {
+      ready.push({ operation: value.operation, transaction: value.transaction });
+      readyAgents.push(value.agentId);
+    }
+  }
+  const committed = commitHostedOperationTerminations(retryWorld, registry, ready);
+  if (committed.kind === "technical_failure") return committed;
+  return {
+    kind: "committed",
+    world: {
+      ...committed.world,
+      pendingOperationTerminations: new Map(),
+    },
+    events: [...retryEvents, ...committed.events],
+    agentIds: [...new Set(readyAgents)].sort((left, right) => left.localeCompare(right)),
+  };
+}
+
+/**
+ * 将 hosted runner 的非终态调用状态写回唯一 active-call 表。
+ * 终态调用已由批量终止事务清理；技术失败则保留当前调用，交由引擎
+ * 抛出结构化失败并冻结世界。这里不创建第二个 hosted 状态容器。
+ */
+export function applyHostedOperationBatchResult(
+  batch: HostedOperationBatchResult,
+): WorldState {
+  const agents = new Map(batch.world.agents);
+  for (const entry of batch.results) {
+    if (
+      entry.result.kind !== "running" &&
+      entry.result.kind !== "termination_pending" &&
+      entry.result.kind !== "technical_failure"
+    ) {
+      continue;
+    }
+    const agent = agents.get(entry.agentId);
+    if (!agent || !agent.activeOperations.has(entry.callId)) continue;
+    agents.set(entry.agentId, {
+      ...agent,
+      activeOperations: new Map(agent.activeOperations).set(
+        entry.callId,
+        entry.result.operation as unknown as ActiveOperation,
+      ),
+    });
+  }
+  return { ...batch.world, agents };
+}
+
 function transitionIntent(
   entry: HostedOperationBatchEntry,
   proposal: OperationLifecycleTransitionResult["proposal"],
@@ -721,10 +837,64 @@ export function advanceHostedOperationBatch(
       left.agentId.localeCompare(right.agentId) ||
       left.operation.callId.localeCompare(right.operation.callId),
   );
-  const results = ordered.map((entry) => ({
-    entry,
-    result: advanceHostedOperation(world, registry, entry.agentId, entry.operation),
-  }));
+  const results = ordered.map((entry) => {
+    const pending = world.pendingOperationTerminations?.get(entry.operation.callId);
+    if (pending) {
+      if (
+        pending.operation.operationId !== entry.operation.operationId ||
+        pending.operation.host.kind !== entry.operation.host.kind ||
+        pending.operation.host.hostEntityId !== entry.operation.host.hostEntityId ||
+        pending.operation.hostDefinition.kind !== entry.operation.hostDefinition.kind ||
+        pending.operation.hostDefinition.hostDefinitionId !== entry.operation.hostDefinition.hostDefinitionId
+      ) {
+        return {
+          entry,
+          result: hostedTechnicalFailure(
+            world,
+            entry.operation,
+            operationTechnicalFailure(
+              "protocol",
+              "operation_termination_retry_call_mismatch",
+              `Pending termination for ${entry.operation.callId} does not match its active hosted call.`,
+              false,
+            ),
+          ),
+        };
+      }
+      if (pending.kind === "complete_pending") {
+        return {
+          entry,
+          result: {
+            kind: "termination_pending" as const,
+            world,
+            operation: pending.operation,
+            events: [],
+            pending: {
+              outcome: "completed" as const,
+              source: pending.source,
+              operation: pending.operation,
+              ...(pending.preTerminationProposal === undefined ? {} : { preTerminationProposal: pending.preTerminationProposal }),
+            },
+            failure: operationTechnicalFailure("plugin", "operation_completion_pending", "Operation completion is awaiting technical retry.", true),
+          },
+        };
+      }
+      return {
+        entry,
+        result: {
+          kind: "termination_ready" as const,
+          world,
+          operation: pending.operation,
+          events: [],
+          transaction: pending.transaction,
+        },
+      };
+    }
+    return {
+      entry,
+      result: advanceHostedOperation(world, registry, entry.agentId, entry.operation),
+    };
+  });
   const intents = results.flatMap(({ entry, result }) => {
     const proposal = proposalForResult(result);
     return proposal
@@ -939,6 +1109,122 @@ export function advanceHostedOperationBatch(
       events: [],
       transaction: failed.transaction,
     });
+  }
+
+  // Validate and commit every terminal proposal as one transaction. A failure
+  // therefore leaves every terminal call active and produces no partial
+  // cleanup/result effects for this batch.
+  const terminalEntries = ordered.flatMap((entry) => {
+    const prepared = processed.get(entry.operation.callId);
+    return prepared?.kind === "termination_ready"
+      ? [{ entry, prepared }]
+      : [];
+  });
+  const hasTechnicalFailure = ordered.some((entry) => {
+    const result = processed.get(entry.operation.callId);
+    return result?.kind === "technical_failure";
+  });
+  const completePendingEntries = ordered.flatMap((entry) => {
+    const prepared = processed.get(entry.operation.callId);
+    return prepared?.kind === "termination_pending"
+      ? [{ entry, prepared }]
+      : [];
+  });
+  const deferTerminations = hasTechnicalFailure || completePendingEntries.length > 0;
+  if (deferTerminations && (terminalEntries.length > 0 || completePendingEntries.length > 0)) {
+    for (const { entry, prepared } of terminalEntries) {
+      const pendingTerminations = new Map(
+        nextWorld.pendingOperationTerminations ?? [],
+      );
+      pendingTerminations.set(entry.operation.callId, {
+        agentId: entry.agentId,
+        operation: prepared.operation,
+        kind: "transaction_ready",
+        transaction: prepared.transaction,
+      });
+      nextWorld = {
+        ...nextWorld,
+        pendingOperationTerminations: pendingTerminations,
+      };
+      processed.set(
+        entry.operation.callId,
+        hostedTechnicalFailure(
+          nextWorld,
+          prepared.operation,
+          operationTechnicalFailure(
+            "protocol",
+            "operation_batch_deferred_by_technical_failure",
+            "Terminal operations were deferred because another operation in the batch failed technically.",
+            true,
+          ),
+        ),
+      );
+    }
+    for (const { entry, prepared } of completePendingEntries) {
+      const pendingTerminations = new Map(nextWorld.pendingOperationTerminations ?? []);
+      pendingTerminations.set(entry.operation.callId, {
+        agentId: entry.agentId,
+        operation: prepared.pending.operation,
+        kind: "complete_pending",
+        source: prepared.pending.source,
+        ...(prepared.pending.preTerminationProposal === undefined ? {} : { preTerminationProposal: prepared.pending.preTerminationProposal }),
+      });
+      nextWorld = { ...nextWorld, pendingOperationTerminations: pendingTerminations };
+    }
+  }
+  if (terminalEntries.length > 0 && !deferTerminations) {
+    const terminated = commitHostedOperationTerminations(
+      nextWorld,
+      registry,
+      terminalEntries.map(({ prepared }) => ({
+        transaction: prepared.transaction,
+        operation: prepared.operation,
+      })),
+    );
+    if (terminated.kind === "technical_failure") {
+      for (const { entry, prepared } of terminalEntries) {
+        const pendingTerminations = new Map(
+          nextWorld.pendingOperationTerminations ?? [],
+        );
+        pendingTerminations.set(entry.operation.callId, {
+          agentId: entry.agentId,
+          operation: prepared.operation,
+          kind: "transaction_ready",
+          transaction: prepared.transaction,
+        });
+        nextWorld = {
+          ...nextWorld,
+          pendingOperationTerminations: pendingTerminations,
+        };
+        processed.set(
+          entry.operation.callId,
+          hostedTechnicalFailure(
+            nextWorld,
+            prepared.operation,
+            terminated.failure,
+            prepared.events,
+          ),
+        );
+      }
+    } else {
+      nextWorld = terminated.world;
+      events.push(...terminated.events);
+      for (const { entry, prepared } of terminalEntries) {
+        const pendingTerminations = new Map(
+          nextWorld.pendingOperationTerminations ?? [],
+        );
+        pendingTerminations.delete(entry.operation.callId);
+        nextWorld = {
+          ...nextWorld,
+          pendingOperationTerminations: pendingTerminations,
+        };
+        processed.set(entry.operation.callId, {
+          ...prepared,
+          world: nextWorld,
+          events: [...prepared.events, ...terminated.events],
+        });
+      }
+    }
   }
   return {
     world: nextWorld,

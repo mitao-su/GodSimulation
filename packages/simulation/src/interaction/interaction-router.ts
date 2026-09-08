@@ -201,6 +201,7 @@ export type InteractionProposalResult =
       readonly accepted: false;
       readonly reasonCode: string;
       readonly summary: string;
+      readonly details?: JsonObject;
     };
 
 function manhattan(a: Coordinate, b: Coordinate): number {
@@ -231,8 +232,11 @@ export function proposeInteraction(
   ) {
     return {
       accepted: false,
-      reasonCode: "not_at_interaction_position",
+      reasonCode: "out_of_range",
       summary: `${request.agentId} is not at an interaction position for ${request.entityId}`,
+      details: {
+        summary: `${request.agentId} is not at an interaction position for ${request.entityId}`,
+      },
     };
   }
 
@@ -244,6 +248,9 @@ export function proposeInteraction(
       accepted: false,
       reasonCode: "unknown_interaction",
       summary: `Unknown interaction ${request.interactionId} on ${request.entityId}`,
+      details: {
+        summary: `Unknown interaction ${request.interactionId} on ${request.entityId}`,
+      },
     };
   }
 

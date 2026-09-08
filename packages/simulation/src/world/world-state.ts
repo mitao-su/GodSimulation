@@ -19,6 +19,11 @@ import type {
 
 import type { MapDefinition } from "../map/map-definition";
 import type { ActiveOperation } from "../execution/operation";
+import type {
+  OperationRuntimeCall,
+  OperationTerminationTransaction,
+} from "../execution/operation-runtime";
+import type { OperationLifecycleTransitionResult } from "../execution/operation-lifecycle-runner";
 import type { TaskTracks } from "../execution/task-tracks";
 import type { AgentKnowledge, ImmediateMemory } from "../perception/agent-knowledge";
 
@@ -64,6 +69,35 @@ export interface DecisionRequestState {
   readonly failure: TechnicalFailure | null;
 }
 
+/**
+ * 已运行到终态、但终止提交尚未成功的 hosted call。它属于世界运行时
+ * 事实，不能藏在引擎私有缓存；P3 再把该字段接入线上快照格式。
+ */
+interface PendingOperationTerminationBase {
+  readonly agentId: AgentId;
+  readonly operation: OperationRuntimeCall;
+}
+
+export interface PendingOperationTerminationCompletePending
+  extends PendingOperationTerminationBase {
+  readonly kind: "complete_pending";
+  readonly source: "duration_elapsed" | "operation_signalled_completion";
+  readonly preTerminationProposal?: {
+    readonly proposal: OperationLifecycleTransitionResult["proposal"];
+    readonly phase: "start" | "tick";
+  };
+}
+
+export interface PendingOperationTerminationTransactionReady
+  extends PendingOperationTerminationBase {
+  readonly kind: "transaction_ready";
+  readonly transaction: OperationTerminationTransaction;
+}
+
+export type PendingOperationTermination =
+  | PendingOperationTerminationCompletePending
+  | PendingOperationTerminationTransactionReady;
+
 export type WorldHistory =
   | { readonly mode: "strict"; readonly causalFromSequence: 1 }
   | { readonly mode: "legacy"; readonly causalFromSequence: number };
@@ -78,6 +112,12 @@ export interface WorldState {
   readonly reviewRequired: boolean;
   readonly randomState: number;
   readonly lastEventSequence: number;
+  /**
+   * P2 进程内的不可消费终态调用账本。它尚未进入线上快照；P3 负责
+   * 持久化和恢复后的去重，因此恢复的旧快照可不带这个运行时字段。
+   */
+  readonly terminalOperationCallIds?: ReadonlySet<OperationCallId>;
+  readonly pendingOperationTerminations?: ReadonlyMap<OperationCallId, PendingOperationTermination>;
   readonly pluginLockHash: PluginLockHash;
   readonly simulationRulesLock: SimulationRulesLock;
   readonly history: WorldHistory;

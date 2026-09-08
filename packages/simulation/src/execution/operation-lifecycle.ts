@@ -3,6 +3,7 @@ import {
   type AgentId,
   type DomainEvent,
   type JsonObject,
+  type OperationDomainFailure,
   type OperationResultContext,
 } from "@god-sim/protocol";
 import type { EffectProposal } from "@god-sim/plugin-sdk";
@@ -10,8 +11,17 @@ import type { EffectProposal } from "@god-sim/plugin-sdk";
 import type { ActiveOperation, OperationObservation } from "./operation";
 import {
   createOperationRuntimeContext,
+  isOperationRuntimeCall,
+  type HostedOperationRegistry,
+  type HostedOperationRuntimeRegistry,
   type OperationRuntimeRegistry,
 } from "./operation-runtime";
+import { fuseOperationLifecycle } from "./operation-lifecycle-runner";
+import { commitActiveOperationTermination } from "./operation-termination";
+import {
+  OperationTechnicalFailureError,
+  operationTechnicalFailure,
+} from "./operation-failure-classifier";
 import { appendDomainEvent, type EventMetadata } from "../engine/event-writer";
 import { proposeInteraction } from "../interaction/interaction-router";
 import type { WorldState } from "../world/world-state";
@@ -123,51 +133,49 @@ export function recordOperationTermination(
   reasonCode: string,
   metadata: EventMetadata,
   resultOverride?: JsonObject,
+  proposal?: EffectProposal,
+  failure?: OperationDomainFailure,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
-  const runtime = registry.getOperation(operation.operationId);
-  if (!runtime) {
-    throw new Error(`Operation ${operation.operationId} is not registered`);
-  }
-  const context = createOperationRuntimeContext(worldInput, registry, agentId);
-  const candidate =
-    resultOverride === undefined
-      ? runtime.terminalResult(context, operation, outcome)
-      : resultOverride;
-  const result =
-    candidate === null
-      ? {}
-      : JsonObjectSchema.parse(runtime.resultSchema.parse(candidate));
-  const terminated = appendDomainEvent(
-    worldInput,
+  // 旧 action/release 管线在收集终止项时已从 activeOperations 移除调用。
+  // 先把调用放回局部候选世界，才能让清理与失败回滚都经过同一原子入口；
+  // 成功提交随后会再次由终止事务移除它。
+  const currentAgent = worldInput.agents.get(agentId);
+  const terminationWorld =
+    currentAgent && !currentAgent.activeOperations.has(operation.callId)
+      ? {
+          ...worldInput,
+          agents: new Map(worldInput.agents).set(agentId, {
+            ...currentAgent,
+            activeOperations: new Map(currentAgent.activeOperations).set(
+              operation.callId,
+              operation,
+            ),
+          }),
+        }
+      : worldInput;
+  const committed = commitActiveOperationTermination(
+    terminationWorld,
+    registry,
     {
-      type: "operation_terminated",
       agentId,
-      callId: operation.callId,
-      operationId: operation.operationId,
+      operation,
       outcome,
-      reasonCode,
+      source: reasonCode,
+      ...(failure === undefined ? {} : { failure }),
+      proposal: proposal ?? { effects: [] },
+      ...(resultOverride === undefined ? {} : { resultOverride }),
     },
     metadata,
   );
-  const receipt = appendResult(
-    terminated.world,
-    agentId,
-    operation,
-    true,
-    outcome,
-    reasonCode,
-    result,
-    metadata,
-  );
-  return {
-    world: receipt.world,
-    events: [terminated.event, receipt.event],
-  };
+  if (committed.kind === "technical_failure") {
+    throw new OperationTechnicalFailureError(committed.failure);
+  }
+  return committed;
 }
 
 export function recordFuseResults(
   worldInput: WorldState,
-  registry: OperationRuntimeRegistry,
+  registry: OperationRuntimeRegistry & Partial<HostedOperationRegistry>,
   agentIds: readonly AgentId[],
   metadata: EventMetadata,
 ): { readonly world: WorldState; readonly events: readonly DomainEvent[] } {
@@ -181,6 +189,41 @@ export function recordFuseResults(
     for (const operation of [...agent.activeOperations.values()].sort(
       (left, right) => left.callId.localeCompare(right.callId),
     )) {
+      if (isOperationRuntimeCall(operation)) {
+        if (!registry.getHostedOperation) {
+          throw new OperationTechnicalFailureError(
+            operationTechnicalFailure(
+              "configuration",
+              "hosted_operation_registry_unavailable",
+              `Hosted operation ${operation.operationId} cannot be fused without a hosted registry.`,
+              false,
+            ),
+          );
+        }
+        const fused = fuseOperationLifecycle({
+          world,
+          registry: registry as HostedOperationRuntimeRegistry,
+          agentId,
+          operation,
+        });
+        if (fused.kind === "technical_failure") {
+          throw new OperationTechnicalFailureError(fused.failure);
+        }
+        if (fused.kind === "no_result") continue;
+        const written = appendResult(
+          world,
+          agentId,
+          fused.operation as unknown as ActiveOperation,
+          false,
+          null,
+          "world_fused",
+          fused.result,
+          metadata,
+        );
+        world = written.world;
+        events.push(written.event);
+        continue;
+      }
       const runtime = registry.getOperation(operation.operationId);
       if (!runtime) {
         throw new Error(`Operation ${operation.operationId} is not registered`);

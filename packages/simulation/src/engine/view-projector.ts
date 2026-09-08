@@ -124,13 +124,20 @@ function taskView(
   if (!operation) {
     throw new Error(`${agent.id} ${track} references missing call ${state.callId}`);
   }
+  const operationView = operation as unknown as {
+    readonly callId: typeof operation.callId;
+    readonly operationId: typeof operation.operationId;
+    readonly label?: string;
+    readonly duration: typeof operation.duration;
+    readonly progressTicks: number;
+  };
   return {
     kind: "operation",
-    callId: operation.callId,
-    operationId: operation.operationId,
-    label: operation.label,
-    duration: operation.duration,
-    progressTicks: operation.progressTicks,
+    callId: operationView.callId,
+    operationId: operationView.operationId,
+    label: operationView.label ?? operationView.operationId,
+    duration: operationView.duration,
+    progressTicks: operationView.progressTicks,
   };
 }
 
@@ -164,7 +171,17 @@ function renderEntities(world: WorldState, registry: PluginRegistry): WorldView[
     const operation = activeCallId
       ? agent.activeOperations.get(activeCallId)
       : undefined;
-    const action = operation?.plan.actions[operation.plan.currentActionIndex];
+    const operationWithOptionalPlan = operation as unknown as {
+      readonly plan?: {
+        readonly actions: readonly { readonly kind: string }[];
+        readonly currentActionIndex: number;
+      };
+    } | undefined;
+    const action = operationWithOptionalPlan?.plan
+      ? operationWithOptionalPlan.plan.actions[
+          operationWithOptionalPlan.plan.currentActionIndex
+        ]
+      : undefined;
     return {
       entityId: EntityIdSchema.parse(agent.id),
       kind: "agent" as const,
