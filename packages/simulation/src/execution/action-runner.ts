@@ -697,20 +697,47 @@ export function retryPendingHostedOperationTerminations(
   world: WorldState,
   registry: HostedOperationRuntimeRegistry,
 ): HostedTerminationRetryResult {
-  const pending = [...(world.pendingOperationTerminations?.values() ?? [])].sort(
-    (left, right) => left.operation.callId.localeCompare(right.operation.callId),
+  const pending = [...(world.pendingOperationTerminations?.entries() ?? [])].sort(
+    ([left], [right]) =>
+      left.localeCompare(right),
   );
   if (pending.length === 0) {
     return { kind: "committed", world, events: [], agentIds: [] };
   }
-  const committed = commitHostedOperationTerminations(
-    world,
-    registry,
-    pending.map((value) => ({
-      operation: value.operation,
-      transaction: value.transaction,
-    })),
-  );
+  let retryWorld = world;
+  const ready: Array<{ operation: OperationRuntimeCall; transaction: OperationTerminationTransaction }> = [];
+  const readyAgents: AgentId[] = [];
+  for (const [, value] of pending) {
+    if (value.kind === "complete_pending") {
+      const resumed = resumeHostedOperationTermination(
+        retryWorld,
+        registry,
+        value.agentId,
+        {
+          outcome: "completed",
+          source: value.source,
+          operation: value.operation,
+          ...(value.preTerminationProposal === undefined ? {} : { preTerminationProposal: value.preTerminationProposal }),
+        },
+      );
+      if (resumed.kind === "termination_pending") {
+        return { kind: "technical_failure", failure: resumed.failure };
+      }
+      if (resumed.kind !== "termination_ready") {
+        return {
+          kind: "technical_failure",
+          failure: operationTechnicalFailure("protocol", "operation_termination_retry_incomplete", "Pending completion did not produce a termination transaction.", true),
+        };
+      }
+      retryWorld = resumed.world;
+      ready.push({ operation: resumed.operation, transaction: resumed.transaction });
+      readyAgents.push(value.agentId);
+    } else {
+      ready.push({ operation: value.operation, transaction: value.transaction });
+      readyAgents.push(value.agentId);
+    }
+  }
+  const committed = commitHostedOperationTerminations(retryWorld, registry, ready);
   if (committed.kind === "technical_failure") return committed;
   return {
     kind: "committed",
@@ -719,7 +746,7 @@ export function retryPendingHostedOperationTerminations(
       pendingOperationTerminations: new Map(),
     },
     events: committed.events,
-    agentIds: pending.map((value) => value.agentId),
+    agentIds: [...new Set(readyAgents)].sort((left, right) => left.localeCompare(right)),
   };
 }
 
@@ -830,6 +857,24 @@ export function advanceHostedOperationBatch(
               false,
             ),
           ),
+        };
+      }
+      if (pending.kind === "complete_pending") {
+        return {
+          entry,
+          result: {
+            kind: "termination_pending" as const,
+            world,
+            operation: pending.operation,
+            events: [],
+            pending: {
+              outcome: "completed" as const,
+              source: pending.source,
+              operation: pending.operation,
+              ...(pending.preTerminationProposal === undefined ? {} : { preTerminationProposal: pending.preTerminationProposal }),
+            },
+            failure: operationTechnicalFailure("plugin", "operation_completion_pending", "Operation completion is awaiting technical retry.", true),
+          },
         };
       }
       return {
@@ -1077,7 +1122,14 @@ export function advanceHostedOperationBatch(
     const result = processed.get(entry.operation.callId);
     return result?.kind === "technical_failure";
   });
-  if (hasTechnicalFailure && terminalEntries.length > 0) {
+  const completePendingEntries = ordered.flatMap((entry) => {
+    const prepared = processed.get(entry.operation.callId);
+    return prepared?.kind === "termination_pending"
+      ? [{ entry, prepared }]
+      : [];
+  });
+  const deferTerminations = hasTechnicalFailure || completePendingEntries.length > 0;
+  if (deferTerminations && (terminalEntries.length > 0 || completePendingEntries.length > 0)) {
     for (const { entry, prepared } of terminalEntries) {
       const pendingTerminations = new Map(
         nextWorld.pendingOperationTerminations ?? [],
@@ -1085,6 +1137,7 @@ export function advanceHostedOperationBatch(
       pendingTerminations.set(entry.operation.callId, {
         agentId: entry.agentId,
         operation: prepared.operation,
+        kind: "transaction_ready",
         transaction: prepared.transaction,
       });
       nextWorld = {
@@ -1105,8 +1158,19 @@ export function advanceHostedOperationBatch(
         ),
       );
     }
+    for (const { entry, prepared } of completePendingEntries) {
+      const pendingTerminations = new Map(nextWorld.pendingOperationTerminations ?? []);
+      pendingTerminations.set(entry.operation.callId, {
+        agentId: entry.agentId,
+        operation: prepared.pending.operation,
+        kind: "complete_pending",
+        source: prepared.pending.source,
+        ...(prepared.pending.preTerminationProposal === undefined ? {} : { preTerminationProposal: prepared.pending.preTerminationProposal }),
+      });
+      nextWorld = { ...nextWorld, pendingOperationTerminations: pendingTerminations };
+    }
   }
-  if (terminalEntries.length > 0 && !hasTechnicalFailure) {
+  if (terminalEntries.length > 0 && !deferTerminations) {
     const terminated = commitHostedOperationTerminations(
       nextWorld,
       registry,
@@ -1123,6 +1187,7 @@ export function advanceHostedOperationBatch(
         pendingTerminations.set(entry.operation.callId, {
           agentId: entry.agentId,
           operation: prepared.operation,
+          kind: "transaction_ready",
           transaction: prepared.transaction,
         });
         nextWorld = {

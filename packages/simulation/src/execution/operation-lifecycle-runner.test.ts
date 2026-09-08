@@ -1493,17 +1493,17 @@ describe("hosted operation lifecycle runner", () => {
       kind: "domain_failure",
       code: "occupied",
     });
-    expect(result.results.filter(({ result: item }) => item.kind === "termination_ready")).toHaveLength(1);
-    expect(result.results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          result: expect.objectContaining({
-            kind: "termination_ready",
-            transaction: expect.objectContaining({ outcome: "failed", source: "arbitration_domain_failure" }),
-          }),
-        }),
-      ]),
-    );
+    expect(result.results.filter(({ result: item }) => item.kind === "termination_ready")).toHaveLength(0);
+    expect(result.world.pendingOperationTerminations?.size).toBe(2);
+    expect(result.results.every(({ result: item }) => item.kind !== "termination_ready")).toBe(true);
+    expect(result.world.pendingOperationTerminations?.get(OperationCallIdSchema.parse("operation-call:test:lifecycle"))).toMatchObject({
+      kind: "transaction_ready",
+      transaction: expect.objectContaining({ outcome: "failed", source: "arbitration_domain_failure" }),
+    });
+    expect(result.world.pendingOperationTerminations?.get(OperationCallIdSchema.parse("operation-call:bob"))).toMatchObject({
+      kind: "complete_pending",
+      source: "duration_elapsed",
+    });
   });
 
   it("keeps a completed tick pending when complete fails, then retries only complete", () => {

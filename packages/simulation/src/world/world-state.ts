@@ -23,6 +23,7 @@ import type {
   OperationRuntimeCall,
   OperationTerminationTransaction,
 } from "../execution/operation-runtime";
+import type { OperationLifecycleTransitionResult } from "../execution/operation-lifecycle-runner";
 import type { TaskTracks } from "../execution/task-tracks";
 import type { AgentKnowledge, ImmediateMemory } from "../perception/agent-knowledge";
 
@@ -72,11 +73,30 @@ export interface DecisionRequestState {
  * 已运行到终态、但终止提交尚未成功的 hosted call。它属于世界运行时
  * 事实，不能藏在引擎私有缓存；P3 再把该字段接入线上快照格式。
  */
-export interface PendingOperationTermination {
+interface PendingOperationTerminationBase {
   readonly agentId: AgentId;
   readonly operation: OperationRuntimeCall;
+}
+
+export interface PendingOperationTerminationCompletePending
+  extends PendingOperationTerminationBase {
+  readonly kind: "complete_pending";
+  readonly source: "duration_elapsed" | "operation_signalled_completion";
+  readonly preTerminationProposal?: {
+    readonly proposal: OperationLifecycleTransitionResult["proposal"];
+    readonly phase: "start" | "tick";
+  };
+}
+
+export interface PendingOperationTerminationTransactionReady
+  extends PendingOperationTerminationBase {
+  readonly kind: "transaction_ready";
   readonly transaction: OperationTerminationTransaction;
 }
+
+export type PendingOperationTermination =
+  | PendingOperationTerminationCompletePending
+  | PendingOperationTerminationTransactionReady;
 
 export type WorldHistory =
   | { readonly mode: "strict"; readonly causalFromSequence: 1 }
