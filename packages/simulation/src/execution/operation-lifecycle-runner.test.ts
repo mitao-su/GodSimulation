@@ -20,6 +20,7 @@ import {
 import {
   advanceHostedOperation,
   advanceHostedOperationBatch,
+  createHostedOperationTerminationRetryStore,
   resumeHostedOperationTermination,
 } from "./action-runner";
 import { commitProposal } from "../interaction/effect-committer";
@@ -334,7 +335,8 @@ describe("hosted operation lifecycle runner", () => {
     ).toHaveLength(1);
   });
 
-  it("preserves committed tick facts when terminal commit fails in the engine path", () => {
+  it("retries only the frozen termination after a terminal commit failure", () => {
+    let rejectNextTerminalEffect = false;
     const start = vi.fn(
       (context: OperationRuntimeContext): OperationStartResult => ({
         kind: "started",
@@ -351,24 +353,27 @@ describe("hosted operation lifecycle runner", () => {
         nextState: { ticks: 0 },
       }),
     );
-    const complete = vi.fn<HostedOperationRuntime["complete"]>(() => ({
-      effects: [
-        {
-          type: "release_occupancy",
-          entityId: fridgeId,
-          agentId,
-          expectedObjectVersion: 0,
-        },
-      ],
-      result: { status: "completed" },
-    }));
+    const complete = vi.fn<HostedOperationRuntime["complete"]>(() => {
+      rejectNextTerminalEffect = true;
+      return {
+        effects: [
+          {
+            type: "release_occupancy",
+            entityId: fridgeId,
+            agentId,
+            expectedObjectVersion: 1,
+          },
+        ],
+        result: { status: "completed" },
+      };
+    });
     const fixture = fixtureRuntime({
       duration: { kind: "fixed" },
       start,
       complete,
     });
     const operation = runtimeCall({
-      duration: { kind: "fixed", totalTicks: 1 },
+      duration: { kind: "fixed", totalTicks: 2 },
     });
     const base = runningWorld();
     const agent = base.agents.get(agentId)!;
@@ -386,9 +391,26 @@ describe("hosted operation lifecycle runner", () => {
       }),
     };
 
+    const getObject = fixture.registry.getObject.bind(fixture.registry);
+    const registry = {
+      ...fixture.registry,
+      getObject: (definitionId: Parameters<typeof fixture.registry.getObject>[0]) => {
+        if (rejectNextTerminalEffect && definitionId === "test.fridge") {
+          rejectNextTerminalEffect = false;
+          return undefined;
+        }
+        return getObject(definitionId);
+      },
+    };
+    const terminationRetries = createHostedOperationTerminationRetryStore();
+
+    const firstTick = runTickPipeline(world, registry, terminationRetries);
+    expect(fixture.calls.start).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.tick).not.toHaveBeenCalled();
+
     let thrown: unknown;
     try {
-      runTickPipeline(world, fixture.registry);
+      runTickPipeline(firstTick.world, registry, terminationRetries);
     } catch (error) {
       thrown = error;
     }
@@ -399,7 +421,7 @@ describe("hosted operation lifecycle runner", () => {
       code: "termination_effect_rejected",
       retryable: true,
     });
-    expect(failure.committed?.world.tick).toBe(world.tick + 1);
+    expect(failure.committed?.world.tick).toBe(firstTick.world.tick + 1);
     expect(failure.committed?.world.objects.get(fridgeId)).toMatchObject({
       version: 1,
       state: { holder: agentId },
@@ -408,13 +430,36 @@ describe("hosted operation lifecycle runner", () => {
       failure.committed?.world.agents.get(agentId)?.activeOperations.has(operation.callId),
     ).toBe(true);
     expect(
-      failure.committed?.events.some((event) => event.type === "object_state_changed"),
+      firstTick.events.some((event) => event.type === "object_state_changed"),
     ).toBe(true);
     expect(
       failure.committed?.events.some((event) => event.type === "operation_result"),
     ).toBe(false);
     expect(start).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.tick).toHaveBeenCalledTimes(1);
     expect(complete).toHaveBeenCalledTimes(1);
+
+    const retry = runTickPipeline(
+      failure.committed!.world,
+      registry,
+      terminationRetries,
+    );
+    const retryAgent = retry.world.agents.get(agentId)!;
+    expect(retryAgent.activeOperations.has(operation.callId)).toBe(false);
+    expect(retryAgent.taskTracks.BODY).toEqual({ kind: "empty" });
+    expect(fixture.calls.start).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.tick).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.complete).toHaveBeenCalledTimes(1);
+    expect(
+      retry.events.filter(
+        (event) => event.type === "operation_result" && event.callId === operation.callId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      retryAgent.pendingOperationResults.filter(
+        (result) => result.callId === operation.callId && result.terminal,
+      ),
+    ).toHaveLength(1);
   });
 
   it("does not run start twice when an already-started call is at its completion boundary", () => {

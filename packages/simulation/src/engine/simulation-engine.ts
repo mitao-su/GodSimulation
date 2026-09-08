@@ -29,6 +29,7 @@ import {
 } from "../decision/decision-gate";
 import { buildTaskOptions } from "../execution/operation-catalog";
 import { recordFuseResults } from "../execution/operation-lifecycle";
+import { createHostedOperationTerminationRetryStore } from "../execution/action-runner";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
 import {
   loadWorldDefinition,
@@ -158,6 +159,8 @@ function initialPerceptionMetadata(candidate: PerceptionCandidate) {
 class DeterministicSimulationEngine implements SimulationEngine {
   #world: WorldState;
   readonly #registry: SimulationRegistry;
+  /** P2 进程内终态提交重试；P3 再将其纳入快照恢复边界。 */
+  readonly #hostedTerminationRetries = createHostedOperationTerminationRetryStore();
   readonly #commandQueue: WorldCommand[] = [];
   readonly #decisionQueue = new Map<string, AdoptedDecision>();
   #eventOutbox: DomainEvent[] = [];
@@ -309,7 +312,11 @@ class DeterministicSimulationEngine implements SimulationEngine {
     this.#commitBufferedDecisions();
 
     if (wasRunning && this.#world.mode === "RUNNING" && !this.#stopped) {
-      const result = runTickPipeline(this.#world, this.#registry);
+      const result = runTickPipeline(
+        this.#world,
+        this.#registry,
+        this.#hostedTerminationRetries,
+      );
       this.#world = result.world;
       this.#recordEvents(result.events);
       if (result.decisionNeeds.length > 0) this.#requestDecisionCycle(result.decisionNeeds);

@@ -4,16 +4,18 @@ import {
   resolveTaskDecision,
   type AgentId,
   type DomainEvent,
-  type JsonObject,
   type ResolvedTaskSelection,
   type TaskTrack,
 } from "@god-sim/protocol";
-import type { EffectProposal } from "@god-sim/plugin-sdk";
 
 import {
   operationInteractionLifecycleProposal,
 } from "../execution/operation-lifecycle";
-import { commitActiveOperationTerminations } from "../execution/operation-termination";
+import { cancelOperationLifecycle } from "../execution/operation-lifecycle-runner";
+import {
+  commitOperationTerminations,
+  type OperationTerminationBatchRequest,
+} from "../execution/operation-termination";
 import {
   OperationTechnicalFailureError,
   operationTechnicalFailure,
@@ -23,6 +25,7 @@ import {
   createOperationRuntimeContext,
   isOperationRuntimeCall,
   type HostedOperationRegistry,
+  type HostedOperationRuntimeRegistry,
   type OperationRuntimeRegistry,
 } from "../execution/operation-runtime";
 import type { ActiveOperation } from "../execution/operation";
@@ -50,9 +53,8 @@ interface AgentDecisionPlan {
 
 interface CancellationLifecycle {
   readonly agentId: AgentId;
-  readonly operation: ActiveOperation;
-  readonly result: JsonObject | null;
-  readonly effects: EffectProposal["effects"];
+  readonly callId: ActiveOperation["callId"];
+  readonly request: OperationTerminationBatchRequest;
 }
 
 export function allDecisionResultsAccepted(cycle: DecisionCycleState): boolean {
@@ -386,6 +388,47 @@ export function releaseDecisionCycle(
         if (!operation) {
           throw new Error(`Cannot cancel missing operation ${callId}`);
         }
+        if (isOperationRuntimeCall(operation)) {
+          const hostedRegistry = registry as OperationRuntimeRegistry &
+            Partial<HostedOperationRegistry>;
+          if (!hostedRegistry.getHostedOperation) {
+            throw new OperationTechnicalFailureError(
+              operationTechnicalFailure(
+                "configuration",
+                "hosted_operation_registry_unavailable",
+                `Hosted operation ${operation.operationId} cannot be cancelled without a hosted registry.`,
+                false,
+              ),
+            );
+          }
+          const lifecycle = cancelOperationLifecycle(
+            {
+              world: acknowledgedWorld,
+              registry: registry as HostedOperationRuntimeRegistry,
+              agentId: agent.id,
+              operation,
+            },
+            "task_replaced",
+          );
+          if (lifecycle.kind === "technical_failure") {
+            throw new OperationTechnicalFailureError(lifecycle.failure, {
+              world: acknowledgedWorld,
+              events: [],
+            });
+          }
+          cancellationLifecycles.push({
+            agentId: agent.id,
+            callId: operation.callId,
+            request: {
+              kind: "hosted",
+              request: {
+                transaction: lifecycle.transaction,
+                operation: lifecycle.operation,
+              },
+            },
+          });
+          return;
+        }
         const lifecycle = operationInteractionLifecycleProposal(
           acknowledgedWorld,
           registry,
@@ -395,23 +438,25 @@ export function releaseDecisionCycle(
         );
         cancellationLifecycles.push({
           agentId: agent.id,
-          operation,
-          result: lifecycle.result,
-          effects: lifecycle.effects,
+          callId: operation.callId,
+          request: {
+            kind: "active",
+            request: {
+              agentId: agent.id,
+              operation,
+              outcome: "cancelled",
+              source: "task_replaced",
+              proposal: { effects: lifecycle.effects },
+              ...(lifecycle.result === null ? {} : { resultOverride: lifecycle.result }),
+            },
+          },
         });
       });
   });
-  const cancellation = commitActiveOperationTerminations(
+  const cancellation = commitOperationTerminations(
     acknowledgedWorld,
-    registry,
-    cancellationLifecycles.map((lifecycle) => ({
-      agentId: lifecycle.agentId,
-      operation: lifecycle.operation,
-      outcome: "cancelled" as const,
-      source: "task_replaced",
-      proposal: { effects: lifecycle.effects },
-      ...(lifecycle.result === null ? {} : { resultOverride: lifecycle.result }),
-    })),
+    registry as HostedOperationRuntimeRegistry,
+    cancellationLifecycles.map((lifecycle) => lifecycle.request),
     {
       causationId: `release:${cycle.id}`,
       correlationId: cycle.id,
@@ -430,7 +475,7 @@ export function releaseDecisionCycle(
     const cancelledCallIds = new Set(
       cancellationLifecycles
         .filter((lifecycle) => lifecycle.agentId === plan.agentId)
-        .map((lifecycle) => lifecycle.operation.callId),
+        .map((lifecycle) => lifecycle.callId),
     );
     const terminalCancellationResults = candidateWorld
       .agents.get(plan.agentId)!

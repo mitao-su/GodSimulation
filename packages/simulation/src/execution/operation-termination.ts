@@ -191,6 +191,16 @@ export interface HostedOperationTerminationRequest {
   readonly operation?: OperationRuntimeCall;
 }
 
+export type OperationTerminationBatchRequest =
+  | {
+      readonly kind: "active";
+      readonly request: ActiveOperationTerminationRequest;
+    }
+  | {
+      readonly kind: "hosted";
+      readonly request: HostedOperationTerminationRequest;
+    };
+
 function validateTerminalTransaction(
   registry: OperationRuntimeRegistry,
   transaction: OperationTerminationTransaction,
@@ -615,6 +625,32 @@ export function commitHostedOperationTerminations(
     );
     if (validated.kind === "technical_failure") return validated;
     prepared.push(validated.input);
+  }
+  return commitTerminalParts(worldInput, registry, prepared, metadata);
+}
+
+/**
+ * 将 legacy 与 hosted 调用的终态请求放进同一批原子提交。放行阶段可能
+ * 同时替换两种调用；拆成两个提交会在第二批失败时留下第一批的半终态。
+ */
+export function commitOperationTerminations(
+  worldInput: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  requests: readonly OperationTerminationBatchRequest[],
+  metadata?: EventMetadata,
+): OperationTerminationResult {
+  const prepared: TerminalCommitInput[] = [];
+  for (const request of requests) {
+    const result =
+      request.kind === "hosted"
+        ? prepareHostedOperationTerminationRequest(
+            worldInput,
+            registry,
+            request.request,
+          )
+        : prepareActiveTermination(worldInput, registry, request.request);
+    if (result.kind === "technical_failure") return result;
+    prepared.push(result.input);
   }
   return commitTerminalParts(worldInput, registry, prepared, metadata);
 }

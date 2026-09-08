@@ -667,6 +667,38 @@ export interface HostedOperationBatchEntry {
   readonly operation: OperationRuntimeCall;
 }
 
+/**
+ * P2 进程内终态重试记录。调用本身始终保留在 AgentState 的唯一
+ * activeOperations 表；这里仅冻结已成功运行、但尚未提交的终止事务。
+ * P3 负责把这类恢复边界写入快照格式。
+ */
+export interface PendingHostedOperationTermination {
+  readonly agentId: AgentId;
+  readonly operation: OperationRuntimeCall;
+  readonly transaction: OperationTerminationTransaction;
+}
+
+export interface HostedOperationTerminationRetryStore {
+  get(agentId: AgentId, callId: OperationCallId): PendingHostedOperationTermination | undefined;
+  set(value: PendingHostedOperationTermination): void;
+  delete(agentId: AgentId, callId: OperationCallId): void;
+}
+
+function hostedTerminationRetryKey(agentId: AgentId, callId: OperationCallId): string {
+  return `${agentId}\u0000${callId}`;
+}
+
+export function createHostedOperationTerminationRetryStore(): HostedOperationTerminationRetryStore {
+  const pending = new Map<string, PendingHostedOperationTermination>();
+  return {
+    get: (agentId, callId) => pending.get(hostedTerminationRetryKey(agentId, callId)),
+    set: (value) => {
+      pending.set(hostedTerminationRetryKey(value.agentId, value.operation.callId), value);
+    },
+    delete: (agentId, callId) => pending.delete(hostedTerminationRetryKey(agentId, callId)),
+  };
+}
+
 export interface HostedOperationBatchResult {
   readonly world: WorldState;
   readonly events: readonly DomainEvent[];
@@ -687,7 +719,11 @@ export function applyHostedOperationBatchResult(
 ): WorldState {
   const agents = new Map(batch.world.agents);
   for (const entry of batch.results) {
-    if (entry.result.kind !== "running" && entry.result.kind !== "termination_pending") {
+    if (
+      entry.result.kind !== "running" &&
+      entry.result.kind !== "termination_pending" &&
+      entry.result.kind !== "technical_failure"
+    ) {
       continue;
     }
     const agent = agents.get(entry.agentId);
@@ -752,16 +788,53 @@ export function advanceHostedOperationBatch(
   world: WorldState,
   registry: HostedOperationRuntimeRegistry,
   entries: readonly HostedOperationBatchEntry[],
+  terminationRetries?: HostedOperationTerminationRetryStore,
 ): HostedOperationBatchResult {
   const ordered = [...entries].sort(
     (left, right) =>
       left.agentId.localeCompare(right.agentId) ||
       left.operation.callId.localeCompare(right.operation.callId),
   );
-  const results = ordered.map((entry) => ({
-    entry,
-    result: advanceHostedOperation(world, registry, entry.agentId, entry.operation),
-  }));
+  const results = ordered.map((entry) => {
+    const pending = terminationRetries?.get(entry.agentId, entry.operation.callId);
+    if (pending) {
+      if (
+        pending.operation.operationId !== entry.operation.operationId ||
+        pending.operation.host.kind !== entry.operation.host.kind ||
+        pending.operation.host.hostEntityId !== entry.operation.host.hostEntityId ||
+        pending.operation.hostDefinition.kind !== entry.operation.hostDefinition.kind ||
+        pending.operation.hostDefinition.hostDefinitionId !== entry.operation.hostDefinition.hostDefinitionId
+      ) {
+        return {
+          entry,
+          result: hostedTechnicalFailure(
+            world,
+            entry.operation,
+            operationTechnicalFailure(
+              "protocol",
+              "operation_termination_retry_call_mismatch",
+              `Pending termination for ${entry.operation.callId} does not match its active hosted call.`,
+              false,
+            ),
+          ),
+        };
+      }
+      return {
+        entry,
+        result: {
+          kind: "termination_ready" as const,
+          world,
+          operation: pending.operation,
+          events: [],
+          transaction: pending.transaction,
+        },
+      };
+    }
+    return {
+      entry,
+      result: advanceHostedOperation(world, registry, entry.agentId, entry.operation),
+    };
+  });
   const intents = results.flatMap(({ entry, result }) => {
     const proposal = proposalForResult(result);
     return proposal
@@ -998,6 +1071,11 @@ export function advanceHostedOperationBatch(
     );
     if (terminated.kind === "technical_failure") {
       for (const { entry, prepared } of terminalEntries) {
+        terminationRetries?.set({
+          agentId: entry.agentId,
+          operation: prepared.operation,
+          transaction: prepared.transaction,
+        });
         processed.set(
           entry.operation.callId,
           hostedTechnicalFailure(
@@ -1012,6 +1090,7 @@ export function advanceHostedOperationBatch(
       nextWorld = terminated.world;
       events.push(...terminated.events);
       for (const { entry, prepared } of terminalEntries) {
+        terminationRetries?.delete(entry.agentId, entry.operation.callId);
         processed.set(entry.operation.callId, {
           ...prepared,
           world: nextWorld,

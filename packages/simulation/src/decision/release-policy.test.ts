@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   AgentId,
+  DirectOperationReference,
   ModelDecisionResult,
   TaskDecision,
   TaskOption,
@@ -13,7 +14,10 @@ import {
   releaseDecisionCycle,
 } from "./release-policy";
 import { buildTaskOptions } from "../execution/operation-catalog";
-import { prepareOperationCall } from "../execution/operation-planner";
+import {
+  prepareDirectOperationCall,
+  prepareOperationCall,
+} from "../execution/operation-planner";
 import {
   simulationTestWorld,
   testPluginRegistry,
@@ -213,6 +217,68 @@ function worldWithStartedFridgeUse(): WorldState {
       ...fridge,
       version: 1,
       state: { holder: "alice" },
+    }),
+  };
+}
+
+function worldWithStartedHostedFridgeUse(
+  registry: typeof testPluginRegistry,
+): WorldState {
+  const base = { ...simulationTestWorld(), reviewRequired: false };
+  const aliceId = "alice" as never;
+  const fridgeId = "fridge-1" as never;
+  const alice = base.agents.get(aliceId)!;
+  const atFridge = {
+    ...base,
+    agents: new Map(base.agents).set(aliceId, {
+      ...alice,
+      position: { x: 4, y: 2 },
+    }),
+  };
+  const reference: DirectOperationReference = {
+    kind: "operation",
+    operationId: "object.test.fridge.use" as never,
+    hostEntityId: fridgeId,
+    arguments: {},
+  };
+  const prepared = prepareDirectOperationCall(
+    atFridge,
+    registry,
+    aliceId,
+    "BODY",
+    reference,
+    "operation-call:test:hosted-fridge-use" as never,
+  );
+  if (prepared.kind !== "prepared") {
+    throw new Error(
+      prepared.kind === "invalid_reference"
+        ? prepared.message
+        : prepared.failure.message,
+    );
+  }
+  const operation = {
+    ...prepared.operation,
+    firstStepState: "started" as const,
+    progressTicks: 1,
+  };
+  const activeAlice = atFridge.agents.get(aliceId)!;
+  const fridge = atFridge.objects.get(fridgeId)!;
+  return {
+    ...atFridge,
+    agents: new Map(atFridge.agents).set(aliceId, {
+      ...activeAlice,
+      taskTracks: {
+        HEAD: { kind: "empty" },
+        BODY: { kind: "operation", callId: operation.callId },
+      },
+      activeOperations: new Map([
+        [operation.callId, operation as never],
+      ]),
+    }),
+    objects: new Map(atFridge.objects).set(fridgeId, {
+      ...fridge,
+      version: 1,
+      state: { holder: aliceId },
     }),
   };
 }
@@ -527,5 +593,74 @@ describe("decision release policy", () => {
         result: { status: "cancelled" },
       }),
     ]);
+  });
+
+  it("cancels a hosted call through its runtime during replacement", () => {
+    const getHostedOperation = vi.fn(testPluginRegistry.getHostedOperation);
+    const registry = {
+      ...testPluginRegistry,
+      getHostedOperation,
+    };
+    const running = worldWithStartedHostedFridgeUse(registry);
+    const active = running.agents.get("alice" as never)!;
+    const call = [...active.activeOperations.values()][0]!;
+    const promptWorld = {
+      ...running,
+      agents: new Map(running.agents).set("alice" as never, {
+        ...active,
+        taskTracks: {
+          HEAD: { kind: "empty" },
+          BODY: { kind: "empty" },
+        },
+        activeOperations: new Map(),
+      }),
+    };
+    const thinkingWithoutCall = requestDecisions(promptWorld, [
+      {
+        agentId: "alice" as never,
+        reason: { code: "change_task", summary: "Stop hosted use" },
+        taskOptions: buildTaskOptions(promptWorld, registry, "alice" as never),
+      },
+    ]).world;
+    const thinking = {
+      ...thinkingWithoutCall,
+      agents: new Map(thinkingWithoutCall.agents).set("alice" as never, {
+        ...thinkingWithoutCall.agents.get("alice" as never)!,
+        taskTracks: active.taskTracks,
+        activeOperations: active.activeOperations,
+      }),
+    };
+    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
+    const emptyBody = request.promptInput.taskOptions.find(
+      (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
+    )!;
+    const ready = accept(thinking, thinking, "alice", {
+      schemaVersion: 2,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        taskOptionId: emptyBody.id,
+        arguments: {},
+      },
+      reason: "Stop hosted use",
+    });
+
+    const released = releaseDecisionCycle(ready, registry);
+    const alice = released.world.agents.get("alice" as never)!;
+    expect(getHostedOperation).toHaveBeenCalled();
+    expect(alice.activeOperations.has(call.callId)).toBe(false);
+    expect(alice.pendingOperationResults).toContainEqual(
+      expect.objectContaining({
+        callId: call.callId,
+        terminal: true,
+        outcome: "cancelled",
+        reasonCode: "task_replaced",
+        result: { status: "cancelled" },
+      }),
+    );
+    expect(released.world.objects.get("fridge-1" as never)).toMatchObject({
+      version: 2,
+      state: { holder: null },
+    });
   });
 });
