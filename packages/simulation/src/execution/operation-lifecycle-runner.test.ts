@@ -20,6 +20,7 @@ import {
 import {
   advanceHostedOperation,
   advanceHostedOperationBatch,
+  retryPendingHostedOperationTerminations,
   resumeHostedOperationTermination,
 } from "./action-runner";
 import { commitProposal } from "../interaction/effect-committer";
@@ -1668,5 +1669,37 @@ describe("hosted operation lifecycle runner", () => {
       version: 2,
       state: { holder: null },
     });
+  });
+
+  it("returns pre-termination transition events when retrying a complete-pending call", () => {
+    const complete = vi
+      .fn<HostedOperationRuntime["complete"]>()
+      .mockImplementationOnce(() => { throw new Error("temporary completion failure"); })
+      .mockImplementation(() => ({ effects: [], result: { status: "completed" } }));
+    const tick = vi.fn((context: OperationRuntimeContext, operation: OperationRuntimeCall): OperationTickResult => ({
+      kind: "running",
+      proposal: { effects: [{ type: "reserve_occupancy", entityId: fridgeId, agentId: context.agentId, expectedObjectVersion: 0 }] },
+      nextState: { ticks: z.number().parse(operation.state["ticks"]) + 1 },
+    }));
+    const fixture = fixtureRuntime({ duration: { kind: "fixed" }, tick, complete });
+    const operation = runtimeCall({ firstStepState: "started", progressTicks: 1, duration: { kind: "fixed", totalTicks: 2 } });
+    const pending = advanceHostedOperation(runningWorld(), fixture.registry, agentId, operation);
+    if (pending.kind !== "termination_pending") throw new Error("Expected complete pending");
+    const world = {
+      ...runningWorld(),
+      pendingOperationTerminations: new Map([[operation.callId, {
+        kind: "complete_pending" as const,
+        agentId,
+        operation: pending.pending.operation,
+        source: pending.pending.source,
+        ...(pending.pending.preTerminationProposal === undefined ? {} : { preTerminationProposal: pending.pending.preTerminationProposal }),
+      }]]),
+    };
+    const retried = retryPendingHostedOperationTerminations(world, fixture.registry);
+    expect(retried.kind).toBe("committed");
+    if (retried.kind !== "committed") return;
+    expect(retried.events.map((event) => event.sequence)).toEqual([1, 2, 3]);
+    expect(retried.events[0]).toMatchObject({ type: "object_state_changed", sequence: 1 });
+    expect(retried.events.at(-1)).toMatchObject({ type: "operation_result", sequence: 3 });
   });
 });

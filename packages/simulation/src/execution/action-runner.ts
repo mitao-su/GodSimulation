@@ -705,6 +705,7 @@ export function retryPendingHostedOperationTerminations(
     return { kind: "committed", world, events: [], agentIds: [] };
   }
   let retryWorld = world;
+  const retryEvents: DomainEvent[] = [];
   const ready: Array<{ operation: OperationRuntimeCall; transaction: OperationTerminationTransaction }> = [];
   const readyAgents: AgentId[] = [];
   for (const [, value] of pending) {
@@ -730,6 +731,7 @@ export function retryPendingHostedOperationTerminations(
         };
       }
       retryWorld = resumed.world;
+      retryEvents.push(...resumed.events);
       ready.push({ operation: resumed.operation, transaction: resumed.transaction });
       readyAgents.push(value.agentId);
     } else {
@@ -745,7 +747,7 @@ export function retryPendingHostedOperationTerminations(
       ...committed.world,
       pendingOperationTerminations: new Map(),
     },
-    events: committed.events,
+    events: [...retryEvents, ...committed.events],
     agentIds: [...new Set(readyAgents)].sort((left, right) => left.localeCompare(right)),
   };
 }
