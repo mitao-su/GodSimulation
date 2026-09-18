@@ -7,6 +7,7 @@ export * from "./commands/stop-session.command";
 export * from "./commands/world-command";
 export * from "./events/action-failed.event";
 export * from "./events/agent-need-changed.event";
+export * from "./events/agent-moved.event";
 export * from "./events/decision-accepted.event";
 export * from "./events/decision-requested.event";
 export * from "./events/domain-event";

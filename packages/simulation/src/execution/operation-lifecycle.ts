@@ -251,7 +251,7 @@ export function recordFuseResults(
 
 export function accumulateOperationObservations(
   world: WorldState,
-  registry: OperationRuntimeRegistry,
+  registry: OperationRuntimeRegistry & Partial<HostedOperationRegistry>,
   agentId: AgentId,
   observations: readonly OperationObservation[],
 ): WorldState {
@@ -261,6 +261,14 @@ export function accumulateOperationObservations(
   let changed = false;
   const activeOperations = new Map(agent.activeOperations);
   for (const operation of agent.activeOperations.values()) {
+    if (isOperationRuntimeCall(operation)) {
+      const hosted = registry.getHostedOperation?.(operation.operationId, operation.hostDefinition);
+      if (!hosted?.accumulateObservations) continue;
+      const state = hosted.stateSchema.parse(hosted.accumulateObservations(operation, observations));
+      activeOperations.set(operation.callId, { ...operation, state } as unknown as ActiveOperation);
+      changed = true;
+      continue;
+    }
     const runtime = registry.getOperation(operation.operationId);
     if (!runtime?.accumulateObservations) continue;
     const updated = runtime.accumulateObservations(operation, observations);

@@ -1,6 +1,37 @@
 import { z } from "zod";
 
-import { AgentIdSchema, EntityIdSchema, JsonValueSchema } from "@god-sim/protocol";
+import {
+  AgentIdSchema,
+  CoordinateSchema,
+  EntityIdSchema,
+  JsonValueSchema,
+  OperationCallIdSchema,
+  OperationDomainFailureCodeSchema,
+} from "@god-sim/protocol";
+
+/** 位移提议绑定当前调用进度与出发格，重复或过期提交不得再次移动。 */
+export const MoveAgentEffectSchema = z.object({
+  type: z.literal("move_agent"),
+  agentId: AgentIdSchema,
+  callId: OperationCallIdSchema,
+  expectedProgressTicks: z.number().int().nonnegative(),
+  from: CoordinateSchema,
+  to: CoordinateSchema,
+}).strict();
+export type MoveAgentEffect = z.infer<typeof MoveAgentEffectSchema>;
+
+/** 自动通行失败作为移动事实提交，来源事件与角色已知阻挡同时写入。 */
+export const RecordTraversalBlockerEffectSchema = z.object({
+  type: z.literal("record_traversal_blocker"),
+  agentId: AgentIdSchema,
+  callId: OperationCallIdSchema,
+  expectedProgressTicks: z.number().int().nonnegative(),
+  entityId: EntityIdSchema,
+  expectedObjectVersion: z.number().int().nonnegative(),
+  reasonCode: OperationDomainFailureCodeSchema,
+  summary: z.string().min(1).max(500),
+}).strict();
+export type RecordTraversalBlockerEffect = z.infer<typeof RecordTraversalBlockerEffectSchema>;
 
 export const ReplaceObjectStateEffectSchema = z
   .object({
@@ -49,6 +80,8 @@ export const EmitPerceptibleResultEffectSchema = z
   .strict();
 
 export const EffectSchema = z.discriminatedUnion("type", [
+  MoveAgentEffectSchema,
+  RecordTraversalBlockerEffectSchema,
   ReplaceObjectStateEffectSchema,
   SetAgentNeedEffectSchema,
   ReserveOccupancyEffectSchema,

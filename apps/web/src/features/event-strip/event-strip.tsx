@@ -17,6 +17,7 @@ const eventLabels: Readonly<Record<DomainEvent["type"], string>> = {
   interaction_arbitrated: "交互冲突已判定",
   object_state_changed: "家具状态变化",
   agent_need_changed: "角色需求变化",
+  agent_moved: "角色移动",
   action_failed: "动作执行失败",
   operation_started: "任务已开始",
   operation_result: "任务返回结果",
