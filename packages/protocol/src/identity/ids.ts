@@ -15,6 +15,19 @@ export type AgentId = z.infer<typeof AgentIdSchema>;
 export const EntityIdSchema = StableIdSchema.brand<"EntityId">();
 export type EntityId = z.infer<typeof EntityIdSchema>;
 
+/**
+ * 物品定义 ID 与世界实体 ID 分开命名，避免把定义身份误当成实例身份。
+ * 物品实例仍然使用实体 ID，以便后续作为家具/物品宿主参与统一 operation 协议。
+ */
+export const ItemDefinitionIdSchema = StableIdSchema.brand<"ItemDefinitionId">();
+export type ItemDefinitionId = z.infer<typeof ItemDefinitionIdSchema>;
+
+export const ItemInstanceIdSchema = EntityIdSchema;
+export type ItemInstanceId = EntityId;
+
+export const EnvironmentSourceIdSchema = StableIdSchema.brand<"EnvironmentSourceId">();
+export type EnvironmentSourceId = z.infer<typeof EnvironmentSourceIdSchema>;
+
 export const RequestIdSchema = StableIdSchema.brand<"RequestId">();
 export type RequestId = z.infer<typeof RequestIdSchema>;
 

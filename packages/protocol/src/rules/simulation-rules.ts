@@ -131,7 +131,7 @@ const MemoryRulesSchema = z
     { message: "Memory half-lives must descend from critical to low" },
   );
 
-const SoundRulesSchema = z
+export const SoundRulesSchema = z
   .object({
     speakSourceStrength: z
       .object({
@@ -164,6 +164,7 @@ const SoundRulesSchema = z
       message: "Closed-door attenuation must exceed open-door attenuation",
     },
   );
+export type SoundRules = z.infer<typeof SoundRulesSchema>;
 
 export const SimulationRulesSchema = z
   .object({
