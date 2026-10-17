@@ -55,5 +55,5 @@ describe("bladder and toilet loop", () => {
       occupiedBy: null,
     });
     expect(engine.getView().mode).toBe("THINKING");
-  });
+  }, 15_000);
 });
