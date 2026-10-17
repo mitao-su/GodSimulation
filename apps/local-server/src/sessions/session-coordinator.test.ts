@@ -169,10 +169,23 @@ describe("SessionCoordinator", () => {
     "blocks the worker when an unimplemented %s reaches the host",
     async (messageType) => {
       const worker = new FakeWorker();
+      const failures: string[] = [];
+      const store: TimelineStore = {
+        async commitCheckpoint() {},
+        async savePluginLock() {},
+        async saveModelCall() {},
+        async recordFailure(_worldId, failure) {
+          failures.push(failure.message);
+        },
+        async loadLatest() {
+          return { snapshot: null, events: [] };
+        },
+        async close() {},
+      };
       const coordinator = new SessionCoordinator({
         worker,
         decisionProvider: deferredProvider().provider,
-        persistence: PersistenceWriter.inMemory(),
+        persistence: new PersistenceWriter(store),
         modelId: "fixed-test",
         now: () => "2026-08-31T00:00:00.000Z",
       });
@@ -213,6 +226,10 @@ describe("SessionCoordinator", () => {
             },
           }),
         );
+        await coordinator.waitForIdle();
+        expect(failures).toEqual([
+          `Memory IPC message ${messageType} is not implemented`,
+        ]);
         expect(worker.sent).toContainEqual({
           type: "technical_failure",
           failure: expect.objectContaining({

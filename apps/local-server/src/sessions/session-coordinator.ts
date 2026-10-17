@@ -303,14 +303,25 @@ export class SessionCoordinator {
       error instanceof DecisionPersistenceError;
     const unsupportedMemoryMessage =
       message.type === "memory_request" || message.type === "memory_result_ack";
+    const persistWorldId =
+      message.type === "memory_request"
+        ? message.request.identity.worldId
+        : message.type === "memory_result_ack"
+          ? message.acknowledgement.request.worldId
+          : undefined;
     await this.#publishHostFailure({
       error: rootError,
-      category: persistenceMessage ? "persistence" : unsupportedMemoryMessage ? "protocol" : "worker",
+      category: persistenceMessage
+        ? "persistence"
+        : unsupportedMemoryMessage
+          ? "protocol"
+          : "worker",
       retryable: persistenceMessage,
       blockWorker: persistenceMessage || unsupportedMemoryMessage,
       ...(message.type === "decision_requested"
         ? { requestId: message.request.requestId }
         : {}),
+      ...(persistWorldId === undefined ? {} : { persistWorldId }),
     });
   }
 
