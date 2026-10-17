@@ -3,6 +3,8 @@ import type { z } from "zod";
 import {
   JsonValueSchema,
   WorldSnapshotSchema,
+  DirectTaskDecisionSchema,
+  TaskDecisionSchema,
   type AgentId,
   type EntityId,
   type OperationCallId,
@@ -16,6 +18,7 @@ import type {
   SerializedKnowledgeSchema,
   SerializedObjectSchema,
 } from "./snapshot-state-codec";
+import type { SerializedPendingOperationTermination } from "./snapshot-state-codec";
 import {
   parseSerializedState,
   uniqueMap,
@@ -39,6 +42,12 @@ import {
   type ObjectInstance,
   type WorldState,
 } from "../world/world-state";
+import type {
+  OperationRuntimeCall,
+  OperationTerminationTransaction,
+} from "../execution/operation-runtime";
+import { isOperationRuntimeCall } from "../execution/operation-runtime";
+import type { PendingOperationTermination } from "../world/world-state";
 
 
 function assertCoordinateInMap(
@@ -173,7 +182,7 @@ function restoreAgents(
     }
     restored.set(agentId, {
       ...agent,
-      activeOperations,
+      activeOperations: activeOperations as unknown as AgentState["activeOperations"],
       knowledge: restoreKnowledge(agent.knowledge),
     });
   }
@@ -213,7 +222,11 @@ function restoreDecisionCycle(
     ) {
       throw new Error(`Snapshot decision identity is inconsistent for ${agentId}`);
     }
-    if (request.acceptedProposal !== null) {
+    if (
+      request.acceptedProposal !== null &&
+      TaskDecisionSchema.safeParse(request.acceptedProposal).success
+    ) {
+      const legacyProposal = TaskDecisionSchema.parse(request.acceptedProposal);
       const legacyTaskOptions = prompt.taskOptions;
       if (!legacyTaskOptions) {
         throw new Error(
@@ -221,8 +234,8 @@ function restoreDecisionCycle(
         );
       }
       for (const selection of [
-        request.acceptedProposal.head,
-        request.acceptedProposal.body,
+        legacyProposal.head,
+        legacyProposal.body,
       ]) {
         if (
           selection.kind === "replace" &&
@@ -235,6 +248,8 @@ function restoreDecisionCycle(
           );
         }
       }
+    } else if (request.acceptedProposal !== null) {
+      DirectTaskDecisionSchema.parse(request.acceptedProposal);
     }
     const requestFailure =
       request.failure ??
@@ -270,6 +285,78 @@ function restoreDecisionCycle(
   };
 }
 
+function restorePendingOperationTerminations(
+  values: readonly SerializedPendingOperationTermination[],
+  agents: ReadonlyMap<AgentId, AgentState>,
+): ReadonlyMap<OperationCallId, PendingOperationTermination> {
+  const pending = new Map<OperationCallId, PendingOperationTermination>();
+  for (const value of values) {
+    if (pending.has(value.callId)) {
+      throw new Error(`Snapshot contains duplicate pending termination ${value.callId}`);
+    }
+    if (value.callId !== value.operation.callId) {
+      throw new Error(`Pending termination ${value.callId} does not match its operation`);
+    }
+    const agent = agents.get(value.agentId);
+    if (!agent) {
+      throw new Error(`Pending termination ${value.callId} targets unknown agent ${value.agentId}`);
+    }
+    const active = agent.activeOperations.get(value.callId);
+    if (!active || !isOperationRuntimeCall(active)) {
+      throw new Error(`Pending termination ${value.callId} is not an active hosted call`);
+    }
+    if (!sameHostedOperationSnapshot(active, value.operation)) {
+      throw new Error(`Pending termination ${value.callId} does not match its active call`);
+    }
+    if (value.kind === "transaction_ready") {
+      if (
+        value.transaction.callId !== value.callId ||
+        value.transaction.agentId !== value.agentId ||
+        value.transaction.operationId !== value.operation.operationId
+      ) {
+        throw new Error(`Pending transaction ${value.callId} has inconsistent identity`);
+      }
+      pending.set(value.callId, {
+        kind: "transaction_ready",
+        agentId: value.agentId,
+        operation: value.operation as OperationRuntimeCall,
+        transaction: value.transaction as OperationTerminationTransaction,
+      });
+    } else {
+      pending.set(value.callId, {
+        kind: "complete_pending",
+        agentId: value.agentId,
+        operation: value.operation as OperationRuntimeCall,
+        source: value.source,
+        ...(value.preTerminationProposal === undefined
+          ? {}
+          : { preTerminationProposal: value.preTerminationProposal }),
+      });
+    }
+  }
+  return pending;
+}
+
+function sameHostedOperationSnapshot(
+  left: OperationRuntimeCall,
+  right: OperationRuntimeCall,
+): boolean {
+  return (
+    left.callId === right.callId &&
+    left.operationId === right.operationId &&
+    JSON.stringify(left.host) === JSON.stringify(right.host) &&
+    JSON.stringify(left.hostDefinition) === JSON.stringify(right.hostDefinition) &&
+    JSON.stringify(left.target) === JSON.stringify(right.target) &&
+    JSON.stringify(left.taskSlots) === JSON.stringify(right.taskSlots) &&
+    JSON.stringify(left.arguments) === JSON.stringify(right.arguments) &&
+    JSON.stringify(left.duration) === JSON.stringify(right.duration) &&
+    left.startedAtTick === right.startedAtTick &&
+    left.progressTicks === right.progressTicks &&
+    left.firstStepState === right.firstStepState &&
+    JSON.stringify(left.state) === JSON.stringify(right.state)
+  );
+}
+
 export function restoreWorldSnapshot(
   snapshotValue: WorldSnapshot,
   registry: SimulationRegistry,
@@ -298,6 +385,27 @@ export function restoreWorldSnapshot(
     agents,
     state.technicalFailure,
   );
+  const pendingOperationTerminations = restorePendingOperationTerminations(
+    state.pendingOperationTerminations,
+    agents,
+  );
+  if (
+    new Set(state.terminalOperationCallIds).size !==
+    state.terminalOperationCallIds.length
+  ) {
+    throw new Error("Snapshot contains duplicate terminal operation call IDs");
+  }
+  const terminalOperationCallIds = new Set(state.terminalOperationCallIds);
+  for (const callId of terminalOperationCallIds) {
+    if (pendingOperationTerminations.has(callId)) {
+      throw new Error(`Terminal operation ${callId} is also pending`);
+    }
+    for (const agent of agents.values()) {
+      if (agent.activeOperations.has(callId)) {
+        throw new Error(`Terminal operation ${callId} is still active`);
+      }
+    }
+  }
   const suspendedMode = validateAndResolveSnapshotMode(state, decisionCycle);
   const restored: WorldState = {
     id: snapshot.worldId,
@@ -316,6 +424,8 @@ export function restoreWorldSnapshot(
     agents,
     objects,
     decisionCycle,
+    pendingOperationTerminations,
+    terminalOperationCallIds,
     technicalFailure: state.technicalFailure,
   };
   validateRestoredOperations(restored, registry);

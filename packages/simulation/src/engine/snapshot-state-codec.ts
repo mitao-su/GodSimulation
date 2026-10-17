@@ -7,6 +7,7 @@ import {
   DecisionCycleIdSchema,
   DecisionIdentitySchema,
   DecisionPromptInputSchema,
+  DirectTaskDecisionSchema,
   EntityIdSchema,
   EventIdSchema,
   FacingSchema,
@@ -14,14 +15,24 @@ import {
   JsonValueSchema,
   OperationCallIdSchema,
   OperationDurationSchema,
+  OperationDomainFailureSchema,
+  OperationFirstStepStateSchema,
+  OperationHostDefinitionReferenceSchema,
+  OperationHostReferenceSchema,
   OperationIdSchema,
   OperationResultContextSchema,
+  OperationTargetReferenceSchema,
+  OperationTerminationOutcomeSchema,
+  OperationTerminationSourceSchema,
   TaskDecisionSchema,
   TaskOptionIdSchema,
   TechnicalFailureSchema,
   WorldModeSchema,
 } from "@god-sim/protocol";
-import { ObservedInteractionAvailabilitySchema } from "@god-sim/plugin-sdk";
+import {
+  EffectProposalSchema,
+  ObservedInteractionAvailabilitySchema,
+} from "@god-sim/plugin-sdk";
 
 import { MapDefinitionSchema } from "../map/map-definition";
 
@@ -92,7 +103,7 @@ const OperationPlanSchema = z
     { message: "Snapshot operation action index is outside its plan" },
   );
 
-export const SerializedActiveOperationSchema = z
+export const SerializedLegacyActiveOperationSchema = z
   .object({
     callId: OperationCallIdSchema,
     operationId: OperationIdSchema,
@@ -112,6 +123,77 @@ export const SerializedActiveOperationSchema = z
     plan: OperationPlanSchema,
   })
   .strict();
+
+export const SerializedHostedOperationSchema = z
+  .object({
+    callId: OperationCallIdSchema,
+    operationId: OperationIdSchema,
+    host: OperationHostReferenceSchema,
+    hostDefinition: OperationHostDefinitionReferenceSchema,
+    target: OperationTargetReferenceSchema,
+    taskSlots: CanonicalTaskTracksSchema,
+    arguments: JsonObjectSchema,
+    duration: OperationDurationSchema,
+    startedAtTick: z.number().int().nonnegative(),
+    progressTicks: z.number().int().nonnegative(),
+    firstStepState: OperationFirstStepStateSchema,
+    state: JsonObjectSchema,
+  })
+  .strict();
+
+export const SerializedActiveOperationSchema = z.union([
+  SerializedLegacyActiveOperationSchema,
+  SerializedHostedOperationSchema,
+]);
+
+const SerializedOperationTerminationTransactionSchema = z
+  .object({
+    agentId: AgentIdSchema,
+    callId: OperationCallIdSchema,
+    operationId: OperationIdSchema,
+    source: OperationTerminationSourceSchema,
+    terminatedAtTick: z.number().int().nonnegative(),
+    outcome: OperationTerminationOutcomeSchema,
+    proposal: EffectProposalSchema.extend({ result: JsonObjectSchema }).strict(),
+    failure: OperationDomainFailureSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.outcome === "failed" && value.failure === undefined) {
+      context.addIssue({ code: "custom", message: "Failed termination requires a domain failure" });
+    }
+    if (value.outcome !== "failed" && value.failure !== undefined) {
+      context.addIssue({ code: "custom", message: "Only failed termination may carry a domain failure" });
+    }
+  });
+
+export const SerializedPendingOperationTerminationSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("complete_pending"),
+      callId: OperationCallIdSchema,
+      agentId: AgentIdSchema,
+      operation: SerializedHostedOperationSchema,
+      source: z.enum(["duration_elapsed", "operation_signalled_completion"]),
+      preTerminationProposal: z
+        .object({
+          proposal: EffectProposalSchema,
+          phase: z.enum(["start", "tick"]),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("transaction_ready"),
+      callId: OperationCallIdSchema,
+      agentId: AgentIdSchema,
+      operation: SerializedHostedOperationSchema,
+      transaction: SerializedOperationTerminationTransactionSchema,
+    })
+    .strict(),
+]);
 
 const TaskTrackStateSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("empty") }).strict(),
@@ -222,7 +304,7 @@ const SerializedDecisionRequestSchema = z
     agentId: AgentIdSchema,
     identity: DecisionIdentitySchema,
     promptInput: DecisionPromptInputSchema,
-    acceptedProposal: TaskDecisionSchema.nullable(),
+    acceptedProposal: z.union([DirectTaskDecisionSchema, TaskDecisionSchema]).nullable(),
     failure: TechnicalFailureSchema.nullable().default(null),
   })
   .strict();
@@ -253,6 +335,17 @@ export const SerializedWorldStateCommonShape = {
 export const SerializedWorldStateSchema = z
   .object({
     ...SerializedWorldStateCommonShape,
+    stateSchemaVersion: z.literal(4),
+    agents: z.array(SerializedAgentSchema).min(1),
+    decisionCycle: SerializedDecisionCycleSchema.nullable(),
+    pendingOperationTerminations: z.array(SerializedPendingOperationTerminationSchema).default([]),
+    terminalOperationCallIds: z.array(OperationCallIdSchema).default([]),
+  })
+  .strict();
+
+export const SerializedWorldStateV3Schema = z
+  .object({
+    ...SerializedWorldStateCommonShape,
     stateSchemaVersion: z.literal(3),
     agents: z.array(SerializedAgentSchema).min(1),
     decisionCycle: SerializedDecisionCycleSchema.nullable(),
@@ -260,3 +353,7 @@ export const SerializedWorldStateSchema = z
   .strict();
 
 export type SerializedWorldState = z.infer<typeof SerializedWorldStateSchema>;
+export type SerializedWorldStateV3 = z.infer<typeof SerializedWorldStateV3Schema>;
+export type SerializedPendingOperationTermination = z.infer<
+  typeof SerializedPendingOperationTerminationSchema
+>;

@@ -39,6 +39,7 @@ import {
   SerializedOperationActionSchema as OperationActionSchema,
   SerializedWorldStateCommonShape,
   SerializedWorldStateSchema,
+  SerializedWorldStateV3Schema,
 } from "../snapshot-state-codec";
 import {
   LegacyCurrentGoalContextSchema,
@@ -69,7 +70,7 @@ const ObjectInteractionActionSchema = z
   .object({
     ...ActionBaseShape,
     kind: z.literal("interact_object"),
-    purpose: z.enum(["goal", "automatic_traversal"]),
+    purpose: z.enum(["direct", "goal", "automatic_traversal"]),
     targetEntityId: EntityIdSchema,
     interactionId: z.string().min(1),
     started: z.boolean(),
@@ -508,7 +509,7 @@ function activeTasksFor(agent: SerializedAgent) {
     operations: agent.activeOperations.map((operation) => ({
       callId: operation.callId,
       operationId: operation.operationId,
-      label: operation.label,
+      label: "label" in operation ? operation.label : operation.operationId,
       taskSlots: operation.taskSlots,
       arguments: operation.arguments,
       duration: operation.duration,
@@ -603,13 +604,15 @@ function migrateSingleGoalState(
   );
   return SerializedWorldStateSchema.parse({
     ...value,
-    stateSchemaVersion: 3,
+    stateSchemaVersion: 4,
     agents,
     decisionCycle: migrateLegacyDecisionCycle(
       value.decisionCycle,
       agents,
       objects,
     ),
+    pendingOperationTerminations: [],
+    terminalOperationCallIds: [],
   });
 }
 
@@ -623,6 +626,15 @@ function isJsonObject(
   value: JsonValue | undefined,
 ): value is { readonly [key: string]: JsonValue } {
   return typeof value === "object" && value !== null && !isJsonArray(value);
+}
+
+function stripCurrentStateFields(state: JsonValue): JsonValue {
+  if (!isJsonObject(state)) return state;
+  const legacy = { ...state };
+  delete legacy.stateSchemaVersion;
+  delete legacy.pendingOperationTerminations;
+  delete legacy.terminalOperationCallIds;
+  return JsonValueSchema.parse(legacy);
 }
 
 function adoptLegacyMapRules(
@@ -675,6 +687,21 @@ function migrateV2ActiveOperationState(state: JsonValue): JsonValue {
   });
 }
 
+/**
+ * V3 already contains the current HEAD/BODY and operation shapes, but the
+ * hosted-call termination ledger did not exist yet. Add only the new fields;
+ * no runtime resolver is consulted during this migration.
+ */
+function migrateV3State(state: JsonValue): JsonValue {
+  if (!isJsonObject(state) || state["stateSchemaVersion"] !== 3) return state;
+  return JsonValueSchema.parse({
+    ...state,
+    stateSchemaVersion: 4,
+    pendingOperationTerminations: [],
+    terminalOperationCallIds: [],
+  });
+}
+
 export function parseSerializedState(
   snapshot: WorldSnapshot,
   worldRulesReference: WorldRulesReference,
@@ -686,19 +713,33 @@ export function parseSerializedState(
     snapshot.schemaVersion === 3
       ? snapshot.state
       : adoptLegacyMapRules(snapshot.state, worldRulesReference);
+  const migratedV2 = migrateV2ActiveOperationState(serializedState);
   const currentState = SerializedWorldStateSchema.safeParse(
-    migrateV2ActiveOperationState(serializedState),
+    migrateV3State(migratedV2),
   );
+  const v3State = currentState.success
+    ? null
+    : SerializedWorldStateV3Schema.safeParse(migratedV2);
   const singleGoalState = currentState.success
     ? null
-    : SingleGoalSerializedWorldStateSchema.safeParse(serializedState);
+    : v3State?.success
+      ? null
+      : SingleGoalSerializedWorldStateSchema.safeParse(
+          stripCurrentStateFields(serializedState),
+        );
   const state = currentState.success
     ? currentState.data
-    : singleGoalState?.success
+    : v3State?.success
+      ? SerializedWorldStateSchema.parse(
+          migrateV3State(JsonValueSchema.parse(v3State.data)),
+        )
+      : singleGoalState?.success
       ? migrateSingleGoalState(singleGoalState.data, snapshot.worldTick)
       : migrateSingleGoalState(
           normalizeLegacyState(
-            LegacySerializedWorldStateSchema.parse(serializedState),
+            LegacySerializedWorldStateSchema.parse(
+              stripCurrentStateFields(serializedState),
+            ),
           ),
           snapshot.worldTick,
         );

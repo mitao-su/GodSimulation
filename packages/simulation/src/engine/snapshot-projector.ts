@@ -13,8 +13,20 @@ import {
 } from "./snapshot-causality";
 
 function serializeWorldState(world: WorldState): JsonValue {
+  const pendingOperationTerminations = [...(world.pendingOperationTerminations?.entries() ?? [])]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([callId, pending]) => ({
+      ...pending,
+      callId,
+      operation: pending.operation,
+      ...(pending.kind === "transaction_ready"
+        ? { transaction: pending.transaction }
+        : pending.preTerminationProposal === undefined
+          ? {}
+          : { preTerminationProposal: pending.preTerminationProposal }),
+    }));
   return JsonValueSchema.parse({
-    stateSchemaVersion: 3,
+    stateSchemaVersion: 4,
     name: world.name,
     mode: world.mode,
     suspendedMode: world.suspendedMode,
@@ -25,9 +37,9 @@ function serializeWorldState(world: WorldState): JsonValue {
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((agent) => ({
         ...agent,
-        activeOperations: [...agent.activeOperations.values()].sort((left, right) =>
-          left.callId.localeCompare(right.callId),
-        ),
+        activeOperations: [...agent.activeOperations.values()]
+          .sort((left, right) => left.callId.localeCompare(right.callId))
+          .map((operation) => operation),
         knowledge: {
           zoneId: agent.knowledge.zoneId,
           objects: [...agent.knowledge.objects.values()].sort((left, right) =>
@@ -59,6 +71,10 @@ function serializeWorldState(world: WorldState): JsonValue {
               .map(([agentId, request]) => ({ agentId, ...request })),
           },
     technicalFailure: world.technicalFailure,
+    pendingOperationTerminations,
+    terminalOperationCallIds: [...(world.terminalOperationCallIds ?? [])].sort((left, right) =>
+      left.localeCompare(right),
+    ),
   });
 }
 

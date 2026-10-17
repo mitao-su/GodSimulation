@@ -3,15 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
   SimulationRulesLockSchema,
   WorldSnapshotV2Schema,
+  type DirectTaskDecision,
   type WorldSnapshotV1,
 } from "@god-sim/protocol";
 
+import { acceptDecisionResult, requestDecisions } from "../decision/decision-gate";
 import {
   simulationTestWorld,
   testPlugin,
+  testPluginRegistry,
   testSimulationRulesLock,
 } from "../testing/simulation-test-fixtures";
+import { projectWorldSnapshot } from "./snapshot-projector";
 import { createSimulation, restoreSimulation } from "./simulation-engine";
+import { restoreWorldSnapshot } from "./snapshot-restorer";
 
 interface MutableTaskOption {
   readonly id: string;
@@ -197,6 +202,54 @@ function legacySnapshot(): WorldSnapshotV1 {
 }
 
 describe("simulation snapshot restoration", () => {
+  it("round-trips an accepted direct decision without legacy task options", () => {
+    const base = simulationTestWorld();
+    const requested = requestDecisions(base, [
+      {
+        agentId: "alice" as never,
+        reason: { code: "snapshot_test", summary: "Choose a task" },
+      },
+    ]).world;
+    const request = requested.decisionCycle?.requests.get("alice" as never);
+    if (!request) throw new Error("Missing direct decision request");
+    const proposal: DirectTaskDecision = {
+      schemaVersion: 3,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.wait" as never,
+          arguments: { durationTicks: 10 },
+        },
+      },
+      reason: "Wait for the next tick.",
+    };
+    const accepted = acceptDecisionResult(
+      requested,
+      { ...request.identity, proposal },
+      testPluginRegistry,
+    );
+    expect(accepted.accepted).toBe(true);
+    if (!accepted.accepted) throw new Error(accepted.reason ?? "Decision rejected");
+    const ready = {
+      ...accepted.world,
+      mode: "READY_FOR_RELEASE" as const,
+    };
+    const snapshot = projectWorldSnapshot(ready);
+
+    const restored = restoreWorldSnapshot(
+      snapshot,
+      testPluginRegistry,
+      base.map,
+      testSimulationRulesLock,
+    );
+    const restoredRequest = restored.decisionCycle?.requests.get("alice" as never);
+    expect(restoredRequest?.promptInput).not.toHaveProperty("taskOptions");
+    expect(restoredRequest?.acceptedProposal).toEqual(proposal);
+    expect(restored.mode).toBe("READY_FOR_RELEASE");
+  });
+
   it("adopts the supplied rule lock when migrating a version-two snapshot", () => {
     const original = createSimulation({
       worldDefinition: simulationTestWorld().map,
@@ -478,7 +531,7 @@ describe("simulation snapshot restoration", () => {
       }>;
     };
     const restoredAlice = nextState.agents.find((agent) => agent.id === "alice")!;
-    expect(nextState.stateSchemaVersion).toBe(3);
+    expect(nextState.stateSchemaVersion).toBe(4);
     expect(restoredAlice.taskTracks.BODY.kind).toBe("operation");
     expect(restoredAlice.activeOperations).toEqual([
       expect.objectContaining({
