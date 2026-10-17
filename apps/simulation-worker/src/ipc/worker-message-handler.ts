@@ -57,7 +57,7 @@ export class WorkerMessageHandler {
       const result = this.#session.handle(message);
       if (result.shutdownReady) this.#completeShutdown();
     } catch (error) {
-      this.#emitFailure(error, "worker");
+      this.#emitFailure(error, parsed.data.type === "memory_result" ? "protocol" : "worker");
     }
   }
 

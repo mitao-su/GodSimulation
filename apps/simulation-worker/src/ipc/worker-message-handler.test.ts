@@ -176,6 +176,76 @@ describe("WorkerMessageHandler", () => {
       .toBe(blocked.worldTick);
   });
 
+  it("classifies an unimplemented memory result as a protocol failure", () => {
+    const messages: WorkerToHostMessage[] = [];
+    const handler = new WorkerMessageHandler({
+      plugins: [spatialPlugin, homePlugin, agentsPlugin],
+      pluginLock,
+      emit: (message) => messages.push(message),
+      onShutdown: () => undefined,
+      now: () => "2026-08-31T00:00:00.000Z",
+    });
+    handler.handle({
+      type: "initialize",
+      protocolVersion: 1,
+      worldDefinition: JsonValueSchema.parse(starterHome),
+      pluginLock,
+      simulationRulesLock: testSimulationRulesLock,
+      reviewRequired: true,
+      deterministicSeed: 1,
+    });
+    const initialCheckpoint = messages.find(
+      (message) => message.type === "checkpoint_ready",
+    );
+    if (!initialCheckpoint || initialCheckpoint.type !== "checkpoint_ready") {
+      throw new Error("Expected initial checkpoint");
+    }
+    handler.handle({
+      type: "checkpoint_committed",
+      checkpointId: initialCheckpoint.checkpointId,
+    });
+
+    handler.handle({
+      type: "memory_result",
+      result: {
+        schemaVersion: 1,
+        request: {
+          schemaVersion: 1,
+          requestId: "memory-request:1",
+          worldId: "starter-world",
+          branchId: "branch:main",
+          agentId: "alice",
+          checkpointId: initialCheckpoint.checkpointId,
+          worldVersion: 1,
+          worldTick: 0,
+          lastEventSequence: 0,
+          simulationRulesHash: "c".repeat(64),
+          pluginLockHash: pluginLock.hash,
+          inputHash: "d".repeat(64),
+          kind: "consolidation",
+          consolidationCycleId: "consolidation-cycle:1",
+        },
+        requestReceiptSequence: 1,
+        resultReceiptSequence: 1,
+        resultHash: "e".repeat(64),
+        status: "succeeded",
+        output: { retainedMemories: [], archivedMemories: [], semanticMap: {} },
+      },
+    });
+
+    expect(messages.findLast((message) => message.type === "technical_failure"))
+      .toMatchObject({
+        type: "technical_failure",
+        failure: {
+          category: "protocol",
+          retryable: false,
+          message: "Memory result handling is not implemented in this worker",
+        },
+      });
+    expect(messages.findLast((message) => message.type === "world_view"))
+      .toMatchObject({ type: "world_view", view: { mode: "TECHNICALLY_BLOCKED" } });
+  });
+
   it("does not request model decisions from a restored technical block before retry", () => {
     const engine = createSimulation({
       worldDefinition: starterHome,
