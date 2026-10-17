@@ -43,6 +43,28 @@ export function createEffectEvents(
     };
 
     switch (change.effect.type) {
+      case "move_agent":
+        events.push(DomainEventSchema.parse({
+          ...base,
+          type: "agent_moved",
+          agentId: change.effect.agentId,
+          callId: change.effect.callId,
+          from: change.effect.from,
+          to: change.effect.to,
+        }));
+        break;
+      case "record_traversal_blocker":
+        events.push(DomainEventSchema.parse({
+          ...base,
+          type: "action_failed",
+          agentId: change.effect.agentId,
+          perceivedByAgent: true,
+          actionId: `${change.effect.callId}:traversal:${change.effect.expectedProgressTicks}`,
+          entityId: change.effect.entityId,
+          reasonCode: change.effect.reasonCode,
+          summary: change.effect.summary,
+        }));
+        break;
       case "set_agent_need":
         events.push(
           DomainEventSchema.parse({

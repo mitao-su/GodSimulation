@@ -12,6 +12,26 @@ import { EventStrip } from "./event-strip";
 afterEach(cleanup);
 
 describe("event strip", () => {
+  it("labels a committed movement fact", () => {
+    const view = WorldViewSchema.parse({
+      schemaVersion: 1, revision: 1, worldId: "test-world", worldName: "Test World",
+      worldVersion: 1, worldTick: 2, gameTime: { day: 1, hour: 8, minute: 0 },
+      mode: "RUNNING", reviewRequired: true, pauseReason: null,
+      map: { width: 2, height: 1, tileSize: 16, zones: [], tiles: [] },
+      entities: [], agents: [], pendingDecisions: [], technicalFailure: null,
+      recentEvents: [{
+        schemaVersion: 1, eventId: "event:test-world:1", worldId: "test-world",
+        worldVersion: 1, worldTick: 2, sequence: 1, parentSequence: null,
+        causationId: "operation-call:test:move:tick:2", correlationId: "operation-call:test:move",
+        type: "agent_moved", agentId: "alice", callId: "operation-call:test:move",
+        from: { x: 0, y: 0 }, to: { x: 1, y: 0 },
+      }],
+    });
+    render(<EventStrip view={view} commandPending={false} onRelease={vi.fn()}
+      onRetry={vi.fn()} onRetryTechnicalFailure={vi.fn()} />);
+    expect(screen.getByText("角色移动")).toBeVisible();
+  });
+
   it("labels a recorded perception event", () => {
     const view = WorldViewSchema.parse({
       schemaVersion: 1,

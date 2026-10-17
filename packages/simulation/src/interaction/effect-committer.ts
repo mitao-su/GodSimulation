@@ -3,6 +3,8 @@ import { EffectProposalSchema, type EffectProposal } from "@god-sim/plugin-sdk";
 
 import { createEffectEvents, type EventChange, type EventMetadata } from "./domain-event-factory";
 import type { PluginRegistry } from "../world/plugin-registry";
+import { SpatialIndex } from "../world/spatial-index";
+import { hasElapsedMoveStep } from "../execution/core/hosted-move-state";
 import { bladderSensation, type WorldState } from "../world/world-state";
 
 export interface CommitRejection {
@@ -45,10 +47,60 @@ export function commitProposal(
   const agents = new Map(world.agents);
   const objects = new Map(world.objects);
   const changedObjectIds = new Set<string>();
+  const movementAgentIds = new Set<string>();
   const changes: EventChange[] = [];
 
   for (const [effectIndex, effect] of parsed.data.effects.entries()) {
     switch (effect.type) {
+      case "move_agent":
+      case "record_traversal_blocker": {
+        const agent = agents.get(effect.agentId);
+        const operation = agent?.activeOperations.get(effect.callId);
+        if (
+          world.mode !== "RUNNING" || !agent || !operation ||
+          operation.operationId !== "core.move" ||
+          metadata.correlationId !== effect.callId ||
+          agent.taskTracks.BODY.kind !== "operation" ||
+          agent.taskTracks.BODY.callId !== effect.callId ||
+          operation.progressTicks !== effect.expectedProgressTicks
+        ) {
+          return rejected(world, effectIndex, "invalid_movement_call", "Movement must belong to the current running BODY call and progress.");
+        }
+        if (movementAgentIds.has(effect.agentId)) {
+          return rejected(world, effectIndex, "duplicate_movement_effect", "A proposal may advance a character's movement only once.");
+        }
+        const spatial = new SpatialIndex({ ...world, agents, objects }, registry);
+        if (effect.type === "move_agent") {
+          if (agent.position.x !== effect.from.x || agent.position.y !== effect.from.y) {
+            return rejected(world, effectIndex, "stale_agent_position", "Movement departure does not match the character's position.");
+          }
+          if (Math.abs(effect.to.x - effect.from.x) + Math.abs(effect.to.y - effect.from.y) !== 1) {
+            return rejected(world, effectIndex, "invalid_movement_step", "Movement must reach one cardinally adjacent cell.");
+          }
+          if (effect.to.x >= world.map.width || effect.to.y >= world.map.height) {
+            return rejected(world, effectIndex, "movement_out_of_bounds", "Movement destination is outside the map.");
+          }
+          if (spatial.blockingObjectsAt(effect.to, effect.agentId).length > 0) {
+            return rejected(world, effectIndex, "movement_blocked", "Movement destination is blocked.");
+          }
+          if (!hasElapsedMoveStep(operation.state, world.simulationRulesLock.rules.operations.move.ticksPerCell)) {
+            return rejected(world, effectIndex, "movement_too_early", "Movement has not consumed a cell's travel time.");
+          }
+          agents.set(effect.agentId, { ...agent, position: effect.to });
+        } else {
+          const object = objects.get(effect.entityId);
+          const definition = object && registry.getObject(object.definitionId)?.definition;
+          const traversal = definition?.interactions.find((entry) => entry.id === definition.traversal?.interactionId);
+          if (!object || object.version !== effect.expectedObjectVersion || !traversal ||
+              !spatial.objectBlocksMovement(object.id, agent.id) ||
+              (!traversal.domainFailures.some((entry) => entry.code === effect.reasonCode) && effect.reasonCode !== "out_of_range")) {
+            return rejected(world, effectIndex, "invalid_traversal_blocker", "Traversal failure must identify a current blocker and a declared failure.");
+          }
+        }
+        movementAgentIds.add(effect.agentId);
+        changes.push({ effect });
+        break;
+      }
       case "set_agent_need": {
         const agent = agents.get(effect.agentId);
         if (!agent) {
@@ -208,6 +260,23 @@ export function commitProposal(
 
   const committedWorldVersion = world.version + 1;
   const events = createEffectEvents(world, committedWorldVersion, changes, metadata);
+  for (const [index, change] of changes.entries()) {
+    if (change.effect.type !== "record_traversal_blocker") continue;
+    const effect = change.effect;
+    const agent = agents.get(effect.agentId)!;
+    agents.set(agent.id, {
+      ...agent,
+      knowledge: {
+        ...agent.knowledge,
+        knownTraversalBlockers: new Map(agent.knowledge.knownTraversalBlockers).set(effect.entityId, {
+          entityId: effect.entityId,
+          observedObjectVersion: effect.expectedObjectVersion,
+          reasonCode: effect.reasonCode,
+          sourceEventId: events[index]!.eventId,
+        }),
+      },
+    });
+  }
   return {
     accepted: true,
     world: {

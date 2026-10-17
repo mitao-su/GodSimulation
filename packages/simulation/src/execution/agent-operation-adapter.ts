@@ -25,9 +25,16 @@ import {
 } from "./core/core-operation-helpers";
 import {
   MoveOperationResultSchema,
-  MoveOperationStateSchema,
   createMoveOperation,
 } from "./core/move-operation";
+import {
+  HostedMoveOperationResultSchema,
+  accumulateHostedMoveObservations,
+  initialHostedMoveState,
+  hostedMoveCleanupEffects,
+  tickHostedMove,
+} from "./core/hosted-move-operation";
+import { HostedMoveOperationStateSchema } from "./core/hosted-move-state";
 import { createObserveOperation } from "./core/observe-operation";
 import {
   WaitOperationArgumentsSchema,
@@ -187,7 +194,7 @@ function waitStartAvailability(
 }
 
 function moveResult(stateValue: Readonly<JsonObject>): JsonObject {
-  const state = MoveOperationStateSchema.parse(stateValue);
+  const state = HostedMoveOperationStateSchema.parse(stateValue);
   return MoveOperationResultSchema.parse({
     nearby: state.accumulatedObservations.slice(
       state.observationDeliveryCursor,
@@ -199,7 +206,7 @@ function acknowledgeMoveResult(
   stateValue: Readonly<JsonObject>,
   resultValue: Readonly<JsonObject>,
 ): JsonObject {
-  const state = MoveOperationStateSchema.parse(stateValue);
+  const state = HostedMoveOperationStateSchema.parse(stateValue);
   const expected = moveResult(state);
   const actual = MoveOperationResultSchema.parse(resultValue);
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -516,7 +523,8 @@ function coreAgentOperationImplementations(): ReadonlyMap<
   const observe = createObserveOperation();
   const wait = createWaitOperation();
   const implementations: readonly UnboundAgentOperationRuntime[] = [
-    legacyCoreRuntime(move, {
+    {
+      ...legacyCoreRuntime(move, {
       displayName: "Move",
       parametersSchema: ENTITY_TARGET_ARGUMENTS_SCHEMA,
       target: { kind: "object", requiredCapabilities: ["approachable"] },
@@ -524,13 +532,34 @@ function coreAgentOperationImplementations(): ReadonlyMap<
       resultFromState: moveResult,
       fuseFromState: moveResult,
       acknowledgeFuseResult: acknowledgeMoveResult,
-      start: (context, operationCall) =>
-        startAfterAvailability(
+      start: (context, operationCall) => {
+        const available = startAfterAvailability(
           move,
           operationCall,
           moveStartAvailability(context, operationCall.arguments),
-        ),
-    }),
+        );
+        if (available.kind !== "started") return available;
+        const firstStep = tickHostedMove(context, operationCall);
+        if (firstStep.kind === "running") return { ...firstStep, kind: "started" };
+        if (firstStep.kind === "complete") return {
+          kind: "started", proposal: { effects: [] }, nextState: firstStep.nextState,
+        };
+        return firstStep;
+      },
+      }),
+      stateSchema: HostedMoveOperationStateSchema,
+      resultSchema: HostedMoveOperationResultSchema,
+      domainFailures: hostedFailures(move).map((failure) => ({ ...failure, resultSchema: HostedMoveOperationResultSchema })),
+      fail: (context, operation, failure) => ({
+        ...hostedMoveCleanupEffects(context, operation), result: { ...moveResult(operation.state), failure },
+      }),
+      cancel: (context, operation) => ({
+        ...hostedMoveCleanupEffects(context, operation), result: moveResult(operation.state),
+      }),
+      initialState: initialHostedMoveState,
+      tick: tickHostedMove,
+      accumulateObservations: accumulateHostedMoveObservations,
+    },
     legacyCoreRuntime(observe, {
       displayName: "Observe",
       parametersSchema: ENTITY_TARGET_ARGUMENTS_SCHEMA,

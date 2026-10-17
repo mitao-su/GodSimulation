@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { ActionFailedEventSchema } from "./action-failed.event";
 import { AgentNeedChangedEventSchema } from "./agent-need-changed.event";
+import { AgentMovedEventSchema } from "./agent-moved.event";
 import { DecisionAcceptedEventSchema } from "./decision-accepted.event";
 import { DecisionRequestedEventSchema } from "./decision-requested.event";
 import { InteractionArbitratedEventSchema } from "./interaction-arbitrated.event";
@@ -21,6 +22,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   InteractionArbitratedEventSchema,
   ObjectStateChangedEventSchema,
   AgentNeedChangedEventSchema,
+  AgentMovedEventSchema,
   ActionFailedEventSchema,
   OperationStartedEventSchema,
   OperationResultEventSchema,

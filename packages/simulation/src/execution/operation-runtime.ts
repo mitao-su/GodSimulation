@@ -116,6 +116,10 @@ export interface HostedOperationRuntime {
   readonly resultSchema: z.ZodType<JsonObject>;
   readonly stateSchema: z.ZodType<JsonObject>;
   readonly parametersSchema: z.ZodType<JsonObject>;
+  accumulateObservations?(
+    operation: OperationRuntimeCall,
+    observations: readonly OperationObservation[],
+  ): JsonObject;
   initialState(
     context: OperationRuntimeContext,
     host: OperationHostReference,

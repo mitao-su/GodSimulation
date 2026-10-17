@@ -964,7 +964,7 @@ export function advanceHostedOperationBatch(
     const committed = commitLifecycleTransition(
       nextWorld,
       registry,
-      result.operation,
+      entry.operation,
       proposal.proposal,
       entry.operation.callId,
       proposal.phase,
