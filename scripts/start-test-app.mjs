@@ -85,8 +85,7 @@ class ScenarioDecisionProvider {
     await waitForDelay(thinkingDelay, signal);
 
     if (this.#scenario === "basic-loop") {
-      const bobAlreadyNearFridge = request.agentId === "bob";
-      return request.decisionReason.code === "initial_goal" && !bobAlreadyNearFridge
+      return request.decisionReason.code === "initial_goal"
         ? directDecision(
             operation("core.move", { targetEntityId: "fridge-1" }),
             `Deterministic ${this.#scenario} decision`,

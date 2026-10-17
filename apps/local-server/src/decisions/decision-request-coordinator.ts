@@ -131,10 +131,9 @@ export class DecisionRequestCoordinator {
       }
 
       if (proposal === null) {
-        const message = [
-          "Decision correction attempts exhausted.",
-          lastError instanceof Error ? lastError.message : String(lastError ?? "unknown validation error"),
-        ].join(" ");
+        const message = lastError instanceof Error
+          ? lastError.message
+          : String(lastError ?? "unknown validation error");
         const failure = TechnicalFailureSchema.parse({
           id: `failure:model:${request.requestId}`,
           category: "model",

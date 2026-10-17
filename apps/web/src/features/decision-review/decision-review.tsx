@@ -8,18 +8,38 @@ export interface DecisionReviewProps {
 
 type TrackProposal = WorldView["pendingDecisions"][number]["headProposal"];
 
-function proposalText(proposal: TrackProposal): string {
+function operationText(
+  task: Extract<NonNullable<TrackProposal>, { kind: "replace" }>['task'],
+  view: WorldView,
+): string {
+  if (task.kind === "empty_task") return "清空轨道";
+  const targetEntityId = task.hostEntityId ??
+    (typeof task.arguments.targetEntityId === "string"
+      ? task.arguments.targetEntityId
+      : undefined);
+  const target = targetEntityId === undefined
+    ? undefined
+    : view.entities.find((entity) => entity.entityId === targetEntityId);
+  if (task.operationId === "core.move" && target?.kind === "object") {
+    return `Move to ${target.displayName}`;
+  }
+  if (task.operationId.startsWith("object.") && target?.kind === "object") {
+    const action = task.operationId.slice(task.operationId.lastIndexOf(".") + 1);
+    const verb = action.charAt(0).toUpperCase() + action.slice(1);
+    const noun = target.displayName.charAt(0).toLowerCase() + target.displayName.slice(1);
+    return `${verb} ${noun}`;
+  }
+  const argumentsText = Object.keys(task.arguments).length === 0
+    ? ""
+    : ` ${JSON.stringify(task.arguments)}`;
+  const hostText = task.hostEntityId === undefined ? "" : ` @${task.hostEntityId}`;
+  return `${task.operationId}${hostText}${argumentsText}`;
+}
+
+function proposalText(proposal: TrackProposal, view: WorldView): string {
   if (!proposal) return "等待决策";
   if (proposal.kind === "continue") return proposal.label;
-  if (proposal.task.kind === "empty_task") return "清空轨道";
-  const argumentsText =
-    Object.keys(proposal.task.arguments).length === 0
-      ? ""
-      : ` ${JSON.stringify(proposal.task.arguments)}`;
-  const hostText = proposal.task.hostEntityId === undefined
-    ? ""
-    : ` @${proposal.task.hostEntityId}`;
-  return `${proposal.task.operationId}${hostText}${argumentsText}`;
+  return operationText(proposal.task, view);
 }
 
 export function DecisionReview({ view }: DecisionReviewProps) {
@@ -54,6 +74,7 @@ export function DecisionReview({ view }: DecisionReviewProps) {
             const agentName =
               view.agents.find((agent) => agent.agentId === decision.agentId)
                 ?.displayName ?? decision.agentId;
+            const proposalReason = decision.proposalReason ?? decision.reason;
             return (
               <div className="decision-proposal" key={decision.requestId}>
                 <div className="decision-proposal__agent">
@@ -62,15 +83,15 @@ export function DecisionReview({ view }: DecisionReviewProps) {
                 </div>
                 <div className="decision-proposal__track">
                   <span>HEAD</span>
-                  <strong>{proposalText(decision.headProposal)}</strong>
+                  <strong>{proposalText(decision.headProposal, view)}</strong>
                 </div>
                 <div className="decision-proposal__track">
                   <span>BODY</span>
-                  <strong>{proposalText(decision.bodyProposal)}</strong>
+                  <strong>{proposalText(decision.bodyProposal, view)}</strong>
                 </div>
-                <span className="decision-proposal__reason">
-                  {decision.proposalReason ?? decision.reason}
-                </span>
+                {proposalReason !== view.pauseReason?.message ? (
+                  <span className="decision-proposal__reason">{proposalReason}</span>
+                ) : null}
               </div>
             );
           })}
