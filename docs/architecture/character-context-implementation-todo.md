@@ -1,8 +1,8 @@
 # 角色上下文、感知与记忆系统实施 TODO
 
-> 状态：实施中；W1-IF、W1-A-P1、W1-D 与 W2-C 已合入，阶段 0 与阶段 2 已按 W1-D 的实现边界拆分完成项和后续接线
+> 状态：实施中；W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C 与 direct `core.move` execution 修复（PR #11，merge c9335a2）已合入；W1-C 正在收口，L5 设讨论门禁
 >
-> 更新日期：2026-09-05
+> 更新日期：2026-10-18
 >
 > 需求基线：[《角色上下文、感知与记忆系统原始需求》](./character-context-original-requirements.md)
 >
@@ -133,6 +133,10 @@
 > W1-IF 公共接口地基已于 2026-09-04 通过 PR #4 合入 `main`（merge commit `88c8ac08437099846333dfed3a5fff9abbd12c13`）。本 PR 已提供宿主引用、静态说明书、目标与参数约束、直接决策形状、统一生命周期/失败/终止契约，以及 L1 快照字段 Schema 与序列化端口；没有接入注册、执行、模型决策切换、线上快照版本或迁移。以下阶段 1 条目仍以运行时实现和验收测试为准，不能因接口已合入而提前勾选。
 
 > W1-A-P1 已于 2026-09-04 通过 PR #7 合入 `main`（merge commit `bb9f3b0fb69028c86055cfeddd471fa3c458e0aa`）。本 PR 完成角色 operation 显式挂载、宿主注册/静态说明书契约、角色 `read` 及 `ObjectDefinition.capabilities`；直接调用生产切换、首步世界前置校验、声音/回忆运行时和阶段 1 的完整验收仍未完成。
+
+> W1-A-P2 已于 2026-09-06 通过 PR #8 合入 `main`（merge commit `f64d60a9478cf0ab9f3dcf019ab358e7be157e59`），W1-B-P1 已于同日通过 PR #6 合入（merge commit `579e6b0eb9988b36c4f81934dac98d0473883405`），W1-B-P2 已于 2026-09-09 通过 PR #10 合入（merge commit `49ac7838b58db69033649f51c5e764f905d36823`）。这些 PR 已提供直接宿主绑定、通用生命周期/失败分类和原子终止；尚不能据此勾选阶段 1 闭环。
+
+> execution 阻塞已解除：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），direct `core.move` hosted 生命周期、原子移动效果、冻结回执与锁门改道回归已通过；当前 W1-C 仍未合入，不能提前勾选阶段 1 闭环。
 
 - [x] 定义统一的 `TaskTrack = HEAD | BODY`，从插件 SDK、动作资源、快照和测试中删除 `HANDS`。
 - [x] 将所有现有手部交互占用迁移到 `BODY`，检查门、冰箱、马桶及自动通行等插件行为。

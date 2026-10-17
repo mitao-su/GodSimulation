@@ -8,8 +8,8 @@
 
 TODO、Wave、AGENTS.md 和提示词文档基线已合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
 
-1. W1-A-P1、W1-D 已合入；当前继续推进 W1-A-P2、W1-B-P1，两者各自在合入后继续下一片。
-2. W1-A-P2、W1-B-P2 都合入后派 W1-C；W1-C 合入后即可派 W1-B-P3，最后派 W1-X。W1-D 对这两项的前置已经满足。
+1. W1-A-P1/P2、W1-B-P1/P2 与 direct `core.move` execution 修复（PR #11）已合入；当前继续 W1-C，完成后派 W1-B-P3/W1-X。
+2. W1-C 合入后派 W1-B-P3，再派 W1-X；W1-D 对这两项的前置已经满足。
 3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
 4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。
 5. 派 W4-IF；随后优先派 W4-A1、A2、B1、C，按前置滚动派 A3、B2；所有 L4 实现合入后派 W4-X。W3-B 与 L4 所有在施工轨合计不得超过四条，名额不足时优先 L4 主线。
@@ -114,6 +114,26 @@ W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-I
 已实现且已合入的范围：世界锁定规则新增墙、开门和关门声音衰减并严格校验；Worker 现实 Tick 间隔迁入 GOD_SIM_TICK_INTERVAL_MS 且校验 Node 定时器边界；策略字面量 AST 扫描接入 pnpm lint；新增 projectCharacterTime、CharacterTimeAnchors 和清醒/睡眠/整理时长纯派生 API，并验证倍速不改变同一 Tick 的游戏时间。
 
 实际变更边界：没有接入 perception_now、角色生命周期锚点写入或线上快照，没有实现声音传播场景，也没有猜定 L5 睡眠曲线和其他待定数值。前述接线仍由 W3-A3、指定保存格式 owner、W2-D 与 L5 后续轨线负责。
+```
+
+### W1-B execution 修复：direct `core.move` 生命周期推进（PR #11 已合入）
+
+```text
+任务：修复 direct `core.move` 建立后无法完成的问题。前置：W1-A-P2、W1-B-P1/P2 已合入；从最新 origin/main 新建独立分支，建议 wave1/w1b-direct-move-lifecycle-fix。
+
+现象：direct 决策可以绑定角色自身的 core.move，创建 callId，并在首个执行步骤通过世界条件检查；但 move 是 indeterminate，当前 agent-operation-adapter.ts 中 legacy core runtime 只有 start，没有合法的 tick/完成信号，action-runner.ts 的旧 action runner 又跳过 OperationRuntimeCall。结果 Alice 的 direct move 在多 Tick 后仍为 active，冰箱/厕所场景无法继续。
+
+目标：让 direct core.move 只通过现有 hosted runner/OperationRuntimeRegistry 唯一路径推进。保留 move 的 BODY + indeterminate 语义，不伪造固定时长，不把移动复制回旧 action plan。补齐 move 的运行状态推进、正常到达完成、无路/锁门等已声明失败，以及必要的 move 中间回执/完成信号映射；确保终态仍经 W1-B 原子终止事务产生唯一 terminal operation_result，失败分类遵守 operation 自身 domainFailure，技术异常进入 TECHNICALLY_BLOCKED。
+
+文件边界：主写 packages/simulation/src/execution/agent-operation-adapter.ts、core/move-operation.ts 及 hosted runner 所需的 execution 文件和测试；如确需调整 apps/simulation-worker 的 direct provider 接线，只改其 owner 负责的最小接线。不得由本任务修改 simulation/decision、cognition、模型协议、快照版本/迁移或另建第二套移动状态。若发现 W1-C worktree 的改动，不要 reset、checkout 或覆盖。
+
+必须补测试：
+1. direct 决策建立 core.move 后，至少推进一个 Tick，角色位置按现有移动规则变化，抵达后 active operation 被清理，BODY 为空且恰好产生一条 terminal completed result；
+2. direct move 的首步失败、无路/锁门失败仍走声明的 domainFailure，其他世界状态不变；
+3. hosted move 在冻结期间只产生 fuse 中间回执，不推进进度；继续后从原状态推进；
+4. 回归冰箱和厕所 direct 场景，确认 move 完成后后续 operation 能建立并执行。
+
+验证要求：对新增回归做变异验证，临时恢复“move 无 tick/跳过 hosted call”的旧行为并确认测试失败，再还原；运行 pnpm lint、pnpm typecheck、pnpm test、pnpm build、pnpm test:e2e，如 e2e 仍失败必须报告确切失败点。提交 Conventional Commit，提 PR，不自行 merge、不勾选 TODO、不更新 Wave 合入状态。
 ```
 
 ### W1-X 协议集成

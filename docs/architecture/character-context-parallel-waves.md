@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统 — 并行施工编排（Wave Plan）
 
-> 状态：W1-IF、W1-A-P1、W1-D、W2-C 已合入；L1 继续推进 W1-A-P2/W1-B，W1-A-P2 与 W1-B-P2 合入后派 W1-C；L5 设讨论门禁，暂不派发
+> 状态：W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C 与 direct `core.move` execution 修复已合入（PR #11，merge c9335a2）；W1-C 正在收口，L5 设讨论门禁，暂不派发
 >
 > 行为基线：[《实施 TODO》](./character-context-implementation-todo.md)（下称「TODO」）
 >
@@ -66,8 +66,10 @@ flowchart TB
   W1IF --> W1B12["W1-B P1/P2 生命周期/原子终止"]
   W1IF --> W1D["W1-D 规则与 Tick 时间（已合入）"]
   W2C["W2-C 归档存储独立支线（已合入）"]
-  W1A --> W1C["W1-C 直接决策/纠错/全员放行"]
+  W1A --> W1C["W1-C 直接决策/纠错/全员放行（进行中）"]
   W1B12 --> W1C
+  W1B12 --> MOVEFIX["W1-B execution 修复：direct core.move 生命周期（PR #11 已合入）"]
+  MOVEFIX --> W1C
   W1A --> W1B3["W1-B P3 快照迁移/恢复"]
   W1C --> W1B3
   W1D --> W1B3
@@ -120,7 +122,7 @@ flowchart TB
 
 | 层 | 先行 PR | 并行实现轨 | 收口 PR | 最大并行度 |
 | --- | --- | --- | --- | --- |
-| L1 | W1-IF（已合入） | W1-A-P1 已合入；当前推进 W1-A-P2 / W1-B-P1，A-P2 与 B-P2 后滚动启动 W1-C | W1-B-P3 → W1-X | 4 |
+| L1 | W1-IF（已合入） | W1-A-P1/P2、W1-B-P1/P2 与 direct `core.move` execution 修复（PR #11）已合入；当前收口 W1-C | W1-B-P3 → W1-X | 4 |
 | L2 | W2-IF | W2-A / W2-B / W2-D | W2-X | 4 |
 | L3 | W3-IF | W3-A1 / W3-A2 / W3-A3；W3-B 作为不阻塞 L4 的并行支线 | W3-X | 4 |
 | L4 | W4-IF | 首批 W4-A1 / W4-A2 / W4-B1 / W4-C；滚动启动 W4-A3 / W4-B2 | W4-X | 4 |
@@ -153,6 +155,7 @@ flowchart TB
 ### W1-A 宿主注册、说明书、直接调用与首步校验
 
 - **P1 合入状态**：已于 2026-09-04 通过 PR #7 合入 `main`（merge commit `bb9f3b0fb69028c86055cfeddd471fa3c458e0aa`）。已完成角色显式挂载基础 operation、宿主注册与静态说明书校验、角色 `read` operation、对象 `capabilities` 契约及 starter agents 挂载声明；`recall`/`speak` 尚未接入对应运行时，实际调用保持显式技术阻塞。
+- **P2 合入状态**：已于 2026-09-06 通过 PR #8 合入 `main`（merge commit `f64d60a9478cf0ab9f3dcf019ab358e7be157e59`）。已完成直接宿主绑定、参数/轨道/宿主校验及首步 operation 前置校验；没有修改通用 action runner 或决策层。
 - **P1 边界**：旧动态候选路径仅保留按角色挂载过滤的过渡兼容；直接调用生产切换、首步世界条件校验及候选路径删除仍由 P2/W1-C/W1-X 完成。阶段 1 的对应验收条目不因本 PR 合入而提前勾选。
 
 - **覆盖**：TODO 阶段 1 中宿主 operation、说明书、目标需求、`capabilities`、直接调用和首步前置校验条目。
@@ -176,16 +179,20 @@ flowchart TB
 - **主写**：P1/P2 独占 `simulation/execution/operation-lifecycle*`、action runner、终止事务与 effect commit 接线，并主写相关 protocol events；P3 主写 `simulation/engine` 的快照 codec/restorer/migrations。
 - **本层快照 owner**：只有本轨可修改快照版本号与迁移。W1-IF 只定义字段片段；P3 在 W1-A-P2、W1-C、W1-D 全部合入后一次接入并升级。
 - **PR 拆分**：P1“生命周期/失败分类”→P2“原子终止/补偿”可与 W1-A/W1-D 并行；P3“快照迁移/恢复契约”最后合入。
+- **P1 合入状态**：已于 2026-09-06 通过 PR #6 合入 `main`（merge commit `579e6b0eb9988b36c4f81934dac98d0473883405`）。已完成通用 hosted 生命周期、失败分类和执行器接线。
+- **P2 合入状态**：已于 2026-09-09 通过 PR #10 合入 `main`（merge commit `49ac7838b58db69033649f51c5e764f905d36823`）。已完成原子终止、补偿、重试和终态结果唯一性。
+- **execution 阻塞已解除**：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），补齐 direct `core.move` 的 hosted tick、完成、锁门改道、冻结回执和原子终止回归；W1-C 已从最新主线恢复。
 
 ### W1-C 决策纠错与全员原子放行
 
 - **覆盖**：TODO 阶段 1 的直接调用输出、协议预检、纠错循环、尝试耗尽、全员 READY、批量放行及审查界面。
-- **启动依赖**：W1-A-P2 与 W1-B-P2 已合入。A 提供直接绑定，B 提供取消/终止事务；因此 C 不需要临时复制这两套行为。
+- **启动依赖**：W1-A-P2 与 W1-B-P2 已合入。A 提供直接绑定，B 提供取消/终止事务；但在恢复端到端验收前，必须先完成上方记录的 direct `core.move` execution 修复。
 - **边界**：只拒绝非法空任务分支、未知 operation、无法绑定的宿主、错误宿主引用形式、轨道/参数 Schema/同步一致性/目标补丁/取消协议错误；不得检查距离、占用、材料、能力或资源争用。
 - **主写**：`simulation/decision/**`、`cognition` 当前决策请求/提示词、`model-gateway/**`、`protocol/model` 与必要 IPC、`apps/simulation-worker` 的决策接线、`apps/local-server` 的决策协调、`apps/web` 决策审查。
 - **只读**：execution 的实现；只通过 W1-IF 窄接口建立或取消调用。
 - **切换责任**：停止在请求中生成/发送 `taskOptions`，切换到直接引用协议；保留仍被旧快照迁移读取的旧 Schema，待 W1-B-P3/W1-X 收口。
 - **注意**：本轨只提供 `GoalUpdateValidator` 接口和原子挂点；目标状态与实际补丁行为由 W4-A2 完成，对应 TODO 暂不勾选为闭环。
+- **当前状态**：W1-C worktree 已基于包含 PR #11 的最新 `origin/main` 继续施工，负责直接协议、纠错、全员 READY 与审查界面；不得再修改 execution 或建立第二套移动路径。
 
 ### W1-D 规则收尾与 Tick 时间（已合入）
 
