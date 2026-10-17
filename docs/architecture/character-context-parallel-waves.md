@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统 — 并行施工编排（Wave Plan）
 
-> 状态：W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C、direct `core.move` execution 修复（PR #11，merge c9335a2）与 W1-C（PR #13，merge 11e3e3e）已合入；当前推进 W1-B-P3，随后 W1-X。W5-IF 已形成协议 PR #14（等待 W4-X 门禁），W6 仍需先补公共观察字段与回放验收契约
+> 状态：W1-IF、W1-A-P1/P2、W1-B-P1/P2/P3、W1-D、W2-C、direct `core.move` execution 修复（PR #11）、W1-C（PR #13）已合入；W1-B-P3 于 PR #16（merge `ce639b4`）完成快照 V4 与恢复。当前推进 W1-X；W2-IF 有基于 `ce639b4` 的未合入接口草案，必须在 W1-X 合入后 rebase 并通过验收。W5-IF PR #14 当前 head `e81656f`，仍等待 W4-X 门禁；W6 仍需先补公共观察字段与回放验收契约
 >
 > 行为基线：[《实施 TODO》](./character-context-implementation-todo.md)（下称「TODO」）
 >
@@ -70,15 +70,15 @@ flowchart TB
   W1B12 --> W1C
   W1B12 --> MOVEFIX["W1-B execution 修复：direct core.move 生命周期（PR #11 已合入）"]
   MOVEFIX --> W1C
-  W1A --> W1B3["W1-B P3 快照迁移/恢复"]
+  W1A --> W1B3["W1-B P3 快照迁移/恢复（PR #16 已合入）"]
   W1C --> W1B3
   W1D --> W1B3
-  W1A --> W1X["W1-X 协议集成"]
+  W1A --> W1X["W1-X 协议集成（进行中）"]
   W1B3 --> W1X
   W1C --> W1X
   W1D --> W1X
 
-  W1X --> W2IF["W2-IF 物品/外观/视觉接口"]
+  W1X --> W2IF["W2-IF 物品/外观/视觉接口（草案待 rebase/验收）"]
   W2IF --> W2A["W2-A 物品内核与外观"]
   W2IF --> W2B["W2-B 视觉与 move 回执"]
   W2IF --> W2D["W2-D 声音传播纯算法"]
@@ -122,11 +122,11 @@ flowchart TB
 
 | 层 | 先行 PR | 并行实现轨 | 收口 PR | 最大并行度 |
 | --- | --- | --- | --- | --- |
-| L1 | W1-IF（已合入） | W1-A-P1/P2、W1-B-P1/P2、W1-D、direct `core.move` 修复与 W1-C（PR #13）已合入；当前 W1-B-P3 | W1-B-P3 合入后 → W1-X | 4 |
-| L2 | W2-IF | W2-A / W2-B / W2-D | W2-X | 4 |
+| L1 | W1-IF（已合入） | W1-A-P1/P2、W1-B-P1/P2、W1-D、direct `core.move` 修复与 W1-C（PR #13）已合入；W1-B-P3 已通过 PR #16 合入；当前 W1-X | W1-X | 4 |
+| L2 | W2-IF（接口草案在建，尚未合入） | W2-A / W2-B / W2-D（等待 W1-X 与 W2-IF） | W2-X | 4 |
 | L3 | W3-IF | W3-A1 / W3-A2 / W3-A3；W3-B 作为不阻塞 L4 的并行支线 | W3-X | 4 |
 | L4 | W4-IF | 首批 W4-A1 / W4-A2 / W4-B1 / W4-C；滚动启动 W4-A3 / W4-B2 | W4-X | 4 |
-| L5 | 讨论结论已写回；W5-IF PR #14 待 W4-X 后合入 | 暂不派发 W5-A/B/C，等待 W4-X | W5-IF → W5-A/B/C | 4 |
+| L5 | 讨论结论已写回；W5-IF PR #14 head `e81656f` 待 W4-X 后合入 | 暂不派发 W5-A/B/C，等待 W4-X 与 W5-IF 合入 | W5-IF → W5-A/B/C | 4 |
 | L6 | W6 观察/回放契约待补 | 暂不派发实现轨 | W6-IF/验收准备 → W6-A/B | 2 |
 
 拆分增加的是可审查的合入点，不减少可并行的独立工作。W2-C 已作为独立支线合入，不阻塞 L1-L4，也不再占用后续层的并发名额。
@@ -181,6 +181,7 @@ flowchart TB
 - **PR 拆分**：P1“生命周期/失败分类”→P2“原子终止/补偿”可与 W1-A/W1-D 并行；P3“快照迁移/恢复契约”最后合入。
 - **P1 合入状态**：已于 2026-09-06 通过 PR #6 合入 `main`（merge commit `579e6b0eb9988b36c4f81934dac98d0473883405`）。已完成通用 hosted 生命周期、失败分类和执行器接线。
 - **P2 合入状态**：已于 2026-09-09 通过 PR #10 合入 `main`（merge commit `49ac7838b58db69033649f51c5e764f905d36823`）。已完成原子终止、补偿、重试和终态结果唯一性。
+- **P3 合入状态**：已于 2026-10-18 通过 PR #16 合入 `main`（merge commit `ce639b4`）。快照升级至 V4，持久化 hosted call、pending termination、terminal ledger 与 direct decision 恢复状态，并补齐 V3→V4 恢复迁移和跨字段不变量校验；恢复不重新解析 duration。验证记录：`pnpm lint`、`pnpm typecheck`、串行 `pnpm test`（93 files / 549 tests）及 `pnpm build` 通过；本 PR 未记录 `pnpm test:e2e` 结果。
 - **execution 阻塞已解除**：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），补齐 direct `core.move` 的 hosted tick、完成、锁门改道、冻结回执和原子终止回归。
 
 ### W1-C 决策纠错与全员原子放行
@@ -211,6 +212,7 @@ flowchart TB
 - 删除旧 `taskOptions`、`TaskOptionId`、`offers/buildTaskOptions`、面向模型的 `available_interactions` 查询、调用建立阶段的 `canStart` 预筛，以及全局自动授予核心 operation 路径的残留导出与死代码；旧快照只能经 W1-B-P3 的显式迁移进入新版。
 - 建立跨模块测试：空任务不创建调用；角色未挂载 operation 时不可调用；说明书不随世界状态变化；可绑定调用的世界前置失败发生在首个执行步骤；无效引用走纠错；`read` 在放行后、推进下一 Tick 前完成且 `worldTick` 不变，并可在同一 Tick 连续形成独立调用。
 - 全量五件套通过后才进入 L2。
+- **当前状态**：工作分支 `wave1/w1x-protocol-cleanup-clean` 基于 `ce639b4`，正在删除生产路径中的动态候选与全局 operation 授予残留；提交前仍需验证 direct 首步世界条件失败及旧快照/回放兼容边界。
 
 ### W5-IF 记忆 IPC 公共协议（门禁后置）
 
@@ -228,6 +230,7 @@ flowchart TB
 - 一次性定义 L2 所需快照字段片段和序列化端口，但不改线上快照版本；提交该 PR 的 W2-A agent 也是 W2-X 保存格式 owner。
 - 本 PR 补齐上述公共契约的包根导出；后续实现轨不得漂移 W2-B/W2-D 已开始消费的接口。
 - W2-B 只能依赖公开外观读取接口，不能读取 W2-A 私有状态。
+- **当前状态**：工作分支 `wave2/w2if-item-perception-contracts` 基于 `ce639b4` 的接口草案正在审查；它早于 W1-X 合入启动，故必须 rebase 到 W1-X 合入后的 `main`，解决仅限本轨所有权的冲突并重新验证后方可创建/更新 PR。W2-A/B/D 不得基于该未合入分支开工。
 
 ### W2-A 最小物品内核与角色外观
 
@@ -367,7 +370,7 @@ flowchart TB
 
 ## 9. ⚠️ 第五层开工前讨论门禁（L5）
 
-讨论结论已写回并形成 W5-IF PR #14（最新提交 `684e498`），但 PR 必须等待 W4-X 合入后才能进入 `main`。结论如下：
+讨论结论已写回并形成 W5-IF PR #14（最新提交 `e81656f`；包含 `684e498` 协议主体及三项 guard 修复），但 PR 必须等待 W4-X 合入后才能进入 `main`。结论如下：
 
 1. simulation-worker 使用现有 `child_process.fork` IPC；不新增 TCP 端口。
 2. 重要状态先提交 Event + Snapshot 检查点，再发 memory request；host 只持久化事实与审计，不裁决 WorldState。

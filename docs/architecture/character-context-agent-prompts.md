@@ -2,18 +2,18 @@
 
 > 使用方式：每次派发时，把“公共前缀”和一个“任务块”一起发送给 agent。
 >
-> 当前按已合入主线推进 L1；W1-B-P3 与 W1-X 可派发，L2-L4 仍按依赖顺序推进。W5-IF 协议 PR #14 已完成但等待 W4-X 门禁；W6 先行补公共观察字段与回放契约，完成前不派发 W6-A/B。
+> 当前按已合入主线推进 L1/L2；W1-B-P3 已通过 PR #16 合入，W1-X 正在收口，W2-IF 有未合入接口草案且必须在 W1-X 后 rebase/验收。W5-IF PR #14 当前 head `e81656f`，等待 W4-X 门禁；W6 先行补公共观察字段与回放契约，完成前不派发 W6-A/B。
 
 ## 派发顺序
 
 TODO、Wave、AGENTS.md 和提示词文档基线已合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
 
-1. W1-A-P1/P2、W1-B-P1/P2、W1-D、direct `core.move` execution 修复（PR #11）与 W1-C（PR #13）已合入；当前派发 W1-B-P3 与 W1-X，二者分别负责快照恢复与生产死代码收口。
-2. W1-B-P3 与 W1-X 均合入并通过全量验证后派 W2-IF；W1-B-P3 是线上快照 owner，W1-X 不得修改快照版本/迁移。
-3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
+1. W1-A-P1/P2、W1-B-P1/P2、W1-D、direct `core.move` execution 修复（PR #11）、W1-C（PR #13）与 W1-B-P3（PR #16）已合入；当前完成 W1-X 生产死代码收口。
+2. W1-X 合入并通过全量验证后，审查已在 `ce639b4` 上起草的 W2-IF，rebase 到新 `main` 并重新验证；W1-B-P3 是线上快照 owner，W1-X 不得再修改快照版本/迁移。
+3. W2-IF 合入后，并行派 W2-A-P1、W2-B、W2-D；A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
 4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。
 5. 派 W4-IF；随后优先派 W4-A1、A2、B1、C，按前置滚动派 A3、B2；所有 L4 实现合入后派 W4-X。W3-B 与 L4 所有在施工轨合计不得超过四条，名额不足时优先 L4 主线。
-6. W4-X 合入后先合 W5-IF，再按最终拆分派 W5-A/B/C；W5 全部合入且 W3-B 已验收后，先合 W6-IF 公共观察字段与回放夹具，再派 W6-A/B。W6 不得越权修实现包，发现缺陷另开修复 PR。
+6. W4-X 合入后先 rebase、验证并合入 W5-IF，再按最终拆分派 W5-A/B/C；W5 全部合入且 W3-B 已验收后，先合 W6-IF 公共观察字段与回放夹具，再派 W6-A/B。W6 不得越权修实现包，发现缺陷另开修复 PR。
 
 W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-IF/W4-X 也分别保持同一 owner。每个 PR 合入后仍要删除旧 worktree，并从最新 main 为下一片重新建分支。
 
@@ -40,7 +40,7 @@ W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-I
 ### W1-IF 公共接口（已合入 PR #4）
 
 ```text
-审计记录：W1-IF 已于 2026-09-04 通过 PR #4 合入 main，merge commit 为 88c8ac08437099846333dfed3a5fff9abbd12c13；无需再次派发。提交者仍是后续 W1-B-P3 的 L1 保存格式 owner。
+审计记录：W1-IF 已于 2026-09-04 通过 PR #4 合入 main，merge commit 为 88c8ac08437099846333dfed3a5fff9abbd12c13；无需再次派发。提交者仍是后续 W1-B-P3 的 L1 保存格式 owner。W1-B-P3 已于 2026-10-18 通过 PR #16 合入，merge commit `ce639b4`，保存格式版本为 V4。
 
 已实现且已合入的范围：AgentDefinition.operations / AgentOperationDefinition；角色、物品、家具三种宿主引用；必填静态说明书；统一外部目标需求；ObjectDefinition.capabilities；continue | replace(emptyTask | operation 引用) 的新版决策形状；统一 operation 的 start、可选 tick、complete、fail、cancel、fuse 生命周期签名；首步校验结果、类型化失败和原子终止事务窄接口；L1 所需快照字段的独立 Schema 片段和序列化端口。operation 引用包含 operationId、角色自身可省略的 hostEntityId 和 arguments；空任务分支不得携带这些字段或创建 callId。已补齐所有跨包消费者所需的包根导出。
 
@@ -376,7 +376,7 @@ speak 正常完成 Tick 只计算一次传播并产生多接收者批次；每�
 ## L5/L6 状态
 
 ```text
-⚠️ L5 讨论已形成 W5-IF PR #14（最新提交 `684e498`），但必须等待 W4-X 后合入。W5-A/B/C 的实现提示词仍不派发；W5-IF 合入后再生成最终任务块。
+⚠️ L5 讨论已形成 W5-IF PR #14（当前 head `e81656f`，协议主体 `684e498`），但必须等待 W4-X 后 rebase、全量验证并合入。W5-A/B/C 的实现提示词仍不派发；W5-IF 合入后再生成最终任务块。
 
 ⚠️ W6 暂不派发实现轨。先定义 W6-IF：`WorldView`/检查器只读字段（睡眠、整理、疲惫、Token、容量、物品、memory receipt 审计）以及消费已持久化结果的确定性回放夹具。现有仓库没有这些公共字段或端到端回放 harness，不能直接开 W6-A/B。
 ```
