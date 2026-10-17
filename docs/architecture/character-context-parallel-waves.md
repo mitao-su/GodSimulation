@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统 — 并行施工编排（Wave Plan）
 
-> 状态：W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C 与 direct `core.move` execution 修复已合入（PR #11，merge c9335a2）；W1-C 正在收口，L5 设讨论门禁，暂不派发
+> 状态：W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C、direct `core.move` execution 修复（PR #11，merge c9335a2）与 W1-C（PR #13，merge 11e3e3e）已合入；当前推进 W1-B-P3，随后 W1-X。W5-IF 已形成协议 PR #14（等待 W4-X 门禁），W6 仍需先补公共观察字段与回放验收契约
 >
 > 行为基线：[《实施 TODO》](./character-context-implementation-todo.md)（下称「TODO」）
 >
@@ -66,7 +66,7 @@ flowchart TB
   W1IF --> W1B12["W1-B P1/P2 生命周期/原子终止"]
   W1IF --> W1D["W1-D 规则与 Tick 时间（已合入）"]
   W2C["W2-C 归档存储独立支线（已合入）"]
-  W1A --> W1C["W1-C 直接决策/纠错/全员放行（进行中）"]
+  W1A --> W1C["W1-C 直接决策/纠错/全员放行（已合入 PR #13）"]
   W1B12 --> W1C
   W1B12 --> MOVEFIX["W1-B execution 修复：direct core.move 生命周期（PR #11 已合入）"]
   MOVEFIX --> W1C
@@ -122,12 +122,12 @@ flowchart TB
 
 | 层 | 先行 PR | 并行实现轨 | 收口 PR | 最大并行度 |
 | --- | --- | --- | --- | --- |
-| L1 | W1-IF（已合入） | W1-A-P1/P2、W1-B-P1/P2 与 direct `core.move` execution 修复（PR #11）已合入；当前收口 W1-C | W1-B-P3 → W1-X | 4 |
+| L1 | W1-IF（已合入） | W1-A-P1/P2、W1-B-P1/P2、W1-D、direct `core.move` 修复与 W1-C（PR #13）已合入；当前 W1-B-P3 | W1-B-P3 合入后 → W1-X | 4 |
 | L2 | W2-IF | W2-A / W2-B / W2-D | W2-X | 4 |
 | L3 | W3-IF | W3-A1 / W3-A2 / W3-A3；W3-B 作为不阻塞 L4 的并行支线 | W3-X | 4 |
 | L4 | W4-IF | 首批 W4-A1 / W4-A2 / W4-B1 / W4-C；滚动启动 W4-A3 / W4-B2 | W4-X | 4 |
-| L5 | **待讨论** | 暂不派发 | 暂不确定 | 暂不确定 |
-| L6 | 无 | W6-A / W6-B | 最终验收 | 2 |
+| L5 | 讨论结论已写回；W5-IF PR #14 待 W4-X 后合入 | 暂不派发 W5-A/B/C，等待 W4-X | W5-IF → W5-A/B/C | 4 |
+| L6 | W6 观察/回放契约待补 | 暂不派发实现轨 | W6-IF/验收准备 → W6-A/B | 2 |
 
 拆分增加的是可审查的合入点，不减少可并行的独立工作。W2-C 已作为独立支线合入，不阻塞 L1-L4，也不再占用后续层的并发名额。
 
@@ -181,18 +181,19 @@ flowchart TB
 - **PR 拆分**：P1“生命周期/失败分类”→P2“原子终止/补偿”可与 W1-A/W1-D 并行；P3“快照迁移/恢复契约”最后合入。
 - **P1 合入状态**：已于 2026-09-06 通过 PR #6 合入 `main`（merge commit `579e6b0eb9988b36c4f81934dac98d0473883405`）。已完成通用 hosted 生命周期、失败分类和执行器接线。
 - **P2 合入状态**：已于 2026-09-09 通过 PR #10 合入 `main`（merge commit `49ac7838b58db69033649f51c5e764f905d36823`）。已完成原子终止、补偿、重试和终态结果唯一性。
-- **execution 阻塞已解除**：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），补齐 direct `core.move` 的 hosted tick、完成、锁门改道、冻结回执和原子终止回归；W1-C 已从最新主线恢复。
+- **execution 阻塞已解除**：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），补齐 direct `core.move` 的 hosted tick、完成、锁门改道、冻结回执和原子终止回归。
 
 ### W1-C 决策纠错与全员原子放行
 
 - **覆盖**：TODO 阶段 1 的直接调用输出、协议预检、纠错循环、尝试耗尽、全员 READY、批量放行及审查界面。
-- **启动依赖**：W1-A-P2 与 W1-B-P2 已合入。A 提供直接绑定，B 提供取消/终止事务；但在恢复端到端验收前，必须先完成上方记录的 direct `core.move` execution 修复。
+- **合入状态**：已于 2026-10-18 通过 PR #13 合入 `main`（merge commit `11e3e3e`）。已完成 direct operation 请求、纠错循环、纠错耗尽后的 `TECHNICALLY_BLOCKED`、全员 READY 原子放行、审查界面和 direct 场景回归。
+- **启动依赖**：W1-A-P2、W1-B-P2 与 direct `core.move` execution 修复已合入。W1-C 不负责快照升级；direct active operation、accepted proposal、终止重试与终态台账的恢复由 W1-B-P3 补齐。
 - **边界**：只拒绝非法空任务分支、未知 operation、无法绑定的宿主、错误宿主引用形式、轨道/参数 Schema/同步一致性/目标补丁/取消协议错误；不得检查距离、占用、材料、能力或资源争用。
 - **主写**：`simulation/decision/**`、`cognition` 当前决策请求/提示词、`model-gateway/**`、`protocol/model` 与必要 IPC、`apps/simulation-worker` 的决策接线、`apps/local-server` 的决策协调、`apps/web` 决策审查。
 - **只读**：execution 的实现；只通过 W1-IF 窄接口建立或取消调用。
 - **切换责任**：停止在请求中生成/发送 `taskOptions`，切换到直接引用协议；保留仍被旧快照迁移读取的旧 Schema，待 W1-B-P3/W1-X 收口。
 - **注意**：本轨只提供 `GoalUpdateValidator` 接口和原子挂点；目标状态与实际补丁行为由 W4-A2 完成，对应 TODO 暂不勾选为闭环。
-- **当前状态**：W1-C worktree 已基于包含 PR #11 的最新 `origin/main` 继续施工，负责直接协议、纠错、全员 READY 与审查界面；不得再修改 execution 或建立第二套移动路径。
+- **当前状态**：本轨已完成并合入；后续发现的快照缺口不得回填到 W1-C，应交由 W1-B-P3 的保存格式 owner 处理。
 
 ### W1-D 规则收尾与 Tick 时间（已合入）
 
@@ -210,6 +211,12 @@ flowchart TB
 - 删除旧 `taskOptions`、`TaskOptionId`、`offers/buildTaskOptions`、面向模型的 `available_interactions` 查询、调用建立阶段的 `canStart` 预筛，以及全局自动授予核心 operation 路径的残留导出与死代码；旧快照只能经 W1-B-P3 的显式迁移进入新版。
 - 建立跨模块测试：空任务不创建调用；角色未挂载 operation 时不可调用；说明书不随世界状态变化；可绑定调用的世界前置失败发生在首个执行步骤；无效引用走纠错；`read` 在放行后、推进下一 Tick 前完成且 `worldTick` 不变，并可在同一 Tick 连续形成独立调用。
 - 全量五件套通过后才进入 L2。
+
+### W5-IF 记忆 IPC 公共协议（门禁后置）
+
+- **协议 PR**：PR #14（最新提交 `684e498`）已定义 worker/host memory IPC 的请求、结果、身份锁、`requestReceiptSequence`、`resultReceiptSequence`、ack disposition、锁和未实现技术阻塞；局部 protocol lint/typecheck/test 已通过。
+- **当前门禁**：W5-IF 依赖 W4-X 合入后再合入 `main`。在此之前不得派发睡眠状态机、整理落库或 `recall` 运行时实现；不得把 SQLite 状态复制进模拟进程。
+- **保存边界**：请求必须在 Event + Snapshot 检查点之后发出；host 先持久化事实，worker 只在当前 `worldTick` 按接收序应用结果；冻结期间排队，调用被替换后的迟到结果只记 stale 审计。
 
 ---
 
@@ -360,30 +367,34 @@ flowchart TB
 
 ## 9. ⚠️ 第五层开工前讨论门禁（L5）
 
-L5 暂不派发 agent，也不预写最终文件所有权和实现提示词。开工前必须单独讨论并写回 TODO/Wave：
+讨论结论已写回并形成 W5-IF PR #14（最新提交 `684e498`），但 PR 必须等待 W4-X 合入后才能进入 `main`。结论如下：
 
-1. simulation-worker 如何在先提交检查点后，请求 local-server 执行记忆整理和 SQLite 检索。
-2. 整理请求/结果与 `recall` 请求/结果的 IPC 身份、版本锁、持久化接收序号、重试、迟到和历史回放协议。
-3. `cognition`、`simulation` 不直接依赖 `sqlite-store/model-gateway` 的具体端口放置与 app 组合方式。
-4. L5 快照 owner、SQLite owner、模型调用审计 owner，以及 W5-A/B/C 是否仍可同层并行。
-5. 睡眠曲线、记忆重要性参数、检索权重和本地编码器后端的校准/选型结果。
-
-讨论完成后先提交 `W5-IF`，再决定 W5-A 睡眠状态机、W5-B 整理与落库、W5-C recall 接入的最终拆分。任何 agent 不得在此门禁前建立临时跨包依赖或把 SQLite 状态复制进模拟进程。
+1. simulation-worker 使用现有 `child_process.fork` IPC；不新增 TCP 端口。
+2. 重要状态先提交 Event + Snapshot 检查点，再发 memory request；host 只持久化事实与审计，不裁决 WorldState。
+3. request/result identity 锁定 world、branch、agent、checkpoint、worldVersion、Tick、event sequence、rules/plugin/input lock；`requestReceiptSequence` 与 `resultReceiptSequence` 分离。
+4. host 先持久化 result，worker 只在当前 `worldTick` 应用；冻结期间按接收序排队，被替换调用的迟到结果只记 stale 审计。
+5. W5-IF 合入后再确定 W5-A 睡眠状态机、W5-B 整理落库、W5-C recall 接入的最终拆分；在此之前不得建立临时跨包依赖或把 SQLite 状态复制进模拟进程。
 
 ---
 
 ## 10. 第六层：观测与端到端验收（L6）
 
-仅在 L5 全部合入且 W3-B 已验收后启动：
+仅在 L5 全部合入、W3-B 已验收且 W6 公共契约与验收夹具先行合入后启动：
+
+### W6-IF 验收公共契约与观察字段（先行准备）
+
+- 在 `WorldView`/检查器公共协议中补齐睡眠与整理状态、疲惫分解、Token 分区/总量、容量占用、携带物品摘要和 memory request/result 队列审计字段；字段必须只读投影，不增加第二份可写世界状态。
+- 定义回放夹具输入/输出：快照、事件序列、随机状态、规则/plugin lock、记忆结果接收序号和期望感知/任务摘要。回放必须消费已持久化 memory result，不重新执行检索或模型调用。
+- 先行验收：同一输入重复回放字节稳定；冻结时序列不推进；迟到结果按 `resultReceiptSequence` 排序；私有字段在公开检查器、事件和观察者模型请求中不可见。该契约 PR 不实现睡眠、记忆或回放业务。
 
 ### W6-A 检查器与隐私审计
 
-- 主写 `apps/web` 检查器和隐私审计脚本。
+- 主写 `apps/web` 检查器和隐私审计脚本，消费 W6-IF 的只读字段。
 - 展示双轨调用、进度、疲惫分解、睡眠整理、Token、容量和物品；自动检查隐藏衣物、未知空间、未听见声音、匿名互动、operation 私有参数和 recall 私有内容不泄漏。
 
 ### W6-B 回放、长运行与端到端场景
 
-- 主写 `tests/**` 与进程集成测试。
+- 主写 `tests/**` 与进程集成测试，使用 W6-IF 的回放夹具和持久化 memory result 记录。
 - 覆盖确定性回放、决策纠错、多人原子放行、失败分类、跨日无界增长，以及移动→熔断→上下文→睡眠整理→次日提示词→recall→生产得物品。
 
 W6 发现运行时缺陷时单独开修复 PR，不在验收轨越权修改实现包。
