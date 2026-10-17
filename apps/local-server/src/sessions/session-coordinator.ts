@@ -78,11 +78,14 @@ export class SessionCoordinator {
   }
 
   async stop(): Promise<void> {
+    // 先让 worker 停止现实 Tick，再取消模型等待和清理 host 任务。
+    // 如果先等待 host 任务，worker 仍会按定时器推进世界，正常停机的
+    // 最后检查点就可能比调用方观察到的运行状态多出一个 Tick。
+    await this.#worker.stop();
     this.#decisions.cancelAll();
     await this.waitForIdle();
     this.#pendingDecisionMessages.clear();
     this.#pendingDecisionOutcomes.clear();
-    await this.#worker.stop();
     await this.waitForIdle();
     this.#unsubscribeWorker?.();
     this.#unsubscribeWorker = null;
