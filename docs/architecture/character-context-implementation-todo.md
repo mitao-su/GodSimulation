@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统实施 TODO
 
-> 状态：实施中；W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C 与 direct `core.move` execution 修复（PR #11，merge c9335a2）已合入；W1-C 正在收口，L5 设讨论门禁
+> 状态：实施中；W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C、direct `core.move` execution 修复（PR #11，merge c9335a2）与 W1-C（PR #13，merge 11e3e3e）已合入；当前推进 W1-B-P3，随后 W1-X。W5-IF PR #14（merge 684e498）待 W4-X 门禁，W6 先补观察字段与回放契约
 >
 > 更新日期：2026-10-18
 >
@@ -136,7 +136,11 @@
 
 > W1-A-P2 已于 2026-09-06 通过 PR #8 合入 `main`（merge commit `f64d60a9478cf0ab9f3dcf019ab358e7be157e59`），W1-B-P1 已于同日通过 PR #6 合入（merge commit `579e6b0eb9988b36c4f81934dac98d0473883405`），W1-B-P2 已于 2026-09-09 通过 PR #10 合入（merge commit `49ac7838b58db69033649f51c5e764f905d36823`）。这些 PR 已提供直接宿主绑定、通用生命周期/失败分类和原子终止；尚不能据此勾选阶段 1 闭环。
 
-> execution 阻塞已解除：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），direct `core.move` hosted 生命周期、原子移动效果、冻结回执与锁门改道回归已通过；当前 W1-C 仍未合入，不能提前勾选阶段 1 闭环。
+> execution 阻塞已解除：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），direct `core.move` hosted 生命周期、原子移动效果、冻结回执与锁门改道回归已通过。
+
+> W1-C 已于 2026-10-18 通过 PR #13 合入 `main`（merge commit `11e3e3e`）。本 PR 完成 direct operation 请求、纠错循环、纠错耗尽后的 `TECHNICALLY_BLOCKED`、全员 READY 原子放行、审查界面和 direct 场景回归；未接入线上快照升级，因此阶段 1 的恢复闭环仍等待 W1-B-P3。
+
+> W5-IF 讨论结果已形成 PR #14（最新提交 `684e498`）：memory IPC 请求/结果 identity、请求与结果接收序号、锁、ack disposition 和未实现技术阻塞已定义。该 PR 必须等待 W4-X 后合入；W5 实现轨不得提前开工。
 
 - [x] 定义统一的 `TaskTrack = HEAD | BODY`，从插件 SDK、动作资源、快照和测试中删除 `HANDS`。
 - [x] 将所有现有手部交互占用迁移到 `BODY`，检查门、冰箱、马桶及自动通行等插件行为。
@@ -467,6 +471,8 @@
 - [ ] 增加失败分类场景，覆盖已声明游戏内失败、未声明代码、插件抛错、非法效果和显式映射的版本争用；验证只有游戏内失败关闭调用并进入角色上下文，技术失败保持调用可恢复且只进入审计。
 - [ ] 增加长时间无界增长测试，覆盖多日运行、定期睡眠整理、归档衰减和删除。
 - [ ] 增加完整场景：移动扫视 → 熔断中间回执 `nearby` → 通用 `perception_now` → 双轨决策 → 睡眠整理 → 次日系统提示词 → `recall` → 生产操作正常完成并获得物品。
+
+> W6 先行契约（实现前置）：现有 `WorldView` 与角色检查器尚未包含睡眠/整理、疲惫分解、Token 分区、容量占用、携带物品摘要和 memory receipt 队列字段；仓库也没有消费持久化 memory result 的端到端回放夹具。W6-IF 必须先定义这些只读投影和回放输入/输出，验证固定快照、事件、随机状态、规则/plugin lock 与已持久化结果的确定性重放、接收序号排序和隐私裁剪，然后才能派发 W6-A/W6-B。
 
 **完成门槛：** 新架构通过协议、单元、场景、进程集成、恢复回放和隐私测试，且能连续运行多个游戏日而不越过上下文硬上限。
 
