@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统 — 并行施工编排（Wave Plan）
 
-> 状态：W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C 与 direct `core.move` execution 修复已合入（PR #11，merge c9335a2）；W1-C 正在收口，L5 设讨论门禁，暂不派发
+> 状态（2026-10-18）：W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C 与 direct `core.move` execution 修复已合入（PR #11，merge c9335a2）；W1-C（PR #13）和 W5-IF（PR #14）开放待审。L5 讨论结论已写回本文，W5 实现仍须等待 W1-X/W4-X 与 W3-B 验收门禁。
 >
 > 行为基线：[《实施 TODO》](./character-context-implementation-todo.md)（下称「TODO」）
 >
@@ -126,8 +126,8 @@ flowchart TB
 | L2 | W2-IF | W2-A / W2-B / W2-D | W2-X | 4 |
 | L3 | W3-IF | W3-A1 / W3-A2 / W3-A3；W3-B 作为不阻塞 L4 的并行支线 | W3-X | 4 |
 | L4 | W4-IF | 首批 W4-A1 / W4-A2 / W4-B1 / W4-C；滚动启动 W4-A3 / W4-B2 | W4-X | 4 |
-| L5 | **待讨论** | 暂不派发 | 暂不确定 | 暂不确定 |
-| L6 | 无 | W6-A / W6-B | 最终验收 | 2 |
+| L5 | W5-IF（PR #14，待合入） | W5-A / W5-B / W5-C | W5-X | 3 |
+| L6 | 无 | W6-A / W6-B | W6-X 最终验收 | 2 |
 
 拆分增加的是可审查的合入点，不减少可并行的独立工作。W2-C 已作为独立支线合入，不阻塞 L1-L4，也不再占用后续层的并发名额。
 
@@ -358,33 +358,43 @@ flowchart TB
 
 ---
 
-## 9. ⚠️ 第五层开工前讨论门禁（L5）
+## 9. 第五层开工前讨论门禁（L5，已完成决策）
 
-L5 暂不派发 agent，也不预写最终文件所有权和实现提示词。开工前必须单独讨论并写回 TODO/Wave：
+以下决策于 2026-10-18 写回文档；W5-IF PR #14 只实现其中的公共协议，不代表 W5 行为已经完成：
 
-1. simulation-worker 如何在先提交检查点后，请求 local-server 执行记忆整理和 SQLite 检索。
-2. 整理请求/结果与 `recall` 请求/结果的 IPC 身份、版本锁、持久化接收序号、重试、迟到和历史回放协议。
-3. `cognition`、`simulation` 不直接依赖 `sqlite-store/model-gateway` 的具体端口放置与 app 组合方式。
-4. L5 快照 owner、SQLite owner、模型调用审计 owner，以及 W5-A/B/C 是否仍可同层并行。
-5. 睡眠曲线、记忆重要性参数、检索权重和本地编码器后端的校准/选型结果。
+1. **跨进程方向**：simulation-worker 仍是唯一可写世界。它在发出 `memory_request` 前先封口并提交 `Event + Snapshot` 检查点；local-server 只执行整理/检索并回传带原请求身份的结果，不能写入 `WorldState`。
+2. **身份与顺序**：W5-IF 的 `worldId/branchId/checkpointId/worldVersion/worldTick/lastEventSequence/rulesHash/pluginLockHash/inputHash` 必须原样回显；结果由 host 首次持久化时分配单调 `resultReceiptSequence`。worker 只接受匹配当前分支、检查点和输入哈希的结果；迟到结果进入持久化审计/队列，不能改变已封口的历史。
+3. **端口放置**：`protocol` 只放 DTO/Schema；`simulation` 只依赖窄的 memory request/result 端口；`cognition` 负责整理输入/输出验证；`local-server` 组合 `model-gateway` 与 `sqlite-store`；不得让 simulation/cognition 直接依赖 sqlite-store 或 model-gateway。
+4. **保存格式 owner**：W5-A 作为世界快照 owner，负责睡眠、整理 pending/committed 状态、wakeTick、周期 ID 和异步结果游标的一次性版本升级与迁移；W5-B 负责 SQLite/archive store 的实现扩展；W5-C 负责 recall operation 与 worker/host 接线；W5-X 只做跨轨接线和场景测试。
+5. **轨线拆分**：W5-A 睡眠状态机与冻结/唤醒；W5-B 整理输入、严格输出校验、归档落库和强度衰减；W5-C `recall` operation、异步结果队列、重试/迟到处理。W5-A/B/C 可在 W5-IF 合入后并行，任何轨线不得改公共 IF 形状或另建跨包状态。
+6. **校准边界**：睡眠时长、记忆重要性、检索权重和编码器后端先使用集中规则中的暂定值；W5-B 必须提供校准记录和可重放测试，不能在业务代码中散落后备数字。
 
-讨论完成后先提交 `W5-IF`，再决定 W5-A 睡眠状态机、W5-B 整理与落库、W5-C recall 接入的最终拆分。任何 agent 不得在此门禁前建立临时跨包依赖或把 SQLite 状态复制进模拟进程。
+W5-IF 合入后才解除实现派发门禁。W5-X 合入前不得宣称 L5 完成；任何 memory 消息在实现轨接线前必须保持显式 `technical_failure`，禁止静默忽略或伪造成功。
 
 ---
 
 ## 10. 第六层：观测与端到端验收（L6）
 
-仅在 L5 全部合入且 W3-B 已验收后启动：
+仅在 W5-X、W4-X、W1-X 已合入且 W3-B 的物品归属/家具/生产场景已验收后启动。W6 不新增世界规则；发现运行时缺陷必须回到对应 owner 开修复 PR。
 
 ### W6-A 检查器与隐私审计
 
 - 主写 `apps/web` 检查器和隐私审计脚本。
 - 展示双轨调用、进度、疲惫分解、睡眠整理、Token、容量和物品；自动检查隐藏衣物、未知空间、未听见声音、匿名互动、operation 私有参数和 recall 私有内容不泄漏。
+- 输入只来自现有只读 `WorldView`、事件/检查点审计 DTO 和显式 privacy projection；不得从 worker 内部对象或数据库私有表读取。
+- 验收必须包含正例（角色本人可见的公开字段）和反例（另一角色的私有衣物、未听见声音、recall 查询/结果、宿主私有状态、callId/私有参数），失败时返回非零退出码。
 
 ### W6-B 回放、长运行与端到端场景
 
 - 主写 `tests/**` 与进程集成测试。
 - 覆盖确定性回放、决策纠错、多人原子放行、失败分类、跨日无界增长，以及移动→熔断→上下文→睡眠整理→次日提示词→recall→生产得物品。
+- 回放 harness 固定规则锁、插件锁、种子、检查点、事件序号和 memory result receipt；已记录的整理/recall 结果只重放，不重新调用模型或编码器。
+- 长运行测试必须证明冻结期间 `worldTick`/任务进度不动、迟到结果不改历史、上下文和归档存储不无界增长；完整场景必须同时覆盖 W3-B 的 give/accept 或生产结果。
+
+### W6-X 最终收口
+
+- 由 W6-B owner 负责把 W6-A 隐私审计、W6-B 回放/长运行和五项全量命令汇总为一份可复现验收报告。
+- 只允许勾选 TODO 阶段 13 中有测试证据的条目；任何失败或技术阻塞都保留失败状态并开独立修复 PR，不在验收 PR 中改实现语义。
 
 W6 发现运行时缺陷时单独开修复 PR，不在验收轨越权修改实现包。
 
@@ -400,7 +410,7 @@ W6 发现运行时缺陷时单独开修复 PR，不在验收轨越权修改实�
 | L2 | W2-IF 与 W2-X：同一个 W2-A agent | X 等 A/B 合入后一次升级并迁移 |
 | L3 | W3-IF 与 W3-X：同一个 W3-A3 agent | X 等 A1/A2/A3 合入后一次升级；预留 W3-B 字段 |
 | L4 | W4-IF 与 W4-X：同一个 W4-A1 agent | X 等全部 L4 轨合入后一次升级并迁移 |
-| L5 | 待讨论 | 门禁解除时指定 |
+| L5 | W5-IF/W5-A | W5-A 负责线上世界快照版本；W5-B 负责 SQLite archive 迁移；W5-C 不改快照版本 |
 
 SQLite migration 由 W2-C 独占，不与世界快照共用版本号。
 
@@ -426,4 +436,6 @@ SQLite migration 由 W2-C 独占，不与世界快照共用版本号。
 | 大轨 PR 无法审查 | W1-B、W2-A、W3-B、W4-A、W4-B 按卡片拆顺序 PR；其他轨持续并行 |
 | 多轨同时改快照 | 每层唯一 owner；字段必须在先行接口 PR 一次声明 |
 | W3-B 延期影响最终场景 | 保持为不阻塞 L4/L5 的并行支线，但 W6 启动门禁必须确认其已合入 |
-| L5 临时跨包接线破坏唯一权威世界 | 讨论门禁未解除前禁止派发 |
+| L5 临时跨包接线破坏唯一权威世界 | 以 W5-IF 的 checkpoint-bound identity 和 W5-A 单一快照 owner 约束；实现轨不得复制 SQLite 状态 |
+| W5 结果迟到或重复造成跨分支污染 | 以 `branchId + checkpointId + inputHash + resultReceiptSequence` 做接收校验，失败进入审计而不改世界 |
+| W6 审计读取内部状态造成隐私泄漏 | W6-A 只消费只读 projection/审计 DTO，并用反例测试强制失败 |

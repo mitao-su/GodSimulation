@@ -2,17 +2,19 @@
 
 > 使用方式：每次派发时，把“公共前缀”和一个“任务块”一起发送给 agent。
 >
-> 当前只允许派发 L1-L4。W1-IF、W1-A-P1、W1-D 与 W2-C 已完成，相关提示词保留作范围审计，不再重复派发；L5 有讨论门禁，W6 依赖 L5，因此两者暂不提供施工提示词。
+> 状态（2026-10-18）：W1-C（PR #13）与 W5-IF（PR #14）正在审查；L5 讨论已完成。W5-IF 合入后允许派发 W5-A/B/C；W6 仍需等待 W5-X、W4-X、W1-X 与 W3-B 验收。
 
 ## 派发顺序
 
 TODO、Wave、AGENTS.md 和提示词文档基线已合入 `main`；下面所有施工分支都从包含这份基线的最新 `origin/main` 创建。
 
-1. W1-A-P1/P2、W1-B-P1/P2 与 direct `core.move` execution 修复（PR #11）已合入；当前继续 W1-C，完成后派 W1-B-P3/W1-X。
+1. W1-A-P1/P2、W1-B-P1/P2 与 direct `core.move` execution 修复（PR #11）已合入；当前收口 W1-C（PR #13），完成后派 W1-B-P3/W1-X。
 2. W1-C 合入后派 W1-B-P3，再派 W1-X；W1-D 对这两项的前置已经满足。
 3. 派 W2-IF；随后并行 W2-A-P1、W2-B、W2-D，A-P1 合入后滚动派 A-P2；A-P2 与 B 合入后派 W2-X。
 4. W2-X 与 W2-D 合入后派 W3-IF；随后优先并行 W3-A1、A2、A3，空余名额派 B-P1，按各自前置滚动派 B-P2；A1/A2/A3 合入后派 W3-X，不等 W3-B。
 5. 派 W4-IF；随后优先派 W4-A1、A2、B1、C，按前置滚动派 A3、B2；所有 L4 实现合入后派 W4-X。W3-B 与 L4 所有在施工轨合计不得超过四条，名额不足时优先 L4 主线。
+6. W5-IF（PR #14）合入后并行派 W5-A、W5-B、W5-C；三轨合入后派 W5-X。W5-A 是线上快照 owner，W5-B 是归档存储 owner，W5-C 是 recall/IPC 接线 owner。
+7. W5-X、W4-X、W1-X 合入且 W3-B 物品场景验收后派 W6-A、W6-B，最后由 W6-B owner 派 W6-X 收口。
 
 W1-IF/W1-B-P3 交给同一个保存格式 owner；W2-IF/W2-X、W3-IF/W3-X、W4-IF/W4-X 也分别保持同一 owner。每个 PR 合入后仍要删除旧 worktree，并从最新 main 为下一片重新建分支。
 
@@ -374,6 +376,44 @@ speak 正常完成 Tick 只计算一次传播并产生多接收者批次；每�
 
 ## L5/L6 状态
 
+### W5-A 睡眠状态机与快照（W5-IF 合入后派发）
+
 ```text
-⚠️ 不派发：L5 的 worker/host、模型调用、SQLite、迟到结果和回放边界尚待专项讨论。L5 讨论完成并先合 W5-IF 后，才能生成 W5-A/B/C 提示词；W6 依赖 L5，也暂不派发。
+前置：W5-IF、W4-X、W1-X 已合入。主写 simulation 的睡眠/整理状态、冻结与唤醒、W5-A 独占线上快照版本和迁移。睡眠与强制昏睡共享 HEAD+BODY 调用；wakeTick 由 Tick 与规则派生，整理提前完成只进入 pending result；到达 wakeTick 而结果未成功持久化时冻结并显式 technical block。只通过 protocol 的 memory request/result 端口与 host 交互，不导入 cognition/sqlite-store。覆盖恢复、替换、迟到周期 ID、ignore 事件和 worldTick 冻结；禁止修改 W5-IF 形状。
+```
+
+### W5-B 整理、归档与校准（W5-IF 合入后派发）
+
+```text
+前置：W5-IF、W2-C、W4-A1 已合入。主写 cognition 的整理输入/输出 Schema 与事实/来源校验，timeline/sqlite-store 的归档写入、衰减删除、编码器锁和校准测试。不得写 WorldState，不得直接调用 simulation；结果必须按 branch/agent/cycle 隔离并带 resultReceiptSequence。模型不得决定数值重要性、删除日期或目标更新；无来源、越权、坐标泄漏和迟到结果必须拒绝并返回技术失败。覆盖重复条目、矛盾空间、恢复幂等、索引版本失效与跨日确定性。
+```
+
+### W5-C recall 与异步 IPC 接线（W5-IF 合入后派发）
+
+```text
+前置：W5-IF、W1-X、W4-A3、W2-C 已合入。主写 simulation 的 core.recall indeterminate runtime、apps/simulation-worker 与 apps/local-server 的 memory_request/result/ack 接线，以及迟到结果审计。recall 占 HEAD，结果返回所在 Tick 才完成；冻结期间只排队，continue 在同一 Tick 应用，replace 丢弃角色可见结果但保留审计。每次请求必须先有 Event+Snapshot 检查点，结果身份/哈希/分支/检查点严格匹配；任何未实现或持久化错误进入 TECHNICALLY_BLOCKED，不静默成功。不得修改快照版本（由 W5-A 负责）。
+```
+
+### W5-X 跨轨集成（W5-A/B/C 合入后派发）
+
+```text
+只做 memory 端口桶导出、跨进程场景和恢复回放接线；验证睡眠整理与 SQLite 结果的因果顺序、recall 的 HEAD/BODY 并发、迟到/重试/分支隔离、保存失败阻塞和既有 direct operation 不回归。发现实现缺陷退回对应 owner，不在集成 PR 扩展规则。
+```
+
+### W6-A 检查器与隐私审计（W5-X/W3-B/W4-X/W1-X 合入后派发）
+
+```text
+主写 apps/web 检查器与独立隐私审计脚本，消费只读 WorldView/审计 DTO。展示双轨、睡眠整理、Token/疲惫、容量/物品；用正反例检查隐藏衣物、未知空间、未听见声音、匿名互动、callId/私有参数、recall 私有内容不泄漏。脚本失败必须返回非零码；不得读取 worker 内部对象或 SQLite 私有表。
+```
+
+### W6-B 回放与长运行（W5-X/W3-B/W4-X/W1-X 合入后派发）
+
+```text
+主写 tests/** 与进程集成 harness。固定规则锁、插件锁、种子、检查点、事件序号和 memory receipt，重放已记录结果而不重新调用模型/编码器；覆盖冻结不推进、direct/纠错/原子放行、失败分类、跨日睡眠整理、recall 迟到、W3-B 生产/give-accept 和上下文无界增长。测试证据必须能独立复现，失败保持失败状态。
+```
+
+### W6-X 最终验收（W6-A/W6-B 合入后派发）
+
+```text
+只汇总验收报告、五项全量命令和 TODO 阶段 13 的逐条证据；不在验收轨修复实现。任何缺陷开独立修复 PR，修复合入后重新运行受影响的回放、隐私和全量验证。
 ```
