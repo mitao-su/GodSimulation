@@ -18,34 +18,23 @@ function argument(name, fallback) {
   return index === -1 ? fallback : process.argv[index + 1];
 }
 
-function taskOption(request, predicate) {
-  const option = request.taskOptions.find(predicate);
-  if (!option) {
-    throw new Error(
-      `No deterministic task option for ${request.agentId}:${request.decisionReason.code}`,
-    );
-  }
-  return option;
-}
-
-function targets(candidate, entityId) {
-  return candidate.kind === "operation" && candidate.fixedArguments.targetEntityId === entityId;
-}
-
-function operationFor(candidate, operationId, entityId) {
-  return candidate.operationId === operationId && targets(candidate, entityId);
-}
-
-function taskDecision(option, reason) {
-  const selection = {
-    kind: "replace",
-    taskOptionId: option.id,
-    arguments: option.operationId === "core.wait" ? { durationTicks: 600 } : {},
-  };
+function operation(operationId, argumentsValue, hostEntityId) {
   return {
-    schemaVersion: 2,
-    head: option.taskSlots.includes("HEAD") ? selection : { kind: "continue" },
-    body: option.taskSlots.includes("BODY") ? selection : { kind: "continue" },
+    kind: "replace",
+    task: {
+      kind: "operation",
+      operationId,
+      ...(hostEntityId === undefined ? {} : { hostEntityId }),
+      arguments: argumentsValue,
+    },
+  };
+}
+
+function directDecision(body, reason) {
+  return {
+    schemaVersion: 3,
+    head: { kind: "continue" },
+    body,
     reason,
   };
 }
@@ -67,7 +56,7 @@ function waitForDelay(milliseconds, signal) {
 
 class ScenarioDecisionProvider {
   #scenario;
-  #technicalFailureEmitted = false;
+  #technicalFailureRequestId = null;
 
   constructor(scenario) {
     this.#scenario = scenario;
@@ -78,9 +67,11 @@ class ScenarioDecisionProvider {
       this.#scenario === "technical-retry" &&
       request.agentId === "alice" &&
       request.decisionReason.code === "initial_goal" &&
-      !this.#technicalFailureEmitted
+      request.retryOfRequestId === undefined &&
+      (this.#technicalFailureRequestId === null ||
+        this.#technicalFailureRequestId === request.requestId)
     ) {
-      this.#technicalFailureEmitted = true;
+      this.#technicalFailureRequestId = request.requestId;
       await waitForDelay(250, signal);
       throw new Error("Deterministic model outage");
     }
@@ -93,43 +84,34 @@ class ScenarioDecisionProvider {
         : 20;
     await waitForDelay(thinkingDelay, signal);
 
-    const option = taskOption(request, (candidate) => {
-      if (this.#scenario === "basic-loop") {
-        const refrigeratorUse = operationFor(
-          candidate,
-          "object.home.refrigerator.use",
-          "fridge-1",
-        );
-        if (request.taskOptions.some((item) => operationFor(
-          item,
-          "object.home.refrigerator.use",
-          "fridge-1",
-        ))) {
-          return refrigeratorUse;
-        }
-        if (request.taskOptions.some((item) => operationFor(item, "core.move", "fridge-1"))) {
-          return operationFor(candidate, "core.move", "fridge-1");
-        }
-      }
-      if (
-        this.#scenario === "bladder-toilet" &&
-        request.agentId === "alice" &&
-        request.decisionReason.code !== "initial_goal"
-      ) {
-        if (request.taskOptions.some((item) => operationFor(
-          item,
-          "object.home.toilet.use",
-          "toilet-1",
-        ))) {
-          return operationFor(candidate, "object.home.toilet.use", "toilet-1");
-        }
-        if (request.taskOptions.some((item) => operationFor(item, "core.move", "toilet-1"))) {
-          return operationFor(candidate, "core.move", "toilet-1");
-        }
-      }
-      return candidate.kind === "operation" && candidate.operationId === "core.wait";
-    });
-    return taskDecision(option, `Deterministic ${this.#scenario} decision`);
+    if (this.#scenario === "basic-loop") {
+      const bobAlreadyNearFridge = request.agentId === "bob";
+      return request.decisionReason.code === "initial_goal" && !bobAlreadyNearFridge
+        ? directDecision(
+            operation("core.move", { targetEntityId: "fridge-1" }),
+            `Deterministic ${this.#scenario} decision`,
+          )
+        : directDecision(
+            operation("object.home.refrigerator.use", {}, "fridge-1"),
+            `Deterministic ${this.#scenario} decision`,
+          );
+    }
+    if (
+      this.#scenario === "bladder-toilet" &&
+      request.agentId === "alice" &&
+      request.decisionReason.code !== "initial_goal"
+    ) {
+      return request.decisionReason.code === "urgent_bladder"
+        ? directDecision(operation("core.move", { targetEntityId: "toilet-1" }), `Deterministic ${this.#scenario} decision`)
+        : directDecision(
+            operation("object.home.toilet.use", {}, "toilet-1"),
+            `Deterministic ${this.#scenario} decision`,
+          );
+    }
+    return directDecision(
+      operation("core.wait", { durationTicks: 600 }),
+      `Deterministic ${this.#scenario} decision`,
+    );
   }
 }
 

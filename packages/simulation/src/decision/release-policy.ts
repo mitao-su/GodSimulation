@@ -35,6 +35,7 @@ import {
   type OperationRuntimeRegistry,
   type OperationRuntimeCall,
 } from "../execution/operation-runtime";
+import { hostedOperationLabel } from "../execution/operation-label";
 import type { ActiveOperation } from "../execution/operation";
 import type { TaskTrackState, TaskTracks } from "../execution/task-tracks";
 import { appendDomainEvent } from "../engine/event-writer";
@@ -687,6 +688,9 @@ function releaseDirectDecisionCycle(
       .filter((operation) => !previousAgent.activeOperations.has(operation.callId))
       .sort((left, right) => left.callId.localeCompare(right.callId));
     for (const operation of started) {
+      if (!isOperationRuntimeCall(operation)) {
+        throw new Error(`Direct release started legacy operation ${operation.callId}`);
+      }
       const written = appendDomainEvent(
         releasedWorld,
         {
@@ -695,7 +699,7 @@ function releaseDirectDecisionCycle(
           callId: operation.callId,
           operationId: operation.operationId,
           taskSlots: operation.taskSlots,
-          label: operation.operationId,
+          label: hostedOperationLabel(releasedWorld, registry, operation),
         },
         lifecycleMetadata,
       );

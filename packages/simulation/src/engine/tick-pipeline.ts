@@ -28,6 +28,7 @@ import {
   isOperationRuntimeCall,
   type OperationRuntimeCall,
 } from "../execution/operation-runtime";
+import { hostedOperationLabel } from "../execution/operation-label";
 import {
   accumulateOperationObservations,
   operationInteractionLifecycleProposal,
@@ -914,7 +915,10 @@ export function runTickPipeline(
               entry.result.transaction.outcome === "completed"
                 ? "operation_completed"
                 : entry.result.transaction.source,
-            summary: `Hosted operation ${entry.callId} terminated`,
+            summary:
+              entry.result.transaction.outcome === "completed"
+                ? `${hostedOperationLabel(world, registry, entry.result.operation)} completed`
+                : `${hostedOperationLabel(world, registry, entry.result.operation)} terminated`,
           });
         }
       }
