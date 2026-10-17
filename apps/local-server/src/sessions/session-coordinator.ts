@@ -301,11 +301,13 @@ export class SessionCoordinator {
       message.type === "checkpoint_ready" ||
       message.type === "technical_failure" ||
       error instanceof DecisionPersistenceError;
+    const unsupportedMemoryMessage =
+      message.type === "memory_request" || message.type === "memory_result_ack";
     await this.#publishHostFailure({
       error: rootError,
-      category: persistenceMessage ? "persistence" : "worker",
+      category: persistenceMessage ? "persistence" : unsupportedMemoryMessage ? "protocol" : "worker",
       retryable: persistenceMessage,
-      blockWorker: persistenceMessage,
+      blockWorker: persistenceMessage || unsupportedMemoryMessage,
       ...(message.type === "decision_requested"
         ? { requestId: message.request.requestId }
         : {}),
