@@ -1,6 +1,6 @@
 # 角色上下文、感知与记忆系统实施 TODO
 
-> 状态：实施中；W1-IF、W1-A-P1/P2、W1-B-P1/P2、W1-D、W2-C、direct `core.move` execution 修复（PR #11，merge c9335a2）与 W1-C（PR #13，merge 11e3e3e）已合入；当前推进 W1-B-P3，随后 W1-X。W5-IF PR #14（merge 684e498）待 W4-X 门禁，W6 先补观察字段与回放契约
+> 状态：实施中；W1-IF、W1-A-P1/P2、W1-B-P1/P2/P3、W1-D、W2-C、direct `core.move` execution 修复（PR #11）与 W1-C（PR #13）已合入；W1-B-P3 通过 PR #16（merge `ce639b4`）完成快照 V4 与恢复。当前推进 W1-X；W2-IF 有未合入接口草案，需待 W1-X 合入后 rebase/验收。W5-IF PR #14 head `e81656f` 待 W4-X 门禁，W6 先补观察字段与回放契约
 >
 > 更新日期：2026-10-18
 >
@@ -136,11 +136,13 @@
 
 > W1-A-P2 已于 2026-09-06 通过 PR #8 合入 `main`（merge commit `f64d60a9478cf0ab9f3dcf019ab358e7be157e59`），W1-B-P1 已于同日通过 PR #6 合入（merge commit `579e6b0eb9988b36c4f81934dac98d0473883405`），W1-B-P2 已于 2026-09-09 通过 PR #10 合入（merge commit `49ac7838b58db69033649f51c5e764f905d36823`）。这些 PR 已提供直接宿主绑定、通用生命周期/失败分类和原子终止；尚不能据此勾选阶段 1 闭环。
 
+> W1-B-P3 已于 2026-10-18 通过 PR #16 合入 `main`（merge commit `ce639b4`）。线上快照升级至 V4，保存 hosted call 完整运行状态、待终止事务与终态台账，并验证 V3→V4 迁移、direct decision 恢复及相关跨字段不变量；恢复不重新解析已锁定 duration。该 PR 运行 `pnpm lint`、`pnpm typecheck`、串行 `pnpm test`（93 files / 549 tests）和 `pnpm build`；没有记录 `pnpm test:e2e` 结果，因此仍需后续端到端验收。
+
 > execution 阻塞已解除：PR #11 已于 2026-10-18 合入 `main`（merge commit `c9335a2`），direct `core.move` hosted 生命周期、原子移动效果、冻结回执与锁门改道回归已通过。
 
 > W1-C 已于 2026-10-18 通过 PR #13 合入 `main`（merge commit `11e3e3e`）。本 PR 完成 direct operation 请求、纠错循环、纠错耗尽后的 `TECHNICALLY_BLOCKED`、全员 READY 原子放行、审查界面和 direct 场景回归；未接入线上快照升级，因此阶段 1 的恢复闭环仍等待 W1-B-P3。
 
-> W5-IF 讨论结果已形成 PR #14（最新提交 `684e498`）：memory IPC 请求/结果 identity、请求与结果接收序号、锁、ack disposition 和未实现技术阻塞已定义。该 PR 必须等待 W4-X 后合入；W5 实现轨不得提前开工。
+> W5-IF 讨论结果已形成 PR #14（当前 head `e81656f`，协议主体 `684e498`）：memory IPC 请求/结果 identity、请求与结果接收序号、锁、ack disposition 和未实现消息的显式技术阻塞已定义。该 PR 必须等待 W4-X 后合入；W5 实现轨不得提前开工。
 
 - [x] 定义统一的 `TaskTrack = HEAD | BODY`，从插件 SDK、动作资源、快照和测试中删除 `HANDS`。
 - [x] 将所有现有手部交互占用迁移到 `BODY`，检查门、冰箱、马桶及自动通行等插件行为。
