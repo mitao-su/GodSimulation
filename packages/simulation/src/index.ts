@@ -5,7 +5,6 @@ export * from "./execution/action-runner";
 export * from "./execution/local-recovery";
 export * from "./execution/operation";
 export * from "./execution/operation-lifecycle";
-export * from "./execution/operation-catalog";
 export * from "./execution/operation-planner";
 export * from "./execution/operation-registry";
 export * from "./execution/operation-runtime";

@@ -7,7 +7,7 @@ import {
   accumulateOperationObservations,
   recordFuseResults,
 } from "./operation-lifecycle";
-import { buildTaskOptions } from "./operation-catalog";
+import { legacyTaskOptionsFor } from "../testing/legacy-task-options";
 import { runTickPipeline } from "../engine/tick-pipeline";
 import {
   simulationTestWorld,
@@ -195,7 +195,7 @@ describe("operation lifecycle results", () => {
       {
         agentId: "alice" as never,
         reason: { code: "test_fuse", summary: "Review movement" },
-        taskOptions: buildTaskOptions(
+        taskOptions: legacyTaskOptionsFor(
           firstFuse.world,
           testPluginRegistry,
           "alice" as never,
@@ -265,7 +265,7 @@ describe("operation lifecycle results", () => {
       ["alice" as never],
       { causationId: "test:fuse-cancel", correlationId: "test:fuse-cancel" },
     );
-    const taskOptions = buildTaskOptions(
+    const taskOptions = legacyTaskOptionsFor(
       fused.world,
       testPluginRegistry,
       "alice" as never,

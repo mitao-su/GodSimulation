@@ -316,7 +316,7 @@ describe("hosted operation registry", () => {
     ).toThrow(/not bound to test\.fridge/i);
   });
 
-  it("does not grant a core operation to an agent definition that omitted it", () => {
+  it("does not create a hosted core binding omitted from an agent definition", () => {
     const plugin: GamePlugin = {
       ...testPlugin,
       agents: testPlugin.agents.map((definition) =>
@@ -331,25 +331,12 @@ describe("hosted operation registry", () => {
       ),
     };
     const registry = createTestRegistry([plugin]);
-    const world = simulationTestWorld();
-    const bobContext = createOperationRuntimeContext(
-      world,
-      registry,
-      "bob" as never,
-    );
-
     expect(
       registry.getHostedOperation("core.wait", {
         kind: "agent",
         hostDefinitionId: "test.bob",
       }),
     ).toBeUndefined();
-    expect(registry.getOperation("core.wait")?.offers(bobContext)).toEqual([]);
-    expect(
-      registry.getOperation("core.wait")?.canStart(bobContext, {
-        durationTicks: 1,
-      }),
-    ).toMatchObject({ available: false, reasonCode: "operation_not_mounted" });
   });
 
   it("rejects a mounted manual that disagrees with the core runtime", () => {

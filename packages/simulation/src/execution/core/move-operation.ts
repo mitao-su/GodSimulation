@@ -14,8 +14,6 @@ import {
   AVAILABLE,
   ENTITY_TARGET_ARGUMENTS_SCHEMA,
   blocked,
-  isAtInteractionPosition,
-  knownObjects,
   targetObject,
 } from "./core-operation-helpers";
 import { objectInteractionOperationId } from "../object-interaction-adapter";
@@ -256,24 +254,6 @@ export function createMoveOperation(): RegisteredOperation {
       accumulatedObservations: [],
       observationDeliveryCursor: 0,
     }),
-    offers: (context) =>
-      knownObjects(context).flatMap((known) => {
-        const object = context.world.objects.get(known.entityId);
-        const definition = object
-          ? context.registry.getObject(object.definitionId)?.definition
-          : undefined;
-        return object &&
-          definition &&
-          !isAtInteractionPosition(context, object.id)
-          ? [
-              {
-                id: `task-option:${context.agentId}:${object.id}:move`,
-                label: `Move to ${definition.displayName}`,
-                fixedArguments: { targetEntityId: object.id },
-              },
-            ]
-          : [];
-      }),
     canStart: (context, value) => {
       const agent = context.world.agents.get(context.agentId)!;
       const route = routeToTarget(context, value, agent.knowledge);

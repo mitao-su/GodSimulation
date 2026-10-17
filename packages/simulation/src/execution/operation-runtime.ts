@@ -35,7 +35,6 @@ import type {
   OperationTechnicalFailure,
   OperationTerminationOutcome,
   OperationTerminationSource,
-  TaskOptionId,
   TaskTrack,
 } from "@god-sim/protocol";
 
@@ -47,12 +46,6 @@ import type {
 } from "./operation";
 import type { PluginRegistry } from "../world/plugin-registry";
 import type { WorldState } from "../world/world-state";
-
-export interface OperationOffer {
-  readonly id: TaskOptionId | string;
-  readonly label: string;
-  readonly fixedArguments: JsonObject;
-}
 
 export interface OperationRegistry {
   readonly operations: ReadonlyMap<OperationId, RegisteredOperation>;
@@ -295,7 +288,6 @@ export interface RegisteredOperation {
    */
   readonly stateSchema: z.ZodType<JsonObject>;
   argumentsSchema(context: OperationRuntimeContext): z.ZodType<JsonObject>;
-  offers(context: OperationRuntimeContext): readonly OperationOffer[];
   /**
    * Initial runtime-owned state for a newly created call. Invoked once
    * when the call is prepared; the value travels with snapshots and is

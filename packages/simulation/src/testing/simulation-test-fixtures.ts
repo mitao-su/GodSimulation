@@ -320,9 +320,8 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       target: { kind: "none" },
       duration: { kind: "fixed" },
       taskSlots: ["BODY"],
-      // Deliberately parameter-requiring: `available_interactions` queries
-      // cannot preview this interaction with empty arguments and must
-      // surface it as parameter-requiring instead of throwing.
+      // Deliberately parameter-requiring so validation rejects omitted mode
+      // values instead of invoking the duration resolver with invalid input.
       parametersSchema: z.object({ mode: z.enum(["eco", "turbo"]) }).strict(),
       resolveDuration: (_state, _context, parameters) => ({
         kind: "fixed",
@@ -529,7 +528,6 @@ const synchronizedWaitOperation: RegisteredOperation = {
   argumentsSchema: () =>
     z.object({ durationTicks: z.number().int().positive() }).strict(),
   initialState: () => ({}),
-  offers: () => [],
   canStart: () => ({ available: true }),
   resolveDuration: (_context, value) => ({
     kind: "fixed",

@@ -15,7 +15,7 @@ import {
   applyReleasePolicy,
   releaseDecisionCycle,
 } from "./release-policy";
-import { buildTaskOptions } from "../execution/operation-catalog";
+import { legacyTaskOptionsFor } from "../testing/legacy-task-options";
 import {
   prepareDirectOperationCall,
   prepareOperationCall,
@@ -45,7 +45,7 @@ function optionsFor(
   agentId: AgentId,
   synchronized = false,
 ): readonly TaskOption[] {
-  const options = buildTaskOptions(world, testPluginRegistry, agentId);
+  const options = legacyTaskOptionsFor(world, testPluginRegistry, agentId);
   return synchronized
     ? [
         ...options,
@@ -242,7 +242,7 @@ function worldWithStartedFridgeUse(): WorldState {
       },
     }),
   };
-  const option = buildTaskOptions(inRange, testPluginRegistry, aliceId).find(
+  const option = legacyTaskOptionsFor(inRange, testPluginRegistry, aliceId).find(
     (candidate) =>
       candidate.kind === "operation" &&
       candidate.operationId === "object.test.fridge.use",
@@ -919,7 +919,7 @@ describe("decision release policy", () => {
       {
         agentId: "alice" as never,
         reason: { code: "change_task", summary: "Stop using the fridge" },
-        taskOptions: buildTaskOptions(
+        taskOptions: legacyTaskOptionsFor(
           running,
           testPluginRegistry,
           "alice" as never,
@@ -1004,7 +1004,7 @@ describe("decision release policy", () => {
       {
         agentId: "alice" as never,
         reason: { code: "change_task", summary: "Stop hosted use" },
-        taskOptions: buildTaskOptions(promptWorld, registry, "alice" as never),
+        taskOptions: legacyTaskOptionsFor(promptWorld, registry, "alice" as never),
       },
     ]).world;
     const thinking = {

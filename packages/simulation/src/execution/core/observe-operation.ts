@@ -5,7 +5,6 @@ import {
   EMPTY_OPERATION_STATE_SCHEMA,
   EMPTY_RESULT_SCHEMA,
   ENTITY_TARGET_ARGUMENTS_SCHEMA,
-  knownObjects,
   targetObject,
 } from "./core-operation-helpers";
 import type { RegisteredOperation } from "../operation-runtime";
@@ -25,25 +24,6 @@ export function createObserveOperation(): RegisteredOperation {
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => ENTITY_TARGET_ARGUMENTS_SCHEMA,
     initialState: () => ({}),
-    offers: (context) => {
-      const agent = context.world.agents.get(context.agentId)!;
-      return knownObjects(context)
-        .filter((object) => agent.knowledge.visibleEntityIds.has(object.entityId))
-        .flatMap((object) => {
-          const definition = context.registry.getObject(
-            context.world.objects.get(object.entityId)?.definitionId ?? "",
-          )?.definition;
-          return definition
-            ? [
-                {
-                  id: `task-option:${context.agentId}:${object.entityId}:observe`,
-                  label: `Observe ${definition.displayName}`,
-                  fixedArguments: { targetEntityId: object.entityId },
-                },
-              ]
-            : [];
-        });
-    },
     canStart: (context, value) => {
       const object = targetObject(context, value);
       const targetEntityId = ENTITY_TARGET_ARGUMENTS_SCHEMA.safeParse(value).data

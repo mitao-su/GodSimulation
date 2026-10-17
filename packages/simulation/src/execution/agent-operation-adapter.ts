@@ -730,48 +730,8 @@ export function bindAgentOperationRuntime(
   return Object.freeze(runtime);
 }
 
-function operationIsMounted(
-  context: OperationRuntimeContext,
-  operationId: OperationId,
-): boolean {
-  const agent = context.world.agents.get(context.agentId);
-  if (!agent) return false;
-  const definition = context.registry.getAgent(agent.definitionId)?.definition;
-  return (
-    definition !== undefined &&
-    agentOperationMounts(definition).some(
-      (operation) => operation.operationId === operationId,
-    )
-  );
-}
-
-export function restrictLegacyAgentOperationToMounts(
-  operation: RegisteredOperation,
-): RegisteredOperation {
-  return {
-    ...operation,
-    offers: (context) =>
-      operationIsMounted(context, operation.id) ? operation.offers(context) : [],
-    canStart: (context, argumentsValue) =>
-      operationIsMounted(context, operation.id)
-        ? operation.canStart(context, argumentsValue)
-        : {
-            available: false,
-            reasonCode: "operation_not_mounted",
-            summary: `Operation ${operation.id} is not mounted on this character definition`,
-            details: {
-              summary: `Operation ${operation.id} is not mounted on this character definition`,
-            },
-          },
-  };
-}
-
 export function legacyCoreAgentOperations(): readonly RegisteredOperation[] {
-  return [
-    restrictLegacyAgentOperationToMounts(createWaitOperation()),
-    restrictLegacyAgentOperationToMounts(createObserveOperation()),
-    restrictLegacyAgentOperationToMounts(createMoveOperation()),
-  ];
+  return [createWaitOperation(), createObserveOperation(), createMoveOperation()];
 }
 
 export function mountedAgentOperationRuntimes(

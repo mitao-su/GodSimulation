@@ -11,7 +11,6 @@ import {
 } from "@god-sim/plugin-sdk";
 import {
   acceptDecisionResult,
-  buildTaskOptions,
   createSimulationRegistry,
   loadWorldDefinition,
   prepareOperationCall,
@@ -27,6 +26,7 @@ import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
 import { testSimulationRulesLock } from "../fixtures/simulation-rules";
+import { legacyTaskOptionsFor } from "../../packages/simulation/src/testing/legacy-task-options";
 
 interface PassageState {
   readonly raised: boolean;
@@ -767,7 +767,7 @@ describe("capability-based traversal recovery", () => {
 
   it("keeps the traversal cancel result out of a cancelled move terminal result", () => {
     const active = activateTraversal(resultingWorld(), resultingRegistry, true);
-    const taskOptions = buildTaskOptions(active, resultingRegistry, "alice" as never);
+    const taskOptions = legacyTaskOptionsFor(active, resultingRegistry, "alice" as never);
     const emptyBody = taskOptions.find(
       (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
     )!;
