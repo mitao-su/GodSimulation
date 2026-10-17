@@ -18,7 +18,6 @@ const PLACEMENTS = new Set<PromptSectionPlacement>([
   "active_tasks",
   "memory",
   "perception",
-  "task_options",
   "decision_reason",
 ]);
 
@@ -70,7 +69,9 @@ export function assembleDecisionRequest(
     "core_rules",
     [
       "Return one decision for HEAD and one decision for BODY.",
-      "For each track, either continue its current task or replace it with an offered task option for that track.",
+      "For each track, either continue its current task or replace it with an empty_task or a direct operation reference.",
+      "Do not invent dynamic task options. Query a host definition with the character's HEAD read operation when you need an operation manual.",
+      "An empty_task is a stable empty branch and never creates an operation call.",
       "Use only the character's listed sensations, memories, perception, and active tasks.",
       "Do not invent hidden world facts or execution steps; the program handles movement and interaction.",
       "Return only the required JSON object.",
@@ -122,12 +123,6 @@ export function assembleDecisionRequest(
     JSON.stringify(input.perception, null, 2),
     additions.get("perception"),
   );
-  const taskOptions = section(
-    "[TASK OPTIONS]",
-    "task_options",
-    JSON.stringify(input.taskOptions, null, 2),
-    additions.get("task_options"),
-  );
   const reason = section(
     "[DECISION REASON]",
     "decision_reason",
@@ -137,7 +132,7 @@ export function assembleDecisionRequest(
   const responseFormat = section(
     "[RESPONSE FORMAT]",
     "response_format",
-    '{"schemaVersion":2,"head":{"kind":"continue"},"body":{"kind":"replace","taskOptionId":"<offered ID>","arguments":{}},"reason":"<brief reason>"}',
+    '{"schemaVersion":3,"head":{"kind":"continue"},"body":{"kind":"replace","task":{"kind":"operation","operationId":"<operation ID>","hostEntityId":"<optional host instance>","arguments":{}}},"reason":"<brief reason>"}',
   );
 
   return ModelDecisionRequestSchema.parse({
@@ -162,12 +157,10 @@ export function assembleDecisionRequest(
           operationResults,
           memories,
           perception,
-          taskOptions,
           reason,
           responseFormat,
         ].join("\n\n"),
       },
     ],
-    taskOptions: input.taskOptions,
   });
 }

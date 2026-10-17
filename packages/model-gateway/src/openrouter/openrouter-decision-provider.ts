@@ -1,10 +1,11 @@
 import { z } from "zod";
 
 import {
+  DirectTaskDecisionSchema,
   ModelDecisionRequestSchema,
   TaskDecisionSchema,
   type ModelDecisionRequest,
-  type TaskDecision,
+  type ModelDecisionProposal,
 } from "@god-sim/protocol";
 
 import { ModelConfigSchema, type ModelConfig } from "../config/model-config";
@@ -34,8 +35,8 @@ function redact(message: string, apiKey: string): string {
     .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [REDACTED]");
 }
 
-function responseFormat() {
-  const selection = {
+function responseFormat(direct: boolean) {
+  const legacySelection = {
     anyOf: [
       {
         type: "object",
@@ -55,20 +56,63 @@ function responseFormat() {
       },
     ],
   };
+  const directSelection = {
+    anyOf: [
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind"],
+        properties: { kind: { const: "continue" } },
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "task"],
+        properties: {
+          kind: { const: "replace" },
+          task: {
+            anyOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["kind"],
+                properties: { kind: { const: "empty_task" } },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["kind", "operationId", "arguments"],
+                properties: {
+                  kind: { const: "operation" },
+                  operationId: { type: "string" },
+                  hostEntityId: { type: "string" },
+                  arguments: { type: "object", additionalProperties: true },
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  };
+  const selection = direct ? directSelection : legacySelection;
   return {
     type: "json_schema",
     json_schema: {
-      name: "task_decision",
+      name: direct ? "direct_task_decision" : "task_decision",
       strict: true,
       schema: {
         type: "object",
         additionalProperties: false,
         required: ["schemaVersion", "head", "body", "reason"],
         properties: {
-          schemaVersion: { const: 2 },
+          schemaVersion: { const: direct ? 3 : 2 },
           head: selection,
           body: selection,
           reason: { type: "string" },
+          ...(direct
+            ? { goalUpdates: { type: "object", additionalProperties: true } }
+            : {}),
         },
       },
     },
@@ -87,8 +131,9 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
   async decide(
     requestValue: ModelDecisionRequest,
     signal: AbortSignal,
-  ): Promise<TaskDecision> {
+  ): Promise<ModelDecisionProposal> {
     const request = ModelDecisionRequestSchema.parse(requestValue);
+    const direct = request.taskOptions === undefined;
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.#config.apiKey}`,
       "content-type": "application/json",
@@ -102,7 +147,7 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
         body: JSON.stringify({
           model: this.#config.model,
           messages: request.messages,
-          response_format: responseFormat(),
+          response_format: responseFormat(direct),
         }),
         signal: AbortSignal.any([signal, AbortSignal.timeout(this.#config.timeoutMs)]),
       });
@@ -117,7 +162,9 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
       } catch (error) {
         throw new Error("OpenRouter assistant content was not valid JSON", { cause: error });
       }
-      return TaskDecisionSchema.parse(parsedContent);
+      return direct
+        ? DirectTaskDecisionSchema.parse(parsedContent)
+        : TaskDecisionSchema.parse(parsedContent);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(redact(message, this.#config.apiKey));

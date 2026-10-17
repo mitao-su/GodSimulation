@@ -4,7 +4,7 @@ import {
   adoptTask,
   releaseCommand,
   selectInteraction,
-  selectMoveTo,
+  selectContinue,
   selectWait,
   snapshotAgent,
   snapshotObject,
@@ -17,6 +17,7 @@ describe("bladder and toilet loop", () => {
       reviewRequired: true,
       aliceBladder: 74,
       bobBladder: 0,
+      alicePosition: { x: 16, y: 9 },
     });
     adoptTask(engine, "alice" as never, selectWait);
     adoptTask(engine, "bob" as never, selectWait);
@@ -28,7 +29,7 @@ describe("bladder and toilet loop", () => {
     expect(engine.getView().pauseReason?.code).toBe("urgent_bladder");
     expect(snapshotAgent(engine, "alice").bladder).toBe(75);
 
-    adoptTask(engine, "alice" as never, selectMoveTo("toilet-1"));
+    adoptTask(engine, "alice" as never, selectInteraction("toilet-1"));
     engine.tick();
     engine.dispatch(releaseCommand(engine));
     let completed = false;
@@ -40,11 +41,7 @@ describe("bladder and toilet loop", () => {
       const pending = engine.getPendingDecisionInputs();
       if (pending.length > 0) {
         for (const input of pending) {
-          const selector =
-            input.agentId === "alice" &&
-            input.taskOptions.some(selectInteraction("toilet-1"))
-              ? selectInteraction("toilet-1")
-              : selectWait;
+          const selector = input.agentId === "alice" ? selectContinue() : selectWait;
           adoptTask(engine, input.agentId, selector);
         }
         engine.tick();

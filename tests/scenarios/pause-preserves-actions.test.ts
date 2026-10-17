@@ -4,17 +4,17 @@ import {
   adoptTask,
   releaseCommand,
   runUntil,
-  selectMoveTo,
   selectWait,
+  selectWaitFor,
   snapshotAgent,
   starterEngine,
 } from "./fixtures/fixed-decision-provider";
 
 describe("thinking pause", () => {
   it("preserves the other agent's action progress while one agent rethinks", () => {
-    const engine = starterEngine({ reviewRequired: true });
-    adoptTask(engine, "alice" as never, selectMoveTo("fridge-1"));
-    adoptTask(engine, "bob" as never, selectMoveTo("fridge-1"));
+    const engine = starterEngine({ reviewRequired: true, aliceBladder: 0, bobBladder: 0 });
+    adoptTask(engine, "alice" as never, selectWaitFor(10));
+    adoptTask(engine, "bob" as never, selectWaitFor(600));
     engine.tick();
     engine.dispatch(releaseCommand(engine));
     runUntil(

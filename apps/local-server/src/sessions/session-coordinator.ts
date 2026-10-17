@@ -23,6 +23,7 @@ export interface SessionCoordinatorOptions {
   readonly decisionProvider: DecisionProvider;
   readonly persistence: PersistenceWriter;
   readonly modelId: string;
+  readonly decisionMaxAttempts?: number;
   readonly now?: () => string;
   readonly onError?: (error: unknown) => void;
 }
@@ -62,6 +63,9 @@ export class SessionCoordinator {
       persistence: options.persistence,
       modelId: options.modelId,
       now: this.#now,
+      ...(options.decisionMaxAttempts === undefined
+        ? {}
+        : { maxAttempts: options.decisionMaxAttempts }),
     });
   }
 
@@ -132,14 +136,7 @@ export class SessionCoordinator {
       case "worker_ready":
         return;
       case "decision_rejected":
-        await this.#publishHostFailure({
-          error: new Error(message.reason),
-          category: "protocol",
-          retryable: false,
-          blockWorker: true,
-          requestId: message.result.requestId,
-          persistWorldId: message.result.worldId,
-        });
+        await this.#retryRejectedDecision(message);
         return;
       case "decision_requested": {
         let outcome: CoordinatedDecision;
@@ -152,7 +149,7 @@ export class SessionCoordinator {
           throw error;
         }
         await this.#sendDecisionOutcome(outcome);
-        if (outcome.type !== "cancelled") {
+        if (outcome.type === "failure") {
           this.#pendingDecisionMessages.delete(message.request.requestId);
         }
         return;
@@ -218,7 +215,43 @@ export class SessionCoordinator {
 
   #publishView(view: WorldView): void {
     this.#view = view;
+    // A technical block may be rendered from a partial/older view that does
+    // not contain the in-flight request. Keep its identity so recovery can
+    // reissue the exact frozen request; only an explicit ready/error entry
+    // settles the pending map.
+    if (view.mode !== "TECHNICALLY_BLOCKED") {
+      for (const [requestId] of this.#pendingDecisionMessages) {
+        const pending = view.pendingDecisions.find(
+          (decision) => decision.requestId === requestId,
+        );
+        if (pending?.status === "ready" || pending?.status === "error") {
+          this.#pendingDecisionMessages.delete(requestId);
+        }
+      }
+    }
     for (const listener of this.#viewListeners) listener(view);
+  }
+
+  async #retryRejectedDecision(
+    message: Extract<WorkerToHostMessage, { type: "decision_rejected" }>,
+  ): Promise<void> {
+    const pending = this.#pendingDecisionMessages.get(message.result.requestId);
+    if (!pending) {
+      await this.#publishHostFailure({
+        error: new Error(message.reason),
+        category: "protocol",
+        retryable: false,
+        blockWorker: true,
+        requestId: message.result.requestId,
+        persistWorldId: message.result.worldId,
+      });
+      return;
+    }
+    const outcome = await this.#decisions.decide(pending.request, message.reason);
+    await this.#sendDecisionOutcome(outcome);
+    if (outcome.type !== "result") {
+      this.#pendingDecisionMessages.delete(message.result.requestId);
+    }
   }
 
   async #retryTechnicalFailure(

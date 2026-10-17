@@ -11,11 +11,15 @@ type TrackProposal = WorldView["pendingDecisions"][number]["headProposal"];
 function proposalText(proposal: TrackProposal): string {
   if (!proposal) return "等待决策";
   if (proposal.kind === "continue") return proposal.label;
+  if (proposal.task.kind === "empty_task") return "清空轨道";
   const argumentsText =
-    Object.keys(proposal.arguments).length === 0
+    Object.keys(proposal.task.arguments).length === 0
       ? ""
-      : ` ${JSON.stringify(proposal.arguments)}`;
-  return `${proposal.label}${argumentsText}`;
+      : ` ${JSON.stringify(proposal.task.arguments)}`;
+  const hostText = proposal.task.hostEntityId === undefined
+    ? ""
+    : ` @${proposal.task.hostEntityId}`;
+  return `${proposal.task.operationId}${hostText}${argumentsText}`;
 }
 
 export function DecisionReview({ view }: DecisionReviewProps) {

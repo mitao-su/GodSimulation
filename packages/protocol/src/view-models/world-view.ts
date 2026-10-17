@@ -2,14 +2,13 @@ import { z } from "zod";
 
 import { DomainEventSchema } from "../events/domain-event";
 import { OperationDurationSchema } from "../execution/task-contract";
-import { JsonObjectSchema } from "../json/json-value";
+import { DirectTaskReplacementSchema } from "../execution/host-operation-contract";
 import {
   AgentIdSchema,
   EntityIdSchema,
   OperationCallIdSchema,
   OperationIdSchema,
   RequestIdSchema,
-  TaskOptionIdSchema,
   WorldIdSchema,
 } from "../identity/ids";
 import { CoordinateSchema, FacingSchema } from "../world/coordinate";
@@ -114,9 +113,7 @@ export const PendingDecisionViewSchema = z
         z
           .object({
             kind: z.literal("replace"),
-            taskOptionId: TaskOptionIdSchema,
-            label: z.string().min(1).max(160),
-            arguments: JsonObjectSchema,
+            task: DirectTaskReplacementSchema,
           })
           .strict(),
       ])
@@ -132,9 +129,7 @@ export const PendingDecisionViewSchema = z
         z
           .object({
             kind: z.literal("replace"),
-            taskOptionId: TaskOptionIdSchema,
-            label: z.string().min(1).max(160),
-            arguments: JsonObjectSchema,
+            task: DirectTaskReplacementSchema,
           })
           .strict(),
       ])

@@ -78,10 +78,13 @@ function singleGoalStateFromCurrent(stateValue: unknown): MutableSnapshotState {
   if (state.decisionCycle !== null) {
     state.decisionCycle.requests = state.decisionCycle.requests.map(
       (request) => {
-        const wait = request.promptInput.taskOptions?.find(
-          (option) => option.operationId === "core.wait",
-        );
-        if (!wait) throw new Error("Missing wait option in current snapshot fixture");
+        // 这是旧快照迁移夹具，候选项必须由 fixture 明确合成，不能从
+        // 当前 direct 决策请求读取已删除的动态 taskOptions。
+        const wait = {
+          id: `task-option:${request.agentId}:wait`,
+          label: "Wait",
+          goal: { kind: "wait", durationTicks: 600 },
+        } satisfies MutableTaskOption;
         const stablePrompt = { ...request.promptInput };
         delete stablePrompt.activeTasks;
         delete stablePrompt.taskOptions;

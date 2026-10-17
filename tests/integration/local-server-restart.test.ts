@@ -139,12 +139,13 @@ describe("local server restart", () => {
       listen: false,
       serveStaticWeb: false,
     });
-    const beforeRestart = await waitForReady(first);
-    expect(beforeRestart).toMatchObject({
+    const ready = await waitForReady(first);
+    expect(ready).toMatchObject({
       mode: "READY_FOR_RELEASE",
       worldTick: 0,
       technicalFailure: null,
     });
+    const beforeRestart = await releaseAndWaitForRunningTick(first, ready);
     await first.stop();
 
     const second = await startLocalServer({
@@ -156,10 +157,10 @@ describe("local server restart", () => {
       const afterRestart = await waitForReady(second);
       expect(afterRestart).toMatchObject({
         mode: "READY_FOR_RELEASE",
-        worldTick: beforeRestart.worldTick,
-        worldVersion: beforeRestart.worldVersion,
         technicalFailure: null,
       });
+      expect(afterRestart.worldTick).toBeGreaterThanOrEqual(beforeRestart.worldTick);
+      expect(afterRestart.worldVersion).toBeGreaterThan(beforeRestart.worldVersion);
     } finally {
       await second.stop();
     }

@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import homePlugin from "@god-sim/home-objects";
-import type { DomainEvent } from "@god-sim/protocol";
-import { createSimulation, type SimulationEngine } from "@god-sim/simulation";
+import { type DomainEvent, type TaskOption } from "@god-sim/protocol";
+import {
+  createSimulation,
+  createSimulationRegistry,
+  prepareOperationCall,
+  restoreWorldSnapshot,
+  runTickPipeline,
+  type SimulationEngine,
+} from "@god-sim/simulation";
 import spatialPlugin from "@god-sim/spatial-objects";
 import agentsPlugin from "@god-sim/starter-agents";
 
@@ -11,7 +18,6 @@ import { testSimulationRulesLock } from "../fixtures/simulation-rules";
 import {
   adoptTask,
   releaseCommand,
-  selectMoveTo,
   selectWait,
   starterEngine,
 } from "./fixtures/fixed-decision-provider";
@@ -58,20 +64,6 @@ function lockedPassageEngine(): SimulationEngine {
   });
 }
 
-function runUntilActionFailure(engine: SimulationEngine): {
-  readonly events: readonly DomainEvent[];
-  readonly failure: Extract<DomainEvent, { readonly type: "action_failed" }>;
-} {
-  const events: DomainEvent[] = [];
-  for (let count = 0; count < 500; count += 1) {
-    engine.tick();
-    events.push(...takeEvents(engine));
-    const failure = events.find((event) => event.type === "action_failed");
-    if (failure?.type === "action_failed") return { events, failure };
-  }
-  throw new Error("Expected an automatic traversal failure");
-}
-
 describe("causal memory", () => {
   it("uses real startup events for every initial memory and known entity", () => {
     const engine = starterEngine({ reviewRequired: true });
@@ -96,18 +88,109 @@ describe("causal memory", () => {
   });
 
   it("remembers a failed automatic traversal from its action_failed event", () => {
-    const engine = lockedPassageEngine();
-    takeEvents(engine);
-    adoptTask(engine, "alice" as never, selectMoveTo("fridge-1"));
-    adoptTask(engine, "bob" as never, selectWait);
-    engine.tick();
-    takeEvents(engine);
-    engine.dispatch(releaseCommand(engine));
+    const source = lockedPassageEngine();
+    const registry = createSimulationRegistry([
+      spatialPlugin,
+      homePlugin,
+      agentsPlugin,
+    ]);
+    const lockedWorldDefinition = {
+      ...starterHome,
+      objects: starterHome.objects.map((object) =>
+        object.id === "door-living-kitchen"
+          ? { ...object, state: { open: false, locked: true } }
+          : object,
+      ),
+    };
+    let world = restoreWorldSnapshot(
+      source.createSnapshot(),
+      registry,
+      lockedWorldDefinition,
+      testSimulationRulesLock,
+    );
+    const legacyMoveOption: TaskOption = {
+      kind: "operation",
+      id: "task-option:alice:move-fridge" as never,
+      operationId: "core.move" as never,
+      label: "Move to refrigerator",
+      taskSlots: ["BODY"],
+      argumentSchema: {},
+      fixedArguments: { targetEntityId: "fridge-1" },
+    };
+    const prepared = prepareOperationCall(
+      world,
+      registry,
+      "alice" as never,
+      legacyMoveOption,
+      {},
+      "operation-call:causal-memory:move" as never,
+    );
+    if (prepared.kind !== "prepared") {
+      throw new Error(`Expected a prepared legacy move: ${JSON.stringify(prepared)}`);
+    }
+    const traversalIndex = prepared.operation.plan.actions.findIndex(
+      (action) =>
+        action.kind === "interact_object" &&
+        action.purpose === "automatic_traversal" &&
+        action.targetEntityId === "door-living-kitchen",
+    );
+    const traversal = prepared.operation.plan.actions[traversalIndex];
+    const approach = prepared.operation.plan.actions[traversalIndex - 1];
+    if (traversal?.kind !== "interact_object" || approach?.kind !== "move") {
+      throw new Error("Expected the legacy move plan to approach the kitchen door");
+    }
+    const actions = prepared.operation.plan.actions.map((action, index) =>
+      index < traversalIndex
+        ? {
+            ...action,
+            progressTicks: action.durationTicks,
+            ...(action.kind === "interact_object" ? { started: true } : {}),
+          }
+        : index === traversalIndex
+          ? { ...action, progressTicks: 0, started: false }
+          : action,
+    );
+    const activeOperation = {
+      ...prepared.operation,
+      progressTicks: actions
+        .slice(0, traversalIndex)
+        .reduce((total, action) => total + action.durationTicks, 0),
+      plan: {
+        ...prepared.operation.plan,
+        currentActionIndex: traversalIndex,
+        actions,
+      },
+    };
+    const aliceBefore = world.agents.get("alice" as never);
+    if (!aliceBefore) throw new Error("Missing Alice in locked-passage fixture");
+    world = {
+      ...world,
+      mode: "RUNNING",
+      decisionCycle: null,
+      agents: new Map(world.agents).set(aliceBefore.id, {
+        ...aliceBefore,
+        position: approach.path.at(-1)!,
+        taskTracks: {
+          HEAD: { kind: "empty" },
+          BODY: { kind: "operation", callId: activeOperation.callId },
+        },
+        activeOperations: new Map([[activeOperation.callId, activeOperation]]),
+      }),
+    };
 
-    const { failure } = runUntilActionFailure(engine);
-    const alice = snapshotAgents(engine).find((agent) => agent.id === "alice");
+    let failure: Extract<DomainEvent, { readonly type: "action_failed" }> | undefined;
+    for (let count = 0; count < 3 && failure === undefined; count += 1) {
+      const result = runTickPipeline(world, registry);
+      world = result.world;
+      failure = result.events.find(
+        (event): event is Extract<DomainEvent, { readonly type: "action_failed" }> =>
+          event.type === "action_failed",
+      );
+    }
+    if (!failure) throw new Error("Expected an automatic traversal failure");
+    const aliceAfter = world.agents.get("alice" as never);
 
-    expect(alice?.memories).toContainEqual(
+    expect(aliceAfter?.memories).toContainEqual(
       expect.objectContaining({
         sourceEventId: failure.eventId,
         observationKind: "interaction",

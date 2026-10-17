@@ -1,7 +1,7 @@
 import {
   CheckpointIdSchema,
   DecisionIdentitySchema,
-  TaskDecisionSchema,
+  ModelDecisionProposalSchema,
   TechnicalFailureSchema,
   verifySimulationRulesLock,
   WorldCommandSchema,
@@ -9,7 +9,7 @@ import {
   type DecisionPromptInput,
   type DomainEvent,
   type CheckpointId,
-  type TaskDecision,
+  type ModelDecisionProposal,
   type ModelDecisionResult,
   type SimulationRulesLock,
   type TechnicalFailure,
@@ -27,7 +27,6 @@ import {
   retryDecisionRequest,
   type DecisionRequestSpec,
 } from "../decision/decision-gate";
-import { buildTaskOptions } from "../execution/operation-catalog";
 import { recordFuseResults } from "../execution/operation-lifecycle";
 import { retryPendingHostedOperationTerminations } from "../execution/action-runner";
 import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
@@ -74,7 +73,7 @@ export interface SimulationRestoreOptions {
 
 export interface AdoptedDecision {
   readonly identity: DecisionIdentity;
-  readonly proposal: TaskDecision;
+  readonly proposal: ModelDecisionProposal;
 }
 
 export interface BufferResult {
@@ -213,7 +212,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   acceptDecision(decisionInput: AdoptedDecision): BufferResult {
     const identity = DecisionIdentitySchema.safeParse(decisionInput.identity);
-    const proposal = TaskDecisionSchema.safeParse(decisionInput.proposal);
+    const proposal = ModelDecisionProposalSchema.safeParse(decisionInput.proposal);
     if (!identity.success || !proposal.success) {
       return { accepted: false, reason: "Adopted decision failed schema validation" };
     }
@@ -234,7 +233,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
     const validation = acceptDecisionResult(this.#world, {
       ...identity.data,
       proposal: proposal.data,
-    });
+    }, this.#registry);
     if (!validation.accepted) {
       return {
         accepted: false,
@@ -396,9 +395,15 @@ class DeterministicSimulationEngine implements SimulationEngine {
 
   #requestDecisionCycle(needs: readonly DecisionNeed[]): void {
     if (needs.length === 0) return;
+    // 先把世界切入冻结形状，再确认 operation 的熔断回执。Hosted
+    // operation 只能在冻结检查点读取回执，模型请求随后才会被构造。
+    const frozenWorld =
+      this.#world.mode === "RUNNING"
+        ? { ...this.#world, mode: "THINKING" as const }
+        : this.#world;
     const fuseCausationId = `fuse:${this.#world.id}:${this.#world.tick}`;
     const fused = recordFuseResults(
-      this.#world,
+      frozenWorld,
       this.#registry,
       needs.map((need) => need.agentId),
       {
@@ -411,7 +416,6 @@ class DeterministicSimulationEngine implements SimulationEngine {
     const specs: DecisionRequestSpec[] = needs.map((need) => ({
       agentId: need.agentId,
       reason: need.reason,
-      taskOptions: buildTaskOptions(this.#world, this.#registry, need.agentId),
     }));
     const transition = requestDecisions(this.#world, specs);
     this.#world = transition.world;
@@ -592,7 +596,7 @@ class DeterministicSimulationEngine implements SimulationEngine {
         ...adopted.identity,
         proposal: adopted.proposal,
       };
-      const accepted = acceptDecisionResult(this.#world, result);
+      const accepted = acceptDecisionResult(this.#world, result, this.#registry);
       if (!accepted.accepted) throw new Error(accepted.reason ?? "Decision was rejected");
       this.#world = accepted.world;
       const written = appendDomainEvent(

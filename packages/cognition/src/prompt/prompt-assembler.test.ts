@@ -90,7 +90,6 @@ describe("assembleDecisionRequest", () => {
       "[ACTIVE TASKS]",
       "[RELEVANT MEMORIES]",
       "[CURRENT PERCEPTION]",
-      "[TASK OPTIONS]",
       "[DECISION REASON]",
       "[RESPONSE FORMAT]",
     ];
@@ -102,7 +101,8 @@ describe("assembleDecisionRequest", () => {
     expect(prompt).not.toContain("occupied by Bob");
     expect(prompt).toContain('"head"');
     expect(prompt).toContain('"body"');
-    expect(request.taskOptions).toEqual(input.taskOptions);
+    expect(request).not.toHaveProperty("taskOptions");
+    expect(prompt).not.toContain("task-option:alice:wait");
   });
 
   it("rejects a plugin contributor that requests an unknown placement", () => {

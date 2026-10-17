@@ -74,10 +74,7 @@ describe("WorldSession restoration", () => {
         message.type === "decision_requested",
     );
     for (const { request } of requests) {
-      const wait = request.taskOptions.find(
-        (option) =>
-          option.kind === "operation" && option.operationId === "core.wait",
-      )!;
+      expect(request.taskOptions).toBeUndefined();
       session.handle({
         type: "decision_result",
         result: {
@@ -89,12 +86,15 @@ describe("WorldSession restoration", () => {
           schemaVersion: request.schemaVersion,
           pluginLockHash: request.pluginLockHash,
           proposal: {
-            schemaVersion: 2,
+            schemaVersion: 3,
             head: { kind: "continue" },
             body: {
               kind: "replace",
-              taskOptionId: wait.id,
-              arguments: { durationTicks: 10 },
+              task: {
+                kind: "operation",
+                operationId: "core.wait" as never,
+                arguments: { durationTicks: 10 },
+              },
             },
             reason: "Wait",
           },
