@@ -178,6 +178,10 @@ export class SessionCoordinator {
           checkpointId: message.checkpointId,
         });
         return;
+      case "memory_request":
+      case "memory_result_ack":
+        // W5-IF 只先发布协议；在 W5-B/C 接线前不能静默忽略记忆消息。
+        throw new Error(`Memory IPC message ${message.type} is not implemented`);
       case "event_batch":
       case "snapshot_ready":
         throw new Error(`Legacy world-history message ${message.type} is not supported`);

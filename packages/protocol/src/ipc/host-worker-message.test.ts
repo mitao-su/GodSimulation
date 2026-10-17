@@ -255,4 +255,44 @@ describe("host-worker messages", () => {
       HostToWorkerMessageSchema.safeParse({ type: "checkpoint_committed" }).success,
     ).toBe(false);
   });
+
+  it("carries a versioned memory request and result acknowledgement", () => {
+    const identity = {
+      schemaVersion: 1,
+      requestId: "memory-request:1",
+      worldId: "starter-world",
+      branchId: "branch:main",
+      agentId: "alice",
+      checkpointId: "checkpoint:starter-world:8:17",
+      worldVersion: 8,
+      worldTick: 42,
+      lastEventSequence: 17,
+      simulationRulesHash: "c".repeat(64),
+      pluginLockHash: "b".repeat(64),
+      inputHash: "d".repeat(64),
+      kind: "consolidation" as const,
+      consolidationCycleId: "consolidation-cycle:1",
+    };
+    const request = WorkerToHostMessageSchema.parse({
+      type: "memory_request",
+      request: {
+        identity,
+        input: { conversations: [], retainedMemories: [], semanticMap: {} },
+      },
+    });
+    expect(request.type).toBe("memory_request");
+
+    const acknowledgement = WorkerToHostMessageSchema.parse({
+      type: "memory_result_ack",
+      acknowledgement: {
+        schemaVersion: 1,
+        request: identity,
+        requestReceiptSequence: 1,
+        resultReceiptSequence: 1,
+        disposition: "queued",
+        acknowledgedWorldTick: 42,
+      },
+    });
+    expect(acknowledgement.type).toBe("memory_result_ack");
+  });
 });
