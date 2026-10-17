@@ -9,6 +9,11 @@ import {
 import { projectWorldSnapshot } from "./snapshot-projector";
 import { restoreWorldSnapshot } from "./snapshot-restorer";
 import type { ActiveOperation } from "../execution/operation";
+import { prepareDirectOperationCall } from "../execution/operation-planner";
+import type {
+  OperationRuntimeCall,
+} from "../execution/operation-runtime";
+import type { PendingOperationTermination } from "../world/world-state";
 import {
   simulationTestWorld,
   testPluginRegistry,
@@ -82,6 +87,45 @@ function mutableFirstOperation(snapshotValue: unknown): MutableOperationSnapshot
   const operation = alice?.activeOperations[0];
   if (!alice || !operation) throw new Error("Missing active wait fixture");
   return operation;
+}
+
+function hostedOperationFixture() {
+  const base = simulationTestWorld();
+  const aliceId = "alice" as never;
+  const callId = OperationCallIdSchema.parse("operation-call:test:hosted-snapshot");
+  const prepared = prepareDirectOperationCall(
+    base,
+    testPluginRegistry,
+    aliceId,
+    "BODY",
+    {
+      kind: "operation",
+      operationId: OperationIdSchema.parse("object.test.fridge.use"),
+      hostEntityId: "fridge-1" as never,
+      arguments: {},
+    },
+    callId,
+  );
+  if (prepared.kind !== "prepared") {
+    throw new Error(`Hosted fixture failed to prepare: ${prepared.kind}`);
+  }
+  const operation = prepared.operation;
+  const alice = base.agents.get(aliceId)!;
+  const world = {
+    ...base,
+    mode: "RUNNING" as const,
+    agents: new Map(base.agents).set(aliceId, {
+      ...alice,
+      taskTracks: {
+        HEAD: { kind: "empty" as const },
+        BODY: { kind: "operation" as const, callId },
+      },
+      activeOperations: new Map([
+        [callId, operation as unknown as ActiveOperation],
+      ]),
+    }),
+  };
+  return { base, world, operation };
 }
 
 describe("active operation snapshot state", () => {
@@ -182,7 +226,7 @@ describe("active operation snapshot state", () => {
       [bodyCallId, body],
       [headCallId, head],
     ]);
-    expect(snapshot.state).toMatchObject({ stateSchemaVersion: 3 });
+    expect(snapshot.state).toMatchObject({ stateSchemaVersion: 4 });
   });
 
   it("round-trips a synchronized call as one operation referenced by both tracks", () => {
@@ -238,6 +282,228 @@ describe("active operation snapshot state", () => {
     expect(tracks.HEAD).toEqual({ kind: "operation", callId });
     expect(tracks.BODY).toEqual({ kind: "operation", callId });
     expect(restored.agents.get(aliceId)!.activeOperations.size).toBe(1);
+  });
+
+  it("round-trips a production hosted call with its locked lifecycle state", () => {
+    const { base, world, operation } = hostedOperationFixture();
+    const started = {
+      ...operation,
+      firstStepState: "started" as const,
+      progressTicks: 3,
+    } satisfies OperationRuntimeCall;
+    const aliceId = "alice" as never;
+    const alice = world.agents.get(aliceId)!;
+    const activeWorld = {
+      ...world,
+      tick: 3,
+      agents: new Map(world.agents).set(aliceId, {
+        ...alice,
+        activeOperations: new Map([
+          [started.callId, started as unknown as ActiveOperation],
+        ]),
+      }),
+    };
+
+    const restored = restoreWorldSnapshot(
+      projectWorldSnapshot(activeWorld),
+      testPluginRegistry,
+      base.map,
+      testSimulationRulesLock,
+    );
+    const restoredOperation = restored.agents
+      .get(aliceId)!
+      .activeOperations.get(started.callId);
+
+    expect(restoredOperation).toEqual(started);
+    expect(restoredOperation).toHaveProperty("host", {
+      kind: "furniture",
+      hostEntityId: "fridge-1",
+    });
+    expect(restoredOperation).toHaveProperty("hostDefinition", {
+      kind: "furniture",
+      hostDefinitionId: "test.fridge",
+    });
+    expect(restoredOperation).toHaveProperty("firstStepState", "started");
+    expect(restoredOperation).toHaveProperty("duration", {
+      kind: "fixed",
+      totalTicks: 10,
+    });
+  });
+
+  it("round-trips pending termination and terminal call ledger without rerunning lifecycle resolution", () => {
+    const { base, world, operation } = hostedOperationFixture();
+    const call = {
+      ...operation,
+      firstStepState: "started" as const,
+      progressTicks: 10,
+    } satisfies OperationRuntimeCall;
+    const aliceId = "alice" as never;
+    const pending = {
+      kind: "transaction_ready" as const,
+      agentId: aliceId,
+      operation: call,
+      transaction: {
+        agentId: aliceId,
+        callId: call.callId,
+        operationId: call.operationId,
+        source: "duration_elapsed",
+        terminatedAtTick: 10,
+        outcome: "completed" as const,
+        proposal: { effects: [], result: { status: "completed" } },
+      },
+    } satisfies Extract<PendingOperationTermination, { kind: "transaction_ready" }>;
+    const alice = world.agents.get(aliceId)!;
+    const snapshot = projectWorldSnapshot({
+      ...world,
+      tick: 10,
+      agents: new Map(world.agents).set(aliceId, {
+        ...alice,
+        activeOperations: new Map([
+          [call.callId, call as unknown as ActiveOperation],
+        ]),
+      }),
+      pendingOperationTerminations: new Map([[call.callId, pending]]),
+      terminalOperationCallIds: new Set([
+        OperationCallIdSchema.parse("operation-call:test:already-terminal"),
+      ]),
+    });
+
+    const restored = restoreWorldSnapshot(
+      snapshot,
+      testPluginRegistry,
+      base.map,
+      testSimulationRulesLock,
+    );
+    expect(restored.pendingOperationTerminations?.get(call.callId)).toEqual(pending);
+    expect(restored.terminalOperationCallIds).toEqual(
+      new Set(["operation-call:test:already-terminal"]),
+    );
+  });
+
+  it("rejects a pending hosted call whose first step is still pending after progress", () => {
+    const { base, world, operation } = hostedOperationFixture();
+    const call = {
+      ...operation,
+      progressTicks: 1,
+    } satisfies OperationRuntimeCall;
+    const aliceId = "alice" as never;
+    const alice = world.agents.get(aliceId)!;
+    const changed = projectWorldSnapshot({
+      ...world,
+      tick: 1,
+      agents: new Map(world.agents).set(aliceId, {
+        ...alice,
+        activeOperations: new Map([
+          [call.callId, call as unknown as ActiveOperation],
+        ]),
+      }),
+      pendingOperationTerminations: new Map([
+        [
+          call.callId,
+          {
+            kind: "complete_pending" as const,
+            agentId: aliceId,
+            operation: call,
+            source: "duration_elapsed" as const,
+          },
+        ],
+      ]),
+    });
+
+    expect(() =>
+      restoreWorldSnapshot(
+        changed,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/pending but has progressed/i);
+  });
+
+  it("rejects a pending termination whose saved operation diverges from the active call", () => {
+    const { base, world, operation } = hostedOperationFixture();
+    const aliceId = "alice" as never;
+    const alice = world.agents.get(aliceId)!;
+    const changedOperation = {
+      ...operation,
+      arguments: { unexpected: true },
+    } satisfies OperationRuntimeCall;
+    const snapshot = projectWorldSnapshot({
+      ...world,
+      agents: new Map(world.agents).set(aliceId, {
+        ...alice,
+        activeOperations: new Map([
+          [operation.callId, operation as unknown as ActiveOperation],
+        ]),
+      }),
+      pendingOperationTerminations: new Map([
+        [
+          operation.callId,
+          {
+            kind: "complete_pending" as const,
+            agentId: aliceId,
+            operation: changedOperation,
+            source: "duration_elapsed" as const,
+          },
+        ],
+      ]),
+    });
+
+    expect(() =>
+      restoreWorldSnapshot(
+        snapshot,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/does not match its active call/i);
+  });
+
+  it("rejects a terminal ledger entry that still has an active call", () => {
+    const { base, world, operation } = hostedOperationFixture();
+    const aliceId = "alice" as never;
+    const alice = world.agents.get(aliceId)!;
+    const snapshot = projectWorldSnapshot({
+      ...world,
+      agents: new Map(world.agents).set(aliceId, {
+        ...alice,
+        activeOperations: new Map([
+          [operation.callId, operation as unknown as ActiveOperation],
+        ]),
+      }),
+      terminalOperationCallIds: new Set([operation.callId]),
+    });
+
+    expect(() =>
+      restoreWorldSnapshot(
+        snapshot,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/still active/i);
+  });
+
+  it("rejects duplicate terminal call IDs instead of silently collapsing them", () => {
+    const { base, world } = hostedOperationFixture();
+    const callId = OperationCallIdSchema.parse("operation-call:test:already-terminal");
+    const snapshot = projectWorldSnapshot({
+      ...world,
+      terminalOperationCallIds: new Set([callId]),
+    });
+    const changed = structuredClone(snapshot) as typeof snapshot & {
+      state: { terminalOperationCallIds: string[] };
+    };
+    changed.state.terminalOperationCallIds = [callId, callId];
+
+    expect(() =>
+      restoreWorldSnapshot(
+        changed,
+        testPluginRegistry,
+        base.map,
+        testSimulationRulesLock,
+      ),
+    ).toThrow(/duplicate terminal operation call IDs/i);
   });
 
   it("rejects an active call whose operation is no longer registered", () => {

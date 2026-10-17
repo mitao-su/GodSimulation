@@ -1,11 +1,16 @@
 import {
   verifySimulationRulesLock,
+  type AgentId,
   type SimulationRulesLock,
   type WorldSnapshot,
 } from "@god-sim/protocol";
 
 import type { MapDefinition } from "../map/map-definition";
-import { createOperationRuntimeContext } from "../execution/operation-runtime";
+import {
+  createOperationRuntimeContext,
+  isOperationRuntimeCall,
+  type OperationRuntimeCall,
+} from "../execution/operation-runtime";
 import type { SimulationRegistry } from "./simulation-registry";
 import type { DecisionCycleState, WorldState } from "../world/world-state";
 import type { SerializedWorldState } from "./snapshot-state-codec";
@@ -111,6 +116,10 @@ export function validateRestoredOperations(
     for (const operation of [...agent.activeOperations.values()].sort(
       (left, right) => left.callId.localeCompare(right.callId),
     )) {
+      if (isOperationRuntimeCall(operation)) {
+        validateRestoredHostedOperation(world, registry, agentId, operation);
+        continue;
+      }
       const runtime = registry.getOperation(operation.operationId);
       if (!runtime) {
         throw new Error(
@@ -223,4 +232,96 @@ export function validateRestoredOperations(
       }
     }
   }
+}
+
+function validateRestoredHostedOperation(
+  world: WorldState,
+  registry: SimulationRegistry,
+  agentId: AgentId,
+  operation: OperationRuntimeCall,
+): void {
+  const runtime = registry.getHostedOperation(
+    operation.operationId,
+    operation.hostDefinition,
+  );
+  if (!runtime) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} uses an unregistered operation ${operation.operationId} on ${operation.hostDefinition.hostDefinitionId}`,
+    );
+  }
+  if (
+    runtime.id !== operation.operationId ||
+    runtime.host.kind !== operation.hostDefinition.kind ||
+    runtime.host.hostDefinitionId !== operation.hostDefinition.hostDefinitionId ||
+    operation.host.kind !== operation.hostDefinition.kind ||
+    !sameTaskSlots(operation.taskSlots, runtime.taskSlots) ||
+    runtime.duration.kind !== operation.duration.kind ||
+    runtime.target.kind !== operation.target.kind
+  ) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} has an inconsistent host binding`,
+    );
+  }
+  if (operation.host.kind === "agent") {
+    const host = world.agents.get(operation.host.hostEntityId);
+    if (!host || operation.host.hostEntityId !== agentId || host.definitionId !== operation.hostDefinition.hostDefinitionId) {
+      throw new Error(
+        `Snapshot hosted operation ${operation.callId} has an invalid agent host`,
+      );
+    }
+  } else {
+    const host = world.objects.get(operation.host.hostEntityId);
+    if (!host || host.definitionId !== operation.hostDefinition.hostDefinitionId) {
+      throw new Error(
+        `Snapshot hosted operation ${operation.callId} has an invalid object host`,
+      );
+    }
+  }
+  if (operation.target.kind === "character" && !world.agents.has(operation.target.targetCharacterId)) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} targets an unknown character`,
+    );
+  }
+  if (operation.target.kind === "object" && !world.objects.has(operation.target.targetEntityId)) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} targets an unknown object`,
+    );
+  }
+  const parsedArguments = runtime.parametersSchema.safeParse(operation.arguments);
+  if (!parsedArguments.success) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} has incompatible arguments`,
+      { cause: parsedArguments.error },
+    );
+  }
+  const parsedState = runtime.stateSchema.safeParse(operation.state);
+  if (!parsedState.success) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} has an incompatible state`,
+      { cause: parsedState.error },
+    );
+  }
+  if (
+    operation.firstStepState === "pending" &&
+    operation.progressTicks !== 0
+  ) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} is pending but has progressed`,
+    );
+  }
+  if (
+    operation.duration.kind === "fixed" &&
+    operation.progressTicks > operation.duration.totalTicks
+  ) {
+    throw new Error(
+      `Snapshot hosted operation ${operation.callId} exceeds its fixed duration`,
+    );
+  }
+}
+
+function sameTaskSlots(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
