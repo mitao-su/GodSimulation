@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { ModelDecisionResult } from "@god-sim/protocol";
+import type {
+  DirectTaskDecision,
+  ModelDecisionResult,
+} from "@god-sim/protocol";
 
 import {
   acceptDecisionResult,
@@ -9,7 +12,10 @@ import {
   retryDecisionRequest,
 } from "./decision-gate";
 import { recordPerceptionCandidates } from "../perception/perception-recorder";
-import { simulationTestWorld } from "../testing/simulation-test-fixtures";
+import {
+  simulationTestWorld,
+  testPluginRegistry,
+} from "../testing/simulation-test-fixtures";
 
 const aliceWaitRequest = {
   agentId: "alice" as never,
@@ -55,6 +61,167 @@ const aliceWaitRequest = {
 };
 
 describe("decision gate", () => {
+  it("creates production requests without dynamic task options", () => {
+    const transition = requestDecisions(simulationTestWorld(), [
+      {
+        agentId: "alice" as never,
+        reason: { code: "initial_goal", summary: "Choose a first task" },
+      },
+    ]);
+
+    expect(transition.promptInputs[0]).not.toHaveProperty("taskOptions");
+    expect(
+      transition.world.decisionCycle?.requests.get("alice" as never)?.promptInput,
+    ).not.toHaveProperty("taskOptions");
+  });
+
+  it("accepts a bound direct operation without checking world preconditions", () => {
+    const thinking = requestDecisions(simulationTestWorld(), [
+      {
+        agentId: "alice" as never,
+        reason: { code: "initial_goal", summary: "Choose" },
+      },
+    ]).world;
+    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
+    const proposal: DirectTaskDecision = {
+      schemaVersion: 3,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "object.test.fridge.use" as never,
+          hostEntityId: "fridge-1" as never,
+          arguments: {},
+        },
+      },
+      reason: "Use the fridge despite being out of range",
+    };
+
+    const accepted = acceptDecisionResult(
+      thinking,
+      { ...request.identity, proposal },
+      testPluginRegistry,
+    );
+
+    expect(accepted.accepted).toBe(true);
+    expect(accepted.world.agents).toBe(thinking.agents);
+    expect(
+      accepted.world.decisionCycle?.requests.get("alice" as never)?.acceptedProposal,
+    ).toEqual(proposal);
+  });
+
+  it.each([
+    {
+      name: "unknown operation",
+      task: {
+        kind: "operation" as const,
+        operationId: "missing.operation" as never,
+        arguments: {},
+      },
+      reason: /not registered/i,
+    },
+    {
+      name: "missing furniture host",
+      task: {
+        kind: "operation" as const,
+        operationId: "object.test.fridge.use" as never,
+        arguments: {},
+      },
+      reason: /explicit non-agent host/i,
+    },
+    {
+      name: "wrong task track",
+      task: {
+        kind: "operation" as const,
+        operationId: "core.wait" as never,
+        arguments: { durationTicks: 10 },
+      },
+      reason: /does not occupy HEAD/i,
+    },
+    {
+      name: "invalid parameters",
+      task: {
+        kind: "operation" as const,
+        operationId: "object.test.fridge.configure" as never,
+        hostEntityId: "fridge-1" as never,
+        arguments: {},
+      },
+      reason: /mode/i,
+    },
+  ])("rejects a direct decision with $name", ({ task, reason }) => {
+    const thinking = requestDecisions(simulationTestWorld(), [
+      {
+        agentId: "alice" as never,
+        reason: { code: "initial_goal", summary: "Choose" },
+      },
+    ]).world;
+    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
+    const result = acceptDecisionResult(
+      thinking,
+      {
+        ...request.identity,
+        proposal: {
+          schemaVersion: 3,
+          head:
+            task.operationId === "core.wait"
+              ? { kind: "replace", task }
+              : { kind: "continue" },
+          body:
+            task.operationId === "core.wait"
+              ? { kind: "continue" }
+              : { kind: "replace", task },
+          reason: "Invalid direct reference",
+        },
+      },
+      testPluginRegistry,
+    );
+
+    expect(result).toMatchObject({ accepted: false, reason });
+    expect(result.world).toBe(thinking);
+  });
+
+  it("runs the goal update validator without applying target state", () => {
+    const thinking = requestDecisions(simulationTestWorld(), [
+      {
+        agentId: "alice" as never,
+        reason: { code: "initial_goal", summary: "Choose" },
+      },
+    ]).world;
+    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
+    const validate = vi.fn(() => ({
+      kind: "invalid" as const,
+      reason: "Goal patch is not valid for Alice",
+    }));
+    const result = acceptDecisionResult(
+      thinking,
+      {
+        ...request.identity,
+        proposal: {
+          schemaVersion: 3,
+          head: { kind: "continue" },
+          body: { kind: "continue" },
+          goalUpdates: { updates: [] },
+          reason: "Update a goal",
+        },
+      },
+      testPluginRegistry,
+      { validate },
+    );
+
+    expect(validate).toHaveBeenCalledWith(
+      thinking,
+      "alice",
+      { updates: [] },
+    );
+    expect(result).toMatchObject({
+      accepted: false,
+      reason: "Goal patch is not valid for Alice",
+    });
+    expect(result.world).toBe(thinking);
+    expect(result.world).not.toHaveProperty("goals");
+  });
+
   it("builds model input without hidden world facts", () => {
     const base = simulationTestWorld();
     const withMemory = recordPerceptionCandidates(

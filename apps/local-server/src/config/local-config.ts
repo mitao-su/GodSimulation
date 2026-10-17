@@ -34,6 +34,7 @@ export interface LocalConfig {
   readonly pluginDescriptors: readonly LocalPluginDescriptor[];
   readonly reviewRequired: boolean;
   readonly deterministicSeed: number;
+  readonly decisionMaxAttempts: number;
   readonly decisionProvider: LocalDecisionProviderConfig;
   readonly diagnostics: LocalConfigDiagnostics;
   readonly knownSecrets: readonly string[];
@@ -71,6 +72,16 @@ function parseInteger(name: string, value: string | undefined, fallback: number)
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(`${name} must be a non-negative integer`);
   }
+  return parsed;
+}
+
+function parsePositiveInteger(
+  name: string,
+  value: string | undefined,
+  fallback: number,
+): number {
+  const parsed = parseInteger(name, value, fallback);
+  if (parsed < 1) throw new Error(`${name} must be a positive integer`);
   return parsed;
 }
 
@@ -208,6 +219,11 @@ export async function loadLocalConfig(options: LoadLocalConfigOptions = {}): Pro
       "GOD_SIM_DETERMINISTIC_SEED",
       environment.GOD_SIM_DETERMINISTIC_SEED,
       1,
+    ),
+    decisionMaxAttempts: parsePositiveInteger(
+      "GOD_SIM_DECISION_MAX_ATTEMPTS",
+      environment.GOD_SIM_DECISION_MAX_ATTEMPTS,
+      3,
     ),
     decisionProvider: decision.provider,
     diagnostics: {

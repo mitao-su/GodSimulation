@@ -1,10 +1,12 @@
 import {
+  DirectTaskDecisionSchema,
+  TaskDecisionSchema,
   ModelDecisionResultSchema,
   resolveTaskDecision,
   TechnicalFailureSchema,
+  type ModelDecisionProposal,
   type ModelDecisionRequest,
   type ModelDecisionResult,
-  type TaskDecision,
   type TechnicalFailure,
 } from "@god-sim/protocol";
 import type { DecisionProvider } from "@god-sim/model-gateway";
@@ -34,13 +36,30 @@ export interface DecisionRequestCoordinatorOptions {
   readonly modelId: string;
   readonly now: () => string;
   readonly monotonicNow?: () => number;
+  /** 单个冻结请求允许的完整模型重答次数。 */
+  readonly maxAttempts?: number;
 }
 
 function validateProposal(
   request: ModelDecisionRequest,
-  value: TaskDecision,
-): TaskDecision {
-  return resolveTaskDecision(value, request.taskOptions).normalizedDecision;
+  value: ModelDecisionProposal,
+): ModelDecisionProposal {
+  if (request.taskOptions === undefined) {
+    const direct = DirectTaskDecisionSchema.safeParse(value);
+    if (!direct.success) {
+      throw new Error(
+        "Model returned a legacy task decision without task options",
+      );
+    }
+    return direct.data;
+  }
+  const legacy = TaskDecisionSchema.safeParse(value);
+  if (!legacy.success) {
+    throw new Error(
+      "Model returned a direct task decision for a legacy request with task options",
+    );
+  }
+  return resolveTaskDecision(legacy.data, request.taskOptions).normalizedDecision;
 }
 
 export class DecisionRequestCoordinator {
@@ -49,7 +68,10 @@ export class DecisionRequestCoordinator {
   readonly #modelId: string;
   readonly #now: () => string;
   readonly #monotonicNow: () => number;
+  readonly #maxAttempts: number;
   readonly #controllers = new Map<string, AbortController>();
+  readonly #attempts = new Map<string, number>();
+  readonly #persistedRequests = new Set<string>();
 
   constructor(options: DecisionRequestCoordinatorOptions) {
     this.#provider = options.provider;
@@ -57,9 +79,17 @@ export class DecisionRequestCoordinator {
     this.#modelId = options.modelId;
     this.#now = options.now;
     this.#monotonicNow = options.monotonicNow ?? (() => performance.now());
+    const maxAttempts = options.maxAttempts ?? 3;
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new Error("Decision correction maxAttempts must be a positive integer");
+    }
+    this.#maxAttempts = maxAttempts;
   }
 
-  async decide(request: ModelDecisionRequest): Promise<CoordinatedDecision> {
+  async decide(
+    request: ModelDecisionRequest,
+    correctionFeedback?: string,
+  ): Promise<CoordinatedDecision> {
     if (this.#controllers.has(request.requestId)) {
       throw new Error(`Decision request ${request.requestId} is already in flight`);
     }
@@ -67,15 +97,43 @@ export class DecisionRequestCoordinator {
     this.#controllers.set(request.requestId, controller);
     const startedAt = this.#monotonicNow();
     try {
-      let proposal: TaskDecision;
-      try {
-        proposal = validateProposal(
-          request,
-          await this.#provider.decide(request, controller.signal),
-        );
-      } catch (error) {
-        if (controller.signal.aborted) return { type: "cancelled" };
-        const message = error instanceof Error ? error.message : String(error);
+      const previousAttempts = this.#attempts.get(request.requestId) ?? 0;
+      let proposal: ModelDecisionProposal | null = null;
+      let lastError: unknown = correctionFeedback ?? null;
+      for (let attempt = previousAttempts + 1; attempt <= this.#maxAttempts; attempt += 1) {
+        this.#attempts.set(request.requestId, attempt);
+        const attemptRequest: ModelDecisionRequest = correctionFeedback === undefined && attempt === 1
+          ? request
+          : {
+              ...request,
+              messages: [
+                ...request.messages,
+                {
+                  role: "user",
+                  content: [
+                    "[TEMPORARY VALIDATION FEEDBACK]",
+                    String(lastError ?? "The previous response was invalid."),
+                    "Return the complete head/body/goalUpdates decision again. Do not return only a corrected field.",
+                  ].join("\n"),
+                },
+              ],
+            };
+        try {
+          proposal = validateProposal(
+            request,
+            await this.#provider.decide(attemptRequest, controller.signal),
+          );
+          break;
+        } catch (error) {
+          if (controller.signal.aborted) return { type: "cancelled" };
+          lastError = error;
+        }
+      }
+
+      if (proposal === null) {
+        const message = lastError instanceof Error
+          ? lastError.message
+          : String(lastError ?? "unknown validation error");
         const failure = TechnicalFailureSchema.parse({
           id: `failure:model:${request.requestId}`,
           category: "model",
@@ -86,23 +144,26 @@ export class DecisionRequestCoordinator {
         });
         const outcome: CompletedDecision = { type: "failure", failure };
         try {
-          await this.#persistence.saveModelCall({
-            requestId: request.requestId,
-            worldId: request.worldId,
-            worldVersion: request.worldVersion,
-            agentId: request.agentId,
-            protocolSchemaVersion: request.schemaVersion,
-            decisionCycleId: request.decisionCycleId,
-            pluginLockHash: request.pluginLockHash,
-            decisionReasonCode: request.decisionReason.code,
-            modelId: this.#modelId,
-            status: "failed",
-            taskDecision: null,
-            responseReason: failure.message,
-            latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
-            retryOfRequestId: request.retryOfRequestId ?? null,
-            recordedAtRealTime: failure.occurredAtRealTime,
-          });
+          if (!this.#persistedRequests.has(request.requestId)) {
+            await this.#persistence.saveModelCall({
+              requestId: request.requestId,
+              worldId: request.worldId,
+              worldVersion: request.worldVersion,
+              agentId: request.agentId,
+              protocolSchemaVersion: request.schemaVersion,
+              decisionCycleId: request.decisionCycleId,
+              pluginLockHash: request.pluginLockHash,
+              decisionReasonCode: request.decisionReason.code,
+              modelId: this.#modelId,
+              status: "failed",
+              taskDecision: null,
+              responseReason: failure.message,
+              latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
+              retryOfRequestId: request.retryOfRequestId ?? null,
+              recordedAtRealTime: failure.occurredAtRealTime,
+            });
+            this.#persistedRequests.add(request.requestId);
+          }
         } catch (persistenceError) {
           try {
             await this.#persistence.recordFailure(request.worldId, failure);
@@ -134,23 +195,27 @@ export class DecisionRequestCoordinator {
       });
       const outcome: CompletedDecision = { type: "result", result };
       try {
-        await this.#persistence.saveModelCall({
-          requestId: request.requestId,
-          worldId: request.worldId,
-          worldVersion: request.worldVersion,
-          agentId: request.agentId,
-          protocolSchemaVersion: request.schemaVersion,
-          decisionCycleId: request.decisionCycleId,
-          pluginLockHash: request.pluginLockHash,
-          decisionReasonCode: request.decisionReason.code,
-          modelId: this.#modelId,
-          status: "accepted",
-          taskDecision: proposal,
-          responseReason: proposal.reason,
-          latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
-          retryOfRequestId: request.retryOfRequestId ?? null,
-          recordedAtRealTime: this.#now(),
-        });
+        if (!this.#persistedRequests.has(request.requestId)) {
+          await this.#persistence.saveModelCall({
+            requestId: request.requestId,
+            worldId: request.worldId,
+            worldVersion: request.worldVersion,
+            agentId: request.agentId,
+            protocolSchemaVersion: request.schemaVersion,
+            decisionCycleId: request.decisionCycleId,
+            pluginLockHash: request.pluginLockHash,
+            decisionReasonCode: request.decisionReason.code,
+            modelId: this.#modelId,
+            status: "accepted",
+            // The legacy audit column cannot represent a direct proposal yet.
+            taskDecision: proposal.schemaVersion === 2 ? proposal : null,
+            responseReason: proposal.reason,
+            latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
+            retryOfRequestId: request.retryOfRequestId ?? null,
+            recordedAtRealTime: this.#now(),
+          });
+          this.#persistedRequests.add(request.requestId);
+        }
       } catch (persistenceError) {
         throw new DecisionPersistenceError(persistenceError, outcome);
       }

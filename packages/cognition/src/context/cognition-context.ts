@@ -4,7 +4,7 @@ import type {
 } from "@god-sim/protocol";
 
 export interface CognitionContext extends SubjectiveDecisionContext {
-  readonly taskOptions: DecisionPromptInput["taskOptions"];
+  readonly taskOptions?: DecisionPromptInput["taskOptions"];
 }
 
 export function cognitionContextFromInput(input: DecisionPromptInput): CognitionContext {
@@ -15,6 +15,6 @@ export function cognitionContextFromInput(input: DecisionPromptInput): Cognition
     operationResults: input.operationResults,
     memories: input.memories,
     perception: input.perception,
-    taskOptions: input.taskOptions,
+    ...(input.taskOptions === undefined ? {} : { taskOptions: input.taskOptions }),
   };
 }

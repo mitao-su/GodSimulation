@@ -1,14 +1,17 @@
 import {
   EntityIdSchema,
+  TaskDecisionSchema,
   WorldViewSchema,
   type AgentId,
   type DomainEvent,
+  type TaskDecision,
   type WorldView,
 } from "@god-sim/protocol";
 import { ObservationContextSchema } from "@god-sim/plugin-sdk";
 
 import type { PluginRegistry } from "../world/plugin-registry";
 import { projectGameTime } from "../world/game-time";
+import { DirectTaskDecisionSchema } from "@god-sim/protocol";
 import type {
   AgentState,
   DecisionRequestState,
@@ -21,24 +24,48 @@ function decisionTrackProposal(
 ): WorldView["pendingDecisions"][number]["headProposal"] {
   const proposal = request.acceptedProposal;
   if (!proposal) return null;
-  const selection = track === "HEAD" ? proposal.head : proposal.body;
-  if (selection.kind === "continue") {
+  const direct = DirectTaskDecisionSchema.safeParse(proposal);
+  if (direct.success) {
+    const directSelection = track === "HEAD" ? direct.data.head : direct.data.body;
+    if (directSelection.kind === "continue") {
+      return { kind: "continue", label: `Continue current ${track} task` };
+    }
+    if (directSelection.task.kind === "empty_task") {
+      return { kind: "replace", task: { kind: "empty_task" } };
+    }
+    return {
+      kind: "replace",
+      task: {
+        kind: "operation",
+        operationId: directSelection.task.operationId,
+        ...(directSelection.task.hostEntityId === undefined
+          ? {}
+          : { hostEntityId: directSelection.task.hostEntityId }),
+        arguments: directSelection.task.arguments,
+      },
+    };
+  }
+  const legacy = TaskDecisionSchema.parse(proposal) as TaskDecision;
+  const legacySelection = track === "HEAD" ? legacy.head : legacy.body;
+  if (legacySelection.kind !== "replace") {
     return { kind: "continue", label: `Continue current ${track} task` };
   }
-  const option = request.promptInput.taskOptions.find(
-    (candidate) => candidate.id === selection.taskOptionId,
-  );
-  if (!option) {
-    throw new Error(
-      `Accepted decision references missing task option ${selection.taskOptionId}`,
-    );
+  const options = request.promptInput.taskOptions;
+  if (!options) {
+    throw new Error(`Accepted decision for ${track} has no direct operation reference`);
   }
-  return {
-    kind: "replace",
-    taskOptionId: selection.taskOptionId,
-    label: option.label,
-    arguments: selection.arguments,
-  };
+  const option = options.find((candidate) => candidate.id === legacySelection.taskOptionId);
+  if (!option) throw new Error(`Accepted decision references missing task option ${legacySelection.taskOptionId}`);
+  return option.kind === "empty"
+    ? { kind: "replace", task: { kind: "empty_task" } }
+    : {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: option.operationId,
+          arguments: legacySelection.arguments,
+        },
+      };
 }
 
 function pauseReason(world: WorldState): WorldView["pauseReason"] {

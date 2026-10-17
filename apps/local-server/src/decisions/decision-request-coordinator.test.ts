@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  DirectTaskDecision,
   ModelDecisionRequest,
   TaskDecision,
 } from "@god-sim/protocol";
@@ -83,6 +84,61 @@ function coordinator(
 }
 
 describe("DecisionRequestCoordinator", () => {
+  it("forwards direct production decisions without legacy task options", async () => {
+    const records: ModelCallRecord[] = [];
+    const requests: ModelDecisionRequest[] = [];
+    const directRequest: ModelDecisionRequest = {
+      requestId: "request:direct" as never,
+      agentId: "alice" as never,
+      worldId: "starter-world" as never,
+      worldVersion: 1,
+      decisionCycleId: "cycle-direct" as never,
+      schemaVersion: 1,
+      pluginLockHash: "a".repeat(64) as never,
+      decisionReason: { code: "initial_task", summary: "Choose" },
+      messages: [{ role: "user", content: "Choose" }],
+    };
+    const directDecision: DirectTaskDecision = {
+      schemaVersion: 3,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.wait" as never,
+          arguments: { durationTicks: 10 },
+        },
+      },
+      reason: "Alice waits",
+    };
+    const decisionCoordinator = new DecisionRequestCoordinator({
+      provider: {
+        async decide(requestValue) {
+          requests.push(requestValue);
+          return directDecision;
+        },
+      },
+      persistence: new PersistenceWriter(
+        storeWith(async (record) => {
+          records.push(record);
+        }),
+      ),
+      modelId: "fixed-test",
+      now: () => "2026-08-31T00:00:00.000Z",
+      monotonicNow: () => 10,
+    });
+
+    const outcome = await decisionCoordinator.decide(directRequest);
+
+    expect(outcome).toMatchObject({
+      type: "result",
+      result: { proposal: directDecision },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).not.toHaveProperty("taskOptions");
+    expect(records[0]).toMatchObject({ status: "accepted", taskDecision: null });
+  });
+
   it("normalizes synchronized fixed arguments before persistence and forwarding", async () => {
     const records: ModelCallRecord[] = [];
     const synchronizedRequest: ModelDecisionRequest = {

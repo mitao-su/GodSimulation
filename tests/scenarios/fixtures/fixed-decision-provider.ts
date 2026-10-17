@@ -1,8 +1,10 @@
 import {
   type AgentId,
+  type Coordinate,
   type DecisionIdentity,
+  type DecisionPromptInput,
+  type DirectTaskReplacement,
   type JsonObject,
-  type TaskOption,
   type WorldCommand,
 } from "@god-sim/protocol";
 import {
@@ -17,13 +19,21 @@ import agentsPlugin from "@god-sim/starter-agents";
 import starterHome from "../../../content/worlds/starter-home/world.json" with { type: "json" };
 import { testSimulationRulesLock } from "../../fixtures/simulation-rules";
 
-export type TaskOptionSelector = (option: TaskOption) => boolean;
+/**
+ * Scenario choices intentionally use the production direct-operation shape.
+ * The old name is retained locally so call sites stay readable while the
+ * fixture no longer inspects a dynamic candidate list.
+ */
+export type TaskOptionSelector = (
+  input: DecisionPromptInput,
+) => DirectTaskReplacement | "continue";
 
 export function starterEngine(
   options: {
     readonly reviewRequired?: boolean;
     readonly aliceBladder?: number;
     readonly bobBladder?: number;
+    readonly alicePosition?: Coordinate;
   } = {},
 ): SimulationEngine {
   const worldDefinition = {
@@ -36,8 +46,16 @@ export function starterEngine(
             ? options.bobBladder
             : undefined;
       return bladder === undefined
-        ? spawn
-        : { ...spawn, needs: { ...spawn.needs, bladder } };
+        ? spawn.agentId === "alice" && options.alicePosition !== undefined
+          ? { ...spawn, position: options.alicePosition }
+          : spawn
+        : {
+            ...spawn,
+            ...(spawn.agentId === "alice" && options.alicePosition !== undefined
+              ? { position: options.alicePosition }
+              : {}),
+            needs: { ...spawn.needs, bladder },
+          };
     }),
   };
   return createSimulation({
@@ -110,12 +128,6 @@ function identityFromInput(
   };
 }
 
-function defaultArguments(option: TaskOption): JsonObject {
-  return option.kind === "operation" && option.operationId === "core.wait"
-    ? { durationTicks: 600 }
-    : {};
-}
-
 export function adoptTask(
   engine: SimulationEngine,
   agentId: AgentId,
@@ -126,24 +138,26 @@ export function adoptTask(
     .getPendingDecisionInputs()
     .find((candidate) => candidate.agentId === agentId);
   if (!input) throw new Error(`No pending decision for ${agentId}`);
-  const option = input.taskOptions.find(select);
-  if (!option) throw new Error(`No matching task option for ${agentId}`);
-  const selection = {
-    kind: "replace" as const,
-    taskOptionId: option.id,
-    arguments: argumentsValue ?? defaultArguments(option),
-  };
+  const replacement = select(input);
+  const task =
+    replacement !== "continue" &&
+    replacement.kind === "operation" &&
+    argumentsValue !== undefined
+      ? { ...replacement, arguments: argumentsValue }
+      : replacement;
   const adopted: AdoptedDecision = {
     identity: identityFromInput(input),
     proposal: {
-      schemaVersion: 2,
-      head: option.taskSlots.includes("HEAD")
-        ? selection
-        : { kind: "continue" },
-      body: option.taskSlots.includes("BODY")
-        ? selection
-        : { kind: "continue" },
-      reason: `Select ${option.label}`,
+      schemaVersion: 3,
+      head: { kind: "continue" },
+      body:
+        task === "continue"
+          ? { kind: "continue" }
+          : { kind: "replace", task },
+      reason:
+        task === "continue"
+          ? "Continue current task"
+          : `Select ${task.kind === "empty_task" ? "empty task" : task.operationId}`,
     },
   };
   const buffered = engine.acceptDecision(adopted);
@@ -151,32 +165,58 @@ export function adoptTask(
   return adopted;
 }
 
-function targets(option: TaskOption, entityId: string): boolean {
-  return (
-    option.kind === "operation" &&
-    option.fixedArguments.targetEntityId === entityId
-  );
-}
-
 export function selectMoveTo(entityId: string): TaskOptionSelector {
-  return (option) =>
-    option.kind === "operation" &&
-    option.operationId === "core.move" &&
-    targets(option, entityId);
+  return () => ({
+    kind: "operation",
+    operationId: "core.move" as never,
+    arguments: { targetEntityId: entityId },
+  });
 }
 
 export function selectInteraction(
   entityId: string,
   interactionId = "use",
 ): TaskOptionSelector {
-  return (option) =>
-    option.kind === "operation" &&
-    option.operationId.endsWith(`.${interactionId}`) &&
-    targets(option, entityId);
+  return () => {
+    const operationByEntity: Readonly<Record<string, string>> = {
+      "fridge-1": "object.home.refrigerator.use",
+      "toilet-1": "object.home.toilet.use",
+    };
+    const operationId = operationByEntity[entityId];
+    if (!operationId) {
+      throw new Error(`No direct interaction operation for ${entityId}`);
+    }
+    if (!operationId.endsWith(`.${interactionId}`)) {
+      throw new Error(`Unsupported interaction ${interactionId} for ${entityId}`);
+    }
+    return {
+      kind: "operation" as const,
+      operationId: operationId as never,
+      hostEntityId: entityId,
+      arguments: {},
+    };
+  };
 }
 
-export function selectWait(option: TaskOption): boolean {
-  return option.kind === "operation" && option.operationId === "core.wait";
+export function selectWait(): DirectTaskReplacement {
+  return {
+    kind: "operation",
+    operationId: "core.wait" as never,
+    arguments: { durationTicks: 600 },
+  };
+}
+
+export function selectWaitFor(durationTicks: number): TaskOptionSelector {
+  return () => ({
+    kind: "operation",
+    operationId: "core.wait" as never,
+    arguments: { durationTicks },
+  });
+}
+
+
+export function selectContinue(): TaskOptionSelector {
+  return () => "continue";
 }
 
 export function releaseCommand(engine: SimulationEngine): WorldCommand {

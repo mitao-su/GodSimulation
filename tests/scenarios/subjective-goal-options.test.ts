@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { starterEngine } from "./fixtures/fixed-decision-provider";
 
-describe("subjective task options", () => {
-  it("offers movement to remembered furniture and observation of visible objects", () => {
+describe("subjective direct decisions", () => {
+  it("exposes subjective facts without generating a dynamic operation whitelist", () => {
     const engine = starterEngine();
     const input = engine
       .getPendingDecisionInputs()
@@ -15,41 +15,13 @@ describe("subjective task options", () => {
         .filter((entity) => entity.kind === "object")
         .map((entity) => entity.entityId),
     );
-    const rememberedObjectIds = new Set(["fridge-1", "toilet-1"]);
-    const targetedTasks = input.taskOptions.filter(
-      (option) => option.kind === "operation" && option.operationId !== "core.wait",
+    expect(input.taskOptions).toBeUndefined();
+    expect(visibleObjectIds.size).toBeGreaterThan(0);
+    expect(input.memories.map((memory) => memory.summary).join(" ")).toContain(
+      "refrigerator",
     );
-
-    expect(
-      targetedTasks.every((option) => {
-        if (option.kind !== "operation") return false;
-        const targetEntityId = String(option.fixedArguments.targetEntityId);
-        return (
-          visibleObjectIds.has(targetEntityId as never) ||
-          rememberedObjectIds.has(targetEntityId)
-        );
-      }),
-    ).toBe(true);
-    expect(
-      targetedTasks.map((option) =>
-        option.kind === "operation" ? option.fixedArguments.targetEntityId : null,
-      ),
-    ).toEqual(
-      expect.arrayContaining(["fridge-1", "toilet-1"]),
+    expect(input.memories.map((memory) => memory.summary).join(" ")).toContain(
+      "toilet",
     );
-
-    const doorOperations = targetedTasks
-      .filter(
-        (option) =>
-          option.kind === "operation" &&
-          option.fixedArguments.targetEntityId === "door-living-kitchen",
-      )
-      .map((option) => option.kind === "operation" ? option.operationId : null);
-    expect(doorOperations).toEqual(
-      expect.arrayContaining(["core.move", "core.observe"]),
-    );
-    expect(
-      doorOperations.some((operationId) => operationId?.startsWith("object.")),
-    ).toBe(false);
   });
 });

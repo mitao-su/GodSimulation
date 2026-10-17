@@ -92,9 +92,11 @@ function view(
           decisionStatus === "ready"
             ? {
                 kind: "replace",
-                taskOptionId: "task-option:alice:wait",
-                label: "Wait",
-                arguments: { durationTicks: 10 },
+                task: {
+                  kind: "operation",
+                  operationId: "core.wait",
+                  arguments: { durationTicks: 10 },
+                },
               }
             : null,
         error: failure,
@@ -194,7 +196,7 @@ describe("director workbench", () => {
     expect(within(proposals).getByText("HEAD")).toBeVisible();
     expect(within(proposals).getByText("Continue current HEAD task")).toBeVisible();
     expect(within(proposals).getByText("BODY")).toBeVisible();
-    expect(within(proposals).getByText(/Wait/)).toBeVisible();
+    expect(within(proposals).getByText(/core\.wait/)).toBeVisible();
   });
 
   it("changes review mode through a protocol command", async () => {

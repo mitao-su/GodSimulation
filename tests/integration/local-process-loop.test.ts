@@ -17,18 +17,17 @@ function requests(messages: readonly WorkerToHostMessage[]): ModelDecisionReques
 }
 
 function waitDecision(request: ModelDecisionRequest) {
-  const option = request.taskOptions.find(
-    (candidate) =>
-      candidate.kind === "operation" && candidate.operationId === "core.wait",
-  );
-  if (!option) throw new Error(`No wait task option for ${request.agentId}`);
+  expect(request.taskOptions).toBeUndefined();
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     head: { kind: "continue" as const },
     body: {
       kind: "replace" as const,
-      taskOptionId: option.id,
-      arguments: { durationTicks: 600 },
+      task: {
+        kind: "operation" as const,
+        operationId: "core.wait" as never,
+        arguments: { durationTicks: 600 },
+      },
     },
     reason: "Wait",
   };

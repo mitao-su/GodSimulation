@@ -4,6 +4,7 @@ import type {
   DecisionCycleId,
   DecisionIdentity,
   DecisionPromptInput,
+  DirectTaskDecision,
   EntityId,
   Facing,
   JsonValue,
@@ -65,7 +66,8 @@ export interface DecisionCycleState {
 export interface DecisionRequestState {
   readonly identity: DecisionIdentity;
   readonly promptInput: DecisionPromptInput;
-  readonly acceptedProposal: TaskDecision | null;
+  /** Direct decisions are the production shape; TaskDecision remains only for legacy snapshots. */
+  readonly acceptedProposal: DirectTaskDecision | TaskDecision | null;
   readonly failure: TechnicalFailure | null;
 }
 

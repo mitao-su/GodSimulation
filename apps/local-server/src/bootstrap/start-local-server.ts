@@ -138,6 +138,7 @@ export async function startLocalServer(
     decisionProvider: options.decisionProvider ?? configuredDecisionProvider(config),
     persistence,
     modelId: config.diagnostics.modelId,
+    decisionMaxAttempts: config.decisionMaxAttempts,
     onError(error): void {
       const message = error instanceof Error ? error.message : String(error);
       logger.error({ error: message.slice(0, 2_000) }, "Session coordination failed");

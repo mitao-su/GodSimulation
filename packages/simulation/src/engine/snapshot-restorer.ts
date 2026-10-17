@@ -214,13 +214,19 @@ function restoreDecisionCycle(
       throw new Error(`Snapshot decision identity is inconsistent for ${agentId}`);
     }
     if (request.acceptedProposal !== null) {
+      const legacyTaskOptions = prompt.taskOptions;
+      if (!legacyTaskOptions) {
+        throw new Error(
+          `Snapshot decision for ${agentId} has a legacy proposal without task options`,
+        );
+      }
       for (const selection of [
         request.acceptedProposal.head,
         request.acceptedProposal.body,
       ]) {
         if (
           selection.kind === "replace" &&
-          !prompt.taskOptions.some(
+          !legacyTaskOptions.some(
             (option) => option.id === selection.taskOptionId,
           )
         ) {

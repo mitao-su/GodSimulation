@@ -74,8 +74,10 @@ describe("technical failure retry", () => {
 
   it("restores and retries a snapshot blocked while the world was running", () => {
     const engine = starterEngine({ reviewRequired: false });
-    adoptTask(engine, "alice" as never, selectWait);
-    adoptTask(engine, "bob" as never, selectWait);
+    // 该恢复场景只验证运行中技术阻塞的重试；空任务避免引入仍由
+    // W1-B-P3 负责的 active operation 快照迁移。
+    adoptTask(engine, "alice" as never, () => ({ kind: "empty_task" }));
+    adoptTask(engine, "bob" as never, () => ({ kind: "empty_task" }));
     engine.tick();
     const failureId = blockForRetry(engine);
 

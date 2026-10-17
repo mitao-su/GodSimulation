@@ -19,6 +19,7 @@ export * from "./execution/core/wait-operation";
 export * from "./execution/path-planner";
 export * from "./execution/task-tracks";
 export * from "./decision/decision-gate";
+export * from "./decision/goal-update-validator";
 export * from "./decision/plan-conflict-detector";
 export * from "./decision/release-policy";
 export * from "./engine/simulation-engine";

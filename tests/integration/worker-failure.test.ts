@@ -89,11 +89,7 @@ describe("worker decision validation and retry", () => {
         expect(messages.filter((message) => message.type === "decision_requested")).toHaveLength(2),
       );
       const request = messages.find((message) => message.type === "decision_requested")!.request;
-      const option = request.taskOptions.find(
-        (candidate) =>
-          candidate.kind === "operation" && candidate.operationId === "core.wait",
-      );
-      if (!option) throw new Error(`No wait task option for ${request.agentId}`);
+      expect(request.taskOptions).toBeUndefined();
       await worker.send({
         type: "decision_result",
         result: {
@@ -105,12 +101,15 @@ describe("worker decision validation and retry", () => {
           schemaVersion: request.schemaVersion,
           pluginLockHash: request.pluginLockHash,
           proposal: {
-            schemaVersion: 2,
+            schemaVersion: 3,
             head: { kind: "continue" },
             body: {
               kind: "replace",
-              taskOptionId: option.id,
-              arguments: { durationTicks: 600 },
+              task: {
+                kind: "operation",
+                operationId: "core.wait" as never,
+                arguments: { durationTicks: 600 },
+              },
             },
             reason: "Stale",
           },

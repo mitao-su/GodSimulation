@@ -4,19 +4,19 @@ import {
   adoptTask,
   releaseCommand,
   runUntil,
-  selectMoveTo,
+  selectWaitFor,
   starterEngine,
 } from "./fixtures/fixed-decision-provider";
 
 describe("basic headless loop", () => {
   it("freezes, adopts tasks, runs, and freezes when an operation completes", () => {
-    const engine = starterEngine({ reviewRequired: true });
+    const engine = starterEngine({ reviewRequired: true, aliceBladder: 0, bobBladder: 0 });
 
     expect(engine.getView()).toMatchObject({ mode: "THINKING", worldTick: 0 });
     expect(engine.getPendingDecisionInputs()).toHaveLength(2);
 
-    adoptTask(engine, "alice" as never, selectMoveTo("fridge-1"));
-    adoptTask(engine, "bob" as never, selectMoveTo("fridge-1"));
+    adoptTask(engine, "alice" as never, selectWaitFor(10));
+    adoptTask(engine, "bob" as never, selectWaitFor(10));
     engine.tick();
 
     expect(engine.getView()).toMatchObject({ mode: "READY_FOR_RELEASE", worldTick: 0 });

@@ -24,11 +24,7 @@ function bufferWaitDecision(
   engine: SimulationEngine,
   request: DecisionPromptInput,
 ): void {
-  const option = request.taskOptions.find(
-    (candidate) =>
-      candidate.kind === "operation" && candidate.operationId === "core.wait",
-  );
-  if (!option) throw new Error(`No wait option for ${request.agentId}`);
+  expect(request.taskOptions).toBeUndefined();
   const result = engine.acceptDecision({
     identity: {
       requestId: request.requestId,
@@ -43,12 +39,15 @@ function bufferWaitDecision(
         : { retryOfRequestId: request.retryOfRequestId }),
     },
     proposal: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: { kind: "continue" },
       body: {
         kind: "replace",
-        taskOptionId: option.id,
-        arguments: { durationTicks: 10 },
+        task: {
+          kind: "operation",
+          operationId: "core.wait" as never,
+          arguments: { durationTicks: 10 },
+        },
       },
       reason: "Wait in checkpoint test",
     },

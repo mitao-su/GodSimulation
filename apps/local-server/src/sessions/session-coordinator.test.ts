@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   HostToWorkerMessage,
+  DirectTaskDecision,
   ModelDecisionRequest,
-  TaskDecision,
   WorkerToHostMessage,
 } from "@god-sim/protocol";
 import type { DecisionProvider } from "@god-sim/model-gateway";
@@ -25,31 +25,23 @@ function request(agentId: "alice" | "bob"): ModelDecisionRequest {
     pluginLockHash: "a".repeat(64) as never,
     decisionReason: { code: "initial_task", summary: "Choose" },
     messages: [{ role: "user", content: "Choose" }],
-    taskOptions: [
-      {
-        kind: "operation",
-        id: `task-option:${agentId}:wait` as never,
-        operationId: "core.wait" as never,
-        label: "Wait",
-        taskSlots: ["BODY"],
-        argumentSchema: {},
-        fixedArguments: {},
-      },
-    ],
   };
 }
 
 function waitDecision(
   agentId: "alice" | "bob",
   reason = `${agentId} waits`,
-): TaskDecision {
+): DirectTaskDecision {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     head: { kind: "continue" },
     body: {
       kind: "replace",
-      taskOptionId: `task-option:${agentId}:wait` as never,
-      arguments: { durationTicks: 10 },
+      task: {
+        kind: "operation",
+        operationId: "core.wait" as never,
+        arguments: { durationTicks: 10 },
+      },
     },
     reason,
   };
@@ -128,7 +120,7 @@ function deferredProvider() {
   const resolvers = new Map<
     string,
     {
-      resolve: (value: TaskDecision) => void;
+      resolve: (value: DirectTaskDecision) => void;
       reject: (error: Error) => void;
     }
   >();
@@ -249,14 +241,21 @@ describe("SessionCoordinator", () => {
     await coordinator.waitForIdle();
 
     expect(modelStatuses).toEqual(["accepted"]);
-    expect(failures).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          requestId: request("alice").requestId,
-          category: "protocol",
-        }),
-      ]),
+    await vi.waitFor(() =>
+      expect(
+        worker.sent.filter((message) => message.type === "decision_result"),
+      ).toHaveLength(2),
     );
+    const retry = worker.sent.filter(
+      (message): message is Extract<HostToWorkerMessage, { type: "decision_result" }> =>
+        message.type === "decision_result",
+    )[1];
+    expect(retry?.result.requestId).toBe(delivered.result.requestId);
+    expect(retry?.result.proposal).toMatchObject({
+      schemaVersion: 3,
+      body: { task: { operationId: "core.wait" } },
+    });
+    expect(failures).toEqual([]);
     await coordinator.stop();
   });
 
@@ -1181,6 +1180,7 @@ describe("SessionCoordinator", () => {
       decisionProvider: deferred.provider,
       persistence,
       modelId: "fixed-test",
+      decisionMaxAttempts: 1,
       now: () => "2026-08-31T00:00:00.000Z",
     });
     await coordinator.start();
@@ -1197,7 +1197,9 @@ describe("SessionCoordinator", () => {
       result: {
         agentId: "alice",
         proposal: {
-          body: { taskOptionId: "task-option:alice:wait" },
+            body: {
+              task: { operationId: "core.wait" },
+            },
         },
       },
     });

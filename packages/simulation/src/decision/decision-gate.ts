@@ -2,6 +2,7 @@ import {
   DecisionCycleIdSchema,
   DecisionPromptInputSchema,
   DecisionReasonSchema,
+  DirectTaskDecisionSchema,
   EntityIdSchema,
   ModelDecisionResultSchema,
   RequestIdSchema,
@@ -12,18 +13,27 @@ import {
   type DecisionIdentity,
   type DecisionPromptInput,
   type DecisionReason,
-  type TaskOption,
+  type DirectTaskDecision,
   type ModelDecisionResult,
   type RequestId,
+  type TaskDecision,
+  type TaskOption,
   type TechnicalFailure,
 } from "@god-sim/protocol";
 
 import type { AgentState, DecisionRequestState, WorldState } from "../world/world-state";
+import {
+  isOperationRuntimeCall,
+  type HostedOperationRuntimeRegistry,
+} from "../execution/operation-runtime";
+import { preflightDirectDecision } from "./direct-decision-preflight";
+import type { GoalUpdateValidator } from "./goal-update-validator";
 
 export interface DecisionRequestSpec {
   readonly agentId: AgentId;
   readonly reason: DecisionReason;
-  readonly taskOptions: readonly TaskOption[];
+  /** Legacy snapshot/test input only; production requests omit dynamic options. */
+  readonly taskOptions?: readonly TaskOption[];
 }
 
 export interface DecisionRequestTransition {
@@ -35,6 +45,26 @@ export interface DecisionAcceptanceResult {
   readonly accepted: boolean;
   readonly world: WorldState;
   readonly reason: string | null;
+}
+
+/**
+ * 仅执行 direct 引用的协议级预检。它不调用 operation.canStart，也不写入世界。
+ */
+export function validateDirectDecision(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  agentId: AgentId,
+  proposal: DirectTaskDecision,
+  goalUpdateValidator?: GoalUpdateValidator,
+): string | null {
+  const result = preflightDirectDecision(
+    world,
+    registry,
+    agentId,
+    proposal,
+    goalUpdateValidator,
+  );
+  return result.kind === "invalid" ? result.reason : null;
 }
 
 function activeTasksContext(agent: AgentState): DecisionPromptInput["activeTasks"] {
@@ -52,7 +82,9 @@ function activeTasksContext(agent: AgentState): DecisionPromptInput["activeTasks
       .map((operation) => ({
         callId: operation.callId,
         operationId: operation.operationId,
-        label: operation.label,
+        label: isOperationRuntimeCall(operation)
+          ? operation.operationId
+          : operation.label,
         taskSlots: [...operation.taskSlots],
         arguments: operation.arguments,
         duration: operation.duration,
@@ -94,7 +126,7 @@ export function buildDecisionPromptInput(
   agent: AgentState,
   identity: DecisionIdentity,
   reason: DecisionReason,
-  taskOptions: readonly TaskOption[],
+  taskOptions?: readonly TaskOption[],
 ): DecisionPromptInput {
   return DecisionPromptInputSchema.parse({
     ...identity,
@@ -120,7 +152,7 @@ export function buildDecisionPromptInput(
       heardEvents: [],
     },
     operationResults: agent.pendingOperationResults,
-    taskOptions,
+    ...(taskOptions === undefined ? {} : { taskOptions }),
   });
 }
 
@@ -148,10 +180,9 @@ export function requestDecisions(
     const agent = world.agents.get(requestSpec.agentId);
     if (!agent) throw new Error(`Unknown agent instance: ${requestSpec.agentId}`);
     const reason = DecisionReasonSchema.parse(requestSpec.reason);
-    const taskOptions = requestSpec.taskOptions.map((option) => TaskOptionSchema.parse(option));
-    if (taskOptions.length === 0) {
-      throw new Error(`Decision request for ${requestSpec.agentId} has no task options`);
-    }
+    const taskOptions = requestSpec.taskOptions?.map((option) =>
+      TaskOptionSchema.parse(option),
+    );
     const identity: DecisionIdentity = {
       requestId: RequestIdSchema.parse(`decision-request:${cycleVersion}:${index}`),
       agentId: requestSpec.agentId,
@@ -209,6 +240,8 @@ function identitiesMatch(expected: DecisionIdentity, actual: DecisionIdentity): 
 export function acceptDecisionResult(
   world: WorldState,
   resultInput: ModelDecisionResult,
+  registry?: HostedOperationRuntimeRegistry,
+  goalUpdateValidator?: GoalUpdateValidator,
 ): DecisionAcceptanceResult {
   const parsed = ModelDecisionResultSchema.safeParse(resultInput);
   if (!parsed.success) {
@@ -227,23 +260,82 @@ export function acceptDecisionResult(
   if (request.failure) {
     return { accepted: false, world, reason: `Request ${result.requestId} has a recorded failure` };
   }
-  let normalizedProposal;
-  try {
-    normalizedProposal = resolveTaskDecision(
-      result.proposal,
-      request.promptInput.taskOptions,
-    ).normalizedDecision;
-  } catch (error) {
+  const proposal = DirectTaskDecisionSchema.safeParse(result.proposal);
+  const expectsDirect = request.promptInput.taskOptions === undefined;
+  if (proposal.success !== expectsDirect) {
     return {
       accepted: false,
       world,
-      reason: error instanceof Error ? error.message : String(error),
+      reason: expectsDirect
+        ? "Legacy task decision is not valid for a direct request"
+        : "Direct task decision is not valid for a legacy request",
     };
+  }
+  if (proposal.success && registry === undefined) {
+    return {
+      accepted: false,
+      world,
+      reason: "Direct decision validation requires a hosted operation registry",
+    };
+  }
+  const acceptedDirect = proposal.success;
+  const acceptedKinds = [...cycle.requests.values()]
+    .map((entry) => entry.acceptedProposal)
+    .filter((entry): entry is DirectTaskDecision | TaskDecision => entry !== null)
+    .map((entry) => DirectTaskDecisionSchema.safeParse(entry).success);
+  if (acceptedKinds.some((isDirect) => isDirect !== acceptedDirect)) {
+    return {
+      accepted: false,
+      world,
+      reason: "Decision cycle cannot mix direct and legacy task protocols",
+    };
+  }
+  let acceptedProposal: DirectTaskDecision | TaskDecision;
+  if (proposal.success) {
+    acceptedProposal = proposal.data;
+  } else {
+    // 旧快照/回放兼容：新的请求没有 taskOptions，因此不会进入该分支。
+    const legacy = result.proposal as TaskDecision;
+    const options = request.promptInput.taskOptions;
+    if (!options) {
+      return {
+        accepted: false,
+        world,
+        reason: `Invalid direct decision: ${proposal.error?.message ?? "schema validation failed"}`,
+      };
+    }
+    try {
+      acceptedProposal = resolveTaskDecision(legacy, options).normalizedDecision;
+    } catch (error) {
+      return {
+        accepted: false,
+        world,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  if (!acceptedProposal) {
+    return {
+      accepted: false,
+      world,
+      reason: `Invalid direct decision: ${proposal.error?.message ?? "schema validation failed"}`,
+    };
+  }
+  if (DirectTaskDecisionSchema.safeParse(acceptedProposal).success && registry) {
+    const direct = DirectTaskDecisionSchema.parse(acceptedProposal);
+    const validation = validateDirectDecision(
+      world,
+      registry,
+      result.agentId,
+      direct,
+      goalUpdateValidator,
+    );
+    if (validation) return { accepted: false, world, reason: validation };
   }
 
   const requests = new Map(cycle.requests).set(result.agentId, {
     ...request,
-    acceptedProposal: normalizedProposal,
+    acceptedProposal,
     failure: null,
   });
   return {
