@@ -173,4 +173,3 @@ export const AgentBodyFactsSnapshotSchema = z
   })
   .strict();
 export type AgentBodyFactsSnapshot = z.infer<typeof AgentBodyFactsSnapshotSchema>;
-

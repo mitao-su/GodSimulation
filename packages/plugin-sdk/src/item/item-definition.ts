@@ -58,4 +58,3 @@ export function assertItemDefinition<State>(definition: ItemDefinition<State>): 
   }
   ItemInstanceSchema.shape.state.parse(definition.stateSchema.parse(definition.initialState()));
 }
-

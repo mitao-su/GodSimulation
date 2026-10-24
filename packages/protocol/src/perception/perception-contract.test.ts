@@ -169,4 +169,3 @@ describe("L2 perception contracts", () => {
     ).toBe(false);
   });
 });
-

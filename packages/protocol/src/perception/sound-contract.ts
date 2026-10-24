@@ -81,4 +81,3 @@ export type SoundPropagationResult = z.infer<typeof SoundPropagationResultSchema
 export interface SoundPropagationPort {
   propagate(input: SoundPropagationInput): SoundPropagationResult;
 }
-

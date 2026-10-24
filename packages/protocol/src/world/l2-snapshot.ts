@@ -29,4 +29,3 @@ export const L2SnapshotFieldsSchema = z
   })
   .strict();
 export type L2SnapshotFields = z.infer<typeof L2SnapshotFieldsSchema>;
-

@@ -73,4 +73,3 @@ describe("item definition skeleton", () => {
     expect(() => assertItemDefinition(definition)).toThrow();
   });
 });
-

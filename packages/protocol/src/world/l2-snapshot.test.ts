@@ -16,4 +16,3 @@ describe("L2 snapshot fragments", () => {
     expect(L2SnapshotFieldsSchema.parse(fields)).toEqual(fields);
   });
 });
-

@@ -176,5 +176,3 @@ export type DirectionProjectionInput = {
   readonly observerFacing: z.infer<typeof FacingSchema>;
   readonly targetPosition: z.infer<typeof CoordinateSchema>;
 };
-
-

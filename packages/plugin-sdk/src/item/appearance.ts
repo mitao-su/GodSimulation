@@ -25,4 +25,3 @@ export function projectExternallyVisibleAppearance(
   const appearance = CharacterAppearanceStateSchema.parse(value.appearance);
   return ExternallyVisibleAppearanceSchema.parse(appearance.description.externallyVisible);
 }
-

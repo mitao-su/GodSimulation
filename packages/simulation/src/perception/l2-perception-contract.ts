@@ -21,4 +21,3 @@ export interface L2PerceptionPort {
 export interface L2AuditionPort {
   propagateSound(input: SoundPropagationInput): SoundPropagationResult;
 }
-

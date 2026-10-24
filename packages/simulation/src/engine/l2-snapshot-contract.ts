@@ -18,4 +18,3 @@ export interface L2VisualSnapshotSerializationPort<RuntimeState> {
   serializeVisual(runtime: RuntimeState): L2VisualSnapshotFields;
   deserializeVisual(fields: L2VisualSnapshotFields, runtime: RuntimeState): RuntimeState;
 }
-

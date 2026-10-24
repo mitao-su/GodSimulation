@@ -35,4 +35,3 @@ describe("L2 snapshot serialization ports", () => {
     expect(restored).toEqual(runtime);
   });
 });
-

@@ -89,4 +89,3 @@ describe("L2 item and appearance contracts", () => {
     ).toBe(false);
   });
 });
-
