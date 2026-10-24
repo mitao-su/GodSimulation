@@ -22,6 +22,9 @@ export const doorDefinition: ObjectDefinition<DoorState> = {
       { x: 0, y: 1 },
     ],
   },
+  collision: {
+    blocksMovement: (state) => !state.open,
+  },
   movement: {
     blocksMovement: (state) => !state.open,
   },

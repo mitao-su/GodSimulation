@@ -19,6 +19,9 @@ export const refrigeratorDefinition: ObjectDefinition<RefrigeratorState> = {
     footprint: [{ x: 0, y: 0 }],
     interactionOffsets: [{ x: 0, y: 1 }],
   },
+  collision: {
+    blocksMovement: () => true,
+  },
   movement: {
     blocksMovement: () => true,
   },

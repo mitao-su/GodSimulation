@@ -23,6 +23,9 @@ export const wallDefinition: ObjectDefinition<WallState> = {
       { x: -1, y: 0 },
     ],
   },
+  collision: {
+    blocksMovement: () => true,
+  },
   movement: {
     blocksMovement: () => true,
   },

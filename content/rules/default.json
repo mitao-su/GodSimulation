@@ -14,6 +14,9 @@
     "attentionBudgetTokens": 200000,
     "technicalHardLimitTokens": 200000
   },
+  "perception": {
+    "visionRadius": 1
+  },
   "fatigue": {
     "timeWeight": 0.6,
     "tokenWeight": 0.4,

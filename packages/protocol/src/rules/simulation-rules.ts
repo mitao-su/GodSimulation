@@ -51,6 +51,14 @@ const ContextRulesSchema = z
     { message: "technicalHardLimitTokens must be at least attentionBudgetTokens" },
   );
 
+const PerceptionRulesSchema = z
+  .object({
+    /** 360° 近身视觉半径；世界锁定后所有感知路径共享该值。 */
+    visionRadius: z.number().int().nonnegative().max(64),
+  })
+  .strict();
+export type PerceptionRules = z.infer<typeof PerceptionRulesSchema>;
+
 const FatigueRulesSchema = z
   .object({
     timeWeight: UnitIntervalSchema,
@@ -173,6 +181,7 @@ export const SimulationRulesSchema = z
     version: PositiveIntegerSchema,
     time: TimeRulesSchema,
     context: ContextRulesSchema,
+    perception: PerceptionRulesSchema,
     fatigue: FatigueRulesSchema,
     inventory: z.object({ capacityUnits: PositiveIntegerSchema }).strict(),
     operations: OperationRulesSchema,

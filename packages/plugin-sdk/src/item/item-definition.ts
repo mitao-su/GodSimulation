@@ -15,6 +15,13 @@ import {
 export const ItemKindSchema = z.enum(["generic", "clothing"]);
 export type ItemKind = z.infer<typeof ItemKindSchema>;
 
+/**
+ * 物品作为世界实体出现时的占格语义。角色没有碰撞体积；物品只有在
+ * 被放置到世界坐标后，才由模拟按该声明参与移动阻挡检查。
+ */
+export const ItemCollisionSchema = z.enum(["passable", "solid"]);
+export type ItemCollision = z.infer<typeof ItemCollisionSchema>;
+
 export interface ItemDefinition<State = unknown> {
   readonly id: ItemDefinitionId;
   readonly version: string;
@@ -24,6 +31,7 @@ export interface ItemDefinition<State = unknown> {
   readonly capabilities: readonly string[];
   /** 单件容量占用；实例数量由世界按整数乘法计算。 */
   readonly capacityUnits: ItemCapacityUnits;
+  readonly collision: ItemCollision;
   readonly stateSchema: z.ZodType<State>;
   initialState(): State;
   readonly clothing?: ClothingStyleAnchor;
@@ -39,6 +47,7 @@ export function assertItemDefinition<State>(definition: ItemDefinition<State>): 
   z.array(z.string().min(1).max(128)).parse(definition.tags);
   CapabilityListSchema.parse(definition.capabilities);
   ItemCapacityUnitsSchema.parse(definition.capacityUnits);
+  ItemCollisionSchema.parse(definition.collision);
   if (definition.kind === "clothing") {
     if (definition.clothing === undefined) {
       throw new Error(`Clothing item ${definition.id} requires a style anchor`);

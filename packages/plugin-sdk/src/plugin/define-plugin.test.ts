@@ -24,6 +24,7 @@ function objectDefinition(id: string): ObjectDefinition<{ enabled: boolean }> {
       footprint: [{ x: 0, y: 0 }],
       interactionOffsets: [{ x: 0, y: 1 }],
     },
+    collision: { blocksMovement: () => false },
     interactions: [],
     observe: () => ({ status: "ready", summary: "Ready", details: {} }),
   };
@@ -127,6 +128,17 @@ describe("definePlugin", () => {
     expect(() =>
       definePlugin(manifest, { objects: [definition], agents: [] }),
     ).toThrow();
+  });
+
+  it("rejects an object definition without a collision capability", () => {
+    const definition = {
+      ...objectDefinition("test.object"),
+      collision: undefined,
+    } as unknown as ObjectDefinition<{ enabled: boolean }>;
+
+    expect(() =>
+      definePlugin(manifest, { objects: [definition], agents: [] }),
+    ).toThrow(/collision capability/i);
   });
 
   it("rejects an agent definition without an explicit operation mount table", () => {

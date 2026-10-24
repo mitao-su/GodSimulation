@@ -22,6 +22,7 @@ const simulationRulesLock = SimulationRulesLockSchema.parse({
       timePressureFullAtTicks: 43_200,
     },
     inventory: { capacityUnits: 9 },
+    perception: { visionRadius: 1 },
     operations: {
       move: { ticksPerCell: 2 },
       wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },

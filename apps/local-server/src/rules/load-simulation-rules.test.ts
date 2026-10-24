@@ -23,6 +23,7 @@ const validRules = {
     timePressureFullAtTicks: 43_200,
   },
   inventory: { capacityUnits: 9 },
+  perception: { visionRadius: 1 },
   operations: {
     move: { ticksPerCell: 2 },
     wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
@@ -84,6 +85,7 @@ describe("loadSimulationRules", () => {
       sound: validRules.sound,
       memory: validRules.memory,
       inventory: validRules.inventory,
+      perception: validRules.perception,
       operations: validRules.operations,
       fatigue: validRules.fatigue,
       context: validRules.context,

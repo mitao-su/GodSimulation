@@ -28,6 +28,7 @@ const validRules = {
     timePressureFullAtTicks: 43_200,
   },
   inventory: { capacityUnits: 9 },
+  perception: { visionRadius: 1 },
   operations: {
     move: { ticksPerCell: 2 },
     wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
@@ -75,6 +76,23 @@ describe("SimulationRulesSchema", () => {
     const withoutInventory = { ...validRules };
     Reflect.deleteProperty(withoutInventory, "inventory");
     expect(SimulationRulesSchema.safeParse(withoutInventory).success).toBe(false);
+  });
+
+  it("requires a bounded integer perception radius", () => {
+    const withoutPerception = { ...validRules };
+    Reflect.deleteProperty(withoutPerception, "perception");
+    expect(SimulationRulesSchema.safeParse(withoutPerception).success).toBe(false);
+    for (const visionRadius of [-1, 1.5, 65]) {
+      expect(
+        SimulationRulesSchema.safeParse({ ...validRules, perception: { visionRadius } })
+          .success,
+        String(visionRadius),
+      ).toBe(false);
+    }
+    expect(
+      SimulationRulesSchema.safeParse({ ...validRules, perception: { visionRadius: 64 } })
+        .success,
+    ).toBe(true);
   });
 
   it("keeps deployment timing out of the world-locked rules", () => {
@@ -234,5 +252,11 @@ describe("SimulationRulesSchema", () => {
         },
       }),
     ).toThrow(/hash mismatch/i);
+
+    const changedPerception = createSimulationRulesLock({
+      ...validRules,
+      perception: { visionRadius: 2 },
+    });
+    expect(changedPerception.hash).not.toBe(lock.hash);
   });
 });
