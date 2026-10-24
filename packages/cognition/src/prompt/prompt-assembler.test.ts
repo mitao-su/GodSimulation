@@ -83,6 +83,7 @@ describe("assembleDecisionRequest", () => {
     expect(prompt).not.toContain("occupied by Bob");
     expect(prompt).toContain('"head"');
     expect(prompt).toContain('"body"');
+    expect(prompt).toContain("empty_task");
     expect(request).not.toHaveProperty("taskOptions");
     expect(prompt).not.toContain("task-option:alice:wait");
   });

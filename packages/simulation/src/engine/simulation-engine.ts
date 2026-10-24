@@ -29,7 +29,11 @@ import {
 } from "../decision/decision-gate";
 import { recordFuseResults } from "../execution/operation-lifecycle";
 import { retryPendingHostedOperationTerminations } from "../execution/action-runner";
-import { applyReleasePolicy, releaseDecisionCycle } from "../decision/release-policy";
+import {
+  applyReleasePolicy,
+  releaseDecisionCycle,
+  type DecisionReleaseTransition,
+} from "../decision/release-policy";
 import {
   loadWorldDefinition,
   type InitialPerceptionSeed,
@@ -462,10 +466,18 @@ class DeterministicSimulationEngine implements SimulationEngine {
             throw new Error("The world is not ready for release");
           }
           const cycleId = this.#world.decisionCycle.id;
-          const released = releaseDecisionCycle(this.#world, this.#registry);
+          const released = this.#runRelease(
+            cycleId,
+            false,
+            command.commandId,
+            () => releaseDecisionCycle(this.#world, this.#registry),
+          );
           this.#world = released.world;
           this.#recordEvents(released.events);
           this.#recordWorldReleased(cycleId, false, command.commandId);
+          if (released.decisionNeeds && released.decisionNeeds.length > 0) {
+            this.#requestDecisionCycle(released.decisionNeeds);
+          }
           break;
         }
         case "set_review_mode": {
@@ -476,7 +488,12 @@ class DeterministicSimulationEngine implements SimulationEngine {
           };
           if (this.#world.mode === "TECHNICALLY_BLOCKED") break;
           const cycleId = this.#world.decisionCycle?.id;
-          const released = applyReleasePolicy(this.#world, this.#registry);
+          const released = this.#runRelease(
+            cycleId ?? null,
+            true,
+            command.commandId,
+            () => applyReleasePolicy(this.#world, this.#registry),
+          );
           if (
             cycleId &&
             released.world.mode === "RUNNING" &&
@@ -488,6 +505,9 @@ class DeterministicSimulationEngine implements SimulationEngine {
           } else {
             this.#world = released.world;
             this.#recordEvents(released.events);
+          }
+          if (released.decisionNeeds && released.decisionNeeds.length > 0) {
+            this.#requestDecisionCycle(released.decisionNeeds);
           }
           break;
         }
@@ -561,7 +581,12 @@ class DeterministicSimulationEngine implements SimulationEngine {
             break;
           }
           const cycleId = recovered.decisionCycle?.id;
-          const released = applyReleasePolicy(recovered, this.#registry);
+          const released = this.#runRelease(
+            cycleId ?? null,
+            true,
+            command.commandId,
+            () => applyReleasePolicy(recovered, this.#registry),
+          );
           if (
             cycleId &&
             released.world.mode === "RUNNING" &&
@@ -573,6 +598,9 @@ class DeterministicSimulationEngine implements SimulationEngine {
           } else {
             this.#world = released.world;
             this.#recordEvents(released.events);
+          }
+          if (released.decisionNeeds && released.decisionNeeds.length > 0) {
+            this.#requestDecisionCycle(released.decisionNeeds);
           }
           break;
         }
@@ -619,7 +647,12 @@ class DeterministicSimulationEngine implements SimulationEngine {
     this.#recordEvents(events);
 
     const cycleId = this.#world.decisionCycle?.id;
-    const released = applyReleasePolicy(this.#world, this.#registry);
+    const released = this.#runRelease(
+      cycleId ?? null,
+      true,
+      cycleId ? `release:${cycleId}` : "release:auto",
+      () => applyReleasePolicy(this.#world, this.#registry),
+    );
     if (
       cycleId &&
       released.world.mode === "RUNNING" &&
@@ -632,6 +665,9 @@ class DeterministicSimulationEngine implements SimulationEngine {
       this.#world = released.world;
       this.#recordEvents(released.events);
     }
+    if (released.decisionNeeds && released.decisionNeeds.length > 0) {
+      this.#requestDecisionCycle(released.decisionNeeds);
+    }
   }
 
   #recordWorldReleased(cycleId: string, automatic: boolean, causationId: string): void {
@@ -642,6 +678,30 @@ class DeterministicSimulationEngine implements SimulationEngine {
     );
     this.#world = written.world;
     this.#recordEvents([written.event]);
+  }
+
+  #runRelease(
+    cycleId: string | null,
+    automatic: boolean,
+    causationId: string,
+    release: () => DecisionReleaseTransition,
+  ): DecisionReleaseTransition {
+    try {
+      return release();
+    } catch (error) {
+      if (!(error instanceof OperationTechnicalFailureError) || !error.committed) {
+        throw error;
+      }
+      this.#world = error.committed.world;
+      this.#recordEvents(error.committed.events);
+      if (cycleId && this.#world.mode === "RUNNING") {
+        this.#recordWorldReleased(cycleId, automatic, causationId);
+      }
+      throw new OperationTechnicalFailureError(error.failure, {
+        world: this.#world,
+        events: [],
+      });
+    }
   }
 }
 

@@ -49,6 +49,8 @@ import type {
   WorldState,
 } from "../world/world-state";
 
+const ZERO_TICKS = 0;
+
 export interface ActionInteractionIntent extends InteractionIntent {
   readonly callId: OperationCallId;
   readonly actionId: string;
@@ -225,7 +227,7 @@ export function advanceOperations(
       // 旧 ActiveOperation 快照仍可能经过 legacy runner。观察/等待的
       // 零时长动作不应伪造一个 Tick 的进度，否则会违反 progress <= duration。
       if (
-        action.durationTicks === 0 &&
+        action.durationTicks === ZERO_TICKS &&
         (action.kind === "observe" || action.kind === "wait")
       ) {
         const finished = finishCurrentAction(agent, operation);
@@ -1293,7 +1295,7 @@ export function advanceHostedOperation(
   if (
     operation.duration.kind === "fixed" &&
     (!Number.isSafeInteger(operation.duration.totalTicks) ||
-      operation.duration.totalTicks < 0)
+      operation.duration.totalTicks < ZERO_TICKS)
   ) {
     return hostedTechnicalFailure(
       world,
@@ -1355,7 +1357,7 @@ export function advanceHostedOperation(
   // 生命周期提议；start 完成后在同一批次直接进入 complete，进度保持为 0。
   const immediate =
     operation.duration.kind === "fixed" &&
-    operation.duration.totalTicks === 0;
+    operation.duration.totalTicks === ZERO_TICKS;
   const nextProgress = immediate
     ? operation.progressTicks
     : operation.progressTicks + 1;

@@ -9,6 +9,8 @@ import {
 } from "./core-operation-helpers";
 import type { RegisteredOperation } from "../operation-runtime";
 
+const ZERO_TICKS = 0;
+
 export function createObserveOperation(): RegisteredOperation {
   return {
     id: OperationIdSchema.parse("core.observe"),
@@ -42,7 +44,7 @@ export function createObserveOperation(): RegisteredOperation {
     },
     resolveDuration: () => ({
       kind: "fixed",
-      totalTicks: 0,
+      totalTicks: ZERO_TICKS,
     }),
     createPlan: (_context, value, callId, duration) => {
       if (duration.kind !== "fixed") {
@@ -70,7 +72,7 @@ export function createObserveOperation(): RegisteredOperation {
     terminalResult: () => ({}),
     validateRestored: (_context, operation) => {
       const parsed = ENTITY_TARGET_ARGUMENTS_SCHEMA.parse(operation.arguments);
-      const expectedTicks = 0;
+      const expectedTicks = ZERO_TICKS;
       const action = operation.plan.actions[0];
       if (
         operation.duration.kind !== "fixed" ||

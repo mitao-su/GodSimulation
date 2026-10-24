@@ -273,7 +273,11 @@ describe("operation lifecycle results", () => {
         head: { kind: "continue" },
         body: {
           kind: "replace",
-          task: { kind: "empty_task" },
+          task: {
+            kind: "operation",
+            operationId: "core.wait" as never,
+            arguments: { durationTicks: 1 },
+          },
         },
         reason: "Stop moving",
       },

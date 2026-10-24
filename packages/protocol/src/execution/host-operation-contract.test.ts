@@ -158,8 +158,8 @@ describe("host operation contract", () => {
     });
   });
 
-  it("keeps the empty task branch free of operation and call fields", () => {
-    const base = {
+  it("accepts the stable empty task branch", () => {
+    const decision = {
       schemaVersion: 3,
       head: { kind: "continue" },
       body: {
@@ -168,7 +168,7 @@ describe("host operation contract", () => {
       },
       reason: "Clear the body track.",
     } as const;
-    expect(DirectTaskDecisionSchema.parse(base)).toEqual(base);
+    expect(DirectTaskDecisionSchema.parse(decision)).toEqual(decision);
 
     for (const extra of [
       { operationId: "core.wait" },
@@ -178,7 +178,7 @@ describe("host operation contract", () => {
     ]) {
       expect(
         DirectTaskDecisionSchema.safeParse({
-          ...base,
+          ...decision,
           body: {
             kind: "replace",
             task: { kind: "empty_task", ...extra },

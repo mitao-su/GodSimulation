@@ -53,12 +53,49 @@ function directWaitDecision(durationTicks = 10): DirectTaskDecision {
   };
 }
 
-function directEmptyDecision(): DirectTaskDecision {
+function directIdleDecision(): DirectTaskDecision {
   return {
     schemaVersion: 3,
-    head: { kind: "replace", task: { kind: "empty_task" } },
-    body: { kind: "replace", task: { kind: "empty_task" } },
-    reason: "Clear both tracks",
+    head: {
+      kind: "replace",
+      task: {
+        kind: "operation",
+        operationId: "core.think" as never,
+        arguments: {},
+      },
+    },
+    body: {
+      kind: "replace",
+      task: {
+        kind: "operation",
+        operationId: "core.wait" as never,
+        arguments: { durationTicks: 10 },
+      },
+    },
+    reason: "Remain idle",
+  };
+}
+
+function idleDecision(): DirectTaskDecision {
+  return {
+    schemaVersion: 3,
+    head: {
+      kind: "replace",
+      task: {
+        kind: "operation",
+        operationId: "core.think" as never,
+        arguments: {},
+      },
+    },
+    body: {
+      kind: "replace",
+      task: {
+        kind: "operation",
+        operationId: "core.wait" as never,
+        arguments: { durationTicks: 10 },
+      },
+    },
+    reason: "Remain idle",
   };
 }
 
@@ -373,7 +410,7 @@ describe("decision release policy", () => {
     });
   });
 
-  it("uses stable empty-task branches without creating call IDs", () => {
+  it("uses explicit idle operations on both tracks", () => {
     const thinking = directRequests({
       ...simulationTestWorld(),
       reviewRequired: false,
@@ -384,22 +421,22 @@ describe("decision release policy", () => {
         ready,
         thinking,
         agentId,
-        directEmptyDecision(),
+        directIdleDecision(),
       );
     }
 
     const released = releaseDecisionCycle(ready, testPluginRegistry);
 
     for (const agent of released.world.agents.values()) {
-      expect(agent.taskTracks).toEqual({
-        HEAD: { kind: "empty" },
-        BODY: { kind: "empty" },
-      });
-      expect(agent.activeOperations.size).toBe(0);
+      expect(agent.taskTracks.HEAD).toEqual({ kind: "empty" });
+      expect(agent.taskTracks.BODY.kind).toBe("operation");
+      expect(agent.activeOperations.size).toBe(1);
+      expect(
+        [...agent.activeOperations.values()].map((operation) => operation.operationId),
+      ).toEqual(["core.wait"]);
     }
-    expect(
-      released.events.filter((event) => event.type === "operation_started"),
-    ).toEqual([]);
+    expect(released.events.filter((event) => event.type === "operation_started"))
+      .toHaveLength(4);
   });
 
   it("binds a synchronized direct operation once using normalized arguments", () => {
@@ -634,11 +671,11 @@ describe("decision release policy", () => {
     ]);
   });
 
-  it("replacing both tracks with empty tasks creates no calls", () => {
+  it("accepts explicit idle operations through the standard helper", () => {
     const thinking = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     let ready = thinking;
     for (const agentId of ["alice", "bob"] as const) {
-      ready = accept(ready, thinking, agentId, directEmptyDecision());
+      ready = accept(ready, thinking, agentId, directIdleDecision());
     }
 
     const released = releaseDecisionCycle(ready, testPluginRegistry);
@@ -646,8 +683,34 @@ describe("decision release policy", () => {
     expect(
       [...released.world.agents.values()].flatMap((agent) => [
         ...agent.activeOperations.values(),
-      ]),
-    ).toEqual([]);
+      ]).map((operation) => operation.operationId),
+    ).toEqual(["core.wait", "core.wait"]);
+  });
+
+  it("completes HEAD think beside BODY wait without requesting another decision", () => {
+    const thinking = directRequests(
+      { ...simulationTestWorld(), reviewRequired: false },
+      ["alice"],
+    );
+    const ready = accept(thinking, thinking, "alice", idleDecision());
+
+    const released = releaseDecisionCycle(ready, testPluginRegistry);
+    const alice = released.world.agents.get("alice" as never)!;
+
+    expect(released.world.mode).toBe("RUNNING");
+    expect(released.world.tick).toBe(thinking.tick);
+    expect(released.decisionNeeds).toBeUndefined();
+    expect(alice.taskTracks.HEAD).toEqual({ kind: "empty" });
+    expect(alice.taskTracks.BODY.kind).toBe("operation");
+    expect([...alice.activeOperations.values()].map((operation) => operation.operationId))
+      .toEqual(["core.wait"]);
+    expect(
+      released.events.filter(
+        (event) =>
+          event.type === "operation_terminated" &&
+          event.operationId === "core.think",
+      ),
+    ).toHaveLength(1);
   });
 
   it("rejects selecting a synchronized task on only one declared track", () => {
@@ -707,7 +770,14 @@ describe("decision release policy", () => {
       thinking,
       resultFor(thinking, "alice", {
       schemaVersion: 3,
-      head: { kind: "replace", task: { kind: "empty_task" } },
+      head: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.think" as never,
+          arguments: {},
+        },
+      },
       body: { kind: "continue" },
       reason: "Replace only head",
       }),
@@ -740,7 +810,14 @@ describe("decision release policy", () => {
     const thinking = directRequests(progressed);
     const aliceReady = accept(readyWorld(thinking, "bob"), thinking, "alice", {
       schemaVersion: 3,
-      head: { kind: "replace", task: { kind: "empty_task" } },
+      head: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.think" as never,
+          arguments: {},
+        },
+      },
       body: { kind: "continue" },
       reason: "Keep waiting",
     });
@@ -772,7 +849,14 @@ describe("decision release policy", () => {
     const ready = accept(thinking, thinking, "alice", {
       schemaVersion: 3,
       head: { kind: "continue" },
-      body: { kind: "replace", task: { kind: "empty_task" } },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.wait" as never,
+          arguments: { durationTicks: 10 },
+        },
+      },
       reason: "Stop",
     });
 
@@ -811,6 +895,12 @@ describe("decision release policy", () => {
         outcome: "cancelled",
         reasonCode: "task_replaced",
         result: { status: "cancelled" },
+      }),
+      expect.objectContaining({
+        type: "operation_started",
+        agentId: "alice",
+        operationId: "core.wait",
+        taskSlots: ["BODY"],
       }),
     ]);
   });
@@ -852,7 +942,14 @@ describe("decision release policy", () => {
     const ready = accept(thinking, thinking, "alice", {
       schemaVersion: 3,
       head: { kind: "continue" },
-      body: { kind: "replace", task: { kind: "empty_task" } },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.wait" as never,
+          arguments: { durationTicks: 10 },
+        },
+      },
       reason: "Stop hosted use",
     });
 
@@ -873,5 +970,44 @@ describe("decision release policy", () => {
       version: 2,
       state: { holder: null },
     });
+  });
+
+  it("clears a track with empty_task without creating a replacement call", () => {
+    const running = worldWithStartedFridgeUse();
+    const active = running.agents.get("alice" as never)!;
+    const thinking = requestDecisions(running, [
+      {
+        agentId: "alice" as never,
+        reason: { code: "clear_task", summary: "Clear the body task" },
+      },
+    ]).world;
+    const ready = accept(thinking, thinking, "alice", {
+      schemaVersion: 3,
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        task: { kind: "empty_task" },
+      },
+      reason: "Clear the body task",
+    });
+
+    const released = releaseDecisionCycle(ready, testPluginRegistry);
+    const alice = released.world.agents.get("alice" as never)!;
+    expect(alice.taskTracks).toEqual({
+      HEAD: { kind: "empty" },
+      BODY: { kind: "empty" },
+    });
+    expect(alice.activeOperations).toEqual(new Map());
+    expect(alice.pendingOperationResults).toContainEqual(
+      expect.objectContaining({
+        callId: [...active.activeOperations.keys()][0],
+        terminal: true,
+        outcome: "cancelled",
+        reasonCode: "task_replaced",
+      }),
+    );
+    expect(
+      released.events.filter((event) => event.type === "operation_started"),
+    ).toHaveLength(0);
   });
 });

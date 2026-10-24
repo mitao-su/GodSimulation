@@ -14,6 +14,7 @@ const entityTargetSchema = z.object({ targetEntityId: EntityIdSchema }).strict()
 const readSchema = z
   .object({ hostDefinitionId: OperationHostDefinitionIdSchema })
   .strict();
+const thinkSchema = z.object({}).strict();
 const recallSchema = z.object({ query: z.string().min(1) }).strict();
 const speakSchema = z
   .object({
@@ -75,6 +76,19 @@ export const starterAgentOperations = [
           description: "The requested host definition must exist.",
         },
       ],
+    },
+  },
+  {
+    operationId: operationId("core.think"),
+    manual: {
+      operationId: operationId("core.think"),
+      displayName: "Think",
+      summary: "Remain idle on HEAD and think without advancing world time.",
+      taskSlots: ["HEAD"],
+      parametersSchema: operationParametersJsonSchema(thinkSchema),
+      target: { kind: "none" },
+      duration: { kind: "fixed" },
+      worldPreconditions: [],
     },
   },
   {

@@ -87,6 +87,39 @@ describe("OpenRouterDecisionProvider", () => {
     });
   });
 
+  it("accepts the stable empty_task branch", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  schemaVersion: 3,
+                  head: {
+                    kind: "replace",
+                    task: { kind: "empty_task" },
+                  },
+                  body: { kind: "continue" },
+                  reason: "Clear the idle track",
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const provider = new OpenRouterDecisionProvider(config, fetchImplementation);
+
+    await expect(
+      provider.decide(request, new AbortController().signal),
+    ).resolves.toMatchObject({
+      head: { kind: "replace", task: { kind: "empty_task" } },
+      body: { kind: "continue" },
+    });
+  });
+
   it("rejects a legacy v2 assistant response", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

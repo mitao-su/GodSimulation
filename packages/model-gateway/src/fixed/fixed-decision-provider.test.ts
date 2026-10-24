@@ -88,11 +88,15 @@ describe("FixedDecisionProvider", () => {
     });
   });
 
-  it("can clear one track while continuing the other", async () => {
+  it("uses an explicit idle operation instead of clearing a track", async () => {
     const provider = new FixedDecisionProvider({
       defaultDecision: {
         head: { kind: "continue" },
-        body: { kind: "empty" },
+        body: {
+          kind: "operation",
+          operationId: "core.wait" as never,
+          arguments: { durationTicks: 10 },
+        },
       },
     });
 
@@ -102,8 +106,28 @@ describe("FixedDecisionProvider", () => {
       head: { kind: "continue" },
       body: {
         kind: "replace",
-        task: { kind: "empty_task" },
+        task: {
+          kind: "operation",
+          operationId: "core.wait",
+          arguments: { durationTicks: 10 },
+        },
       },
+    });
+  });
+
+  it("emits the stable empty task branch when configured to clear a track", async () => {
+    const provider = new FixedDecisionProvider({
+      defaultDecision: {
+        head: { kind: "empty" },
+        body: { kind: "continue" },
+      },
+    });
+
+    await expect(
+      provider.decide(request, new AbortController().signal),
+    ).resolves.toMatchObject({
+      head: { kind: "replace", task: { kind: "empty_task" } },
+      body: { kind: "continue" },
     });
   });
 });

@@ -63,6 +63,8 @@ function invalidOperationCallBinding(message: string): OperationTechnicalFailure
 }
 
 const FailureDetailsSchema = z.object({}).strict();
+const ThinkOperationArgumentsSchema = z.object({}).strict();
+const ZERO_TICKS = 0;
 
 function agentOperationMounts(
   definition: AgentDefinition,
@@ -393,7 +395,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     stateSchema: ReadOperationStateSchema,
     parametersSchema: ReadOperationArgumentsSchema,
     initialState: () => ({ result: null }),
-    resolveDuration: () => ({ kind: "fixed", totalTicks: 0 }),
+    resolveDuration: () => ({ kind: "fixed", totalTicks: ZERO_TICKS }),
     start: (context, operation) => {
       const { hostDefinitionId } = ReadOperationArgumentsSchema.parse(
         operation.arguments,
@@ -456,6 +458,42 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
     mapArbitrationFailure: (_context, _operationCall, failure) =>
+      mapOperationArbitrationFailure({}, [], failure),
+  };
+}
+
+function createThinkRuntime(): UnboundAgentOperationRuntime {
+  return {
+    id: OperationIdSchema.parse("core.think"),
+    displayName: "Think",
+    trigger: "active_command",
+    target: { kind: "none" },
+    duration: { kind: "fixed" },
+    taskSlots: ["HEAD"],
+    eventIgnore: [],
+    publicBehavior: { kind: "visible", label: "thinking" },
+    domainFailures: [],
+    arbitrationFailureMappings: {},
+    resultSchema: EMPTY_RESULT_SCHEMA,
+    stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
+    parametersSchema: ThinkOperationArgumentsSchema,
+    initialState: () => ({}),
+    resolveDuration: () => ({ kind: "fixed", totalTicks: ZERO_TICKS }),
+    start: (_context, operation) => {
+      ThinkOperationArgumentsSchema.parse(operation.arguments);
+      EMPTY_OPERATION_STATE_SCHEMA.parse(operation.state);
+      return {
+        kind: "started",
+        proposal: { effects: [] },
+        nextState: {},
+      };
+    },
+    complete: () => ({ effects: [], result: {} }),
+    fail: () => ({ effects: [], result: {} }),
+    cancel: () => ({ effects: [], result: {} }),
+    fuse: () => null,
+    acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure: (_context, _operation, failure) =>
       mapOperationArbitrationFailure({}, [], failure),
   };
 }
@@ -573,6 +611,7 @@ function coreAgentOperationImplementations(): ReadonlyMap<
         ),
     }),
     createReadRuntime(),
+    createThinkRuntime(),
     unavailableRuntime({
       id: "core.recall",
       displayName: "Recall",

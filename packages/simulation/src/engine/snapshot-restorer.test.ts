@@ -391,15 +391,15 @@ describe("simulation snapshot restoration", () => {
     });
 
     const objectOption: MutableTaskOption = {
-      id: "task-option:legacy:fridge-use",
-      label: "Use Fridge",
+      id: "task-option:legacy:fridge-configure",
+      label: "Configure Fridge",
       kind: "operation",
-      operationId: "object.test.fridge.use",
+      operationId: "object.test.fridge.configure",
       taskSlots: ["BODY"],
       argumentSchema: {},
       fixedArguments: {
         targetEntityId: "fridge-1",
-        parameters: {},
+        parameters: { mode: "turbo" },
       },
     };
     const objectSimulation = restoreSimulation({
@@ -411,7 +411,7 @@ describe("simulation snapshot restoration", () => {
           taskOptionId: objectOption.id,
           arguments: {},
         },
-        reason: "Use the fridge.",
+        reason: "Configure the fridge.",
       }),
       worldDefinition: simulationTestWorld().map,
       plugins: [testPlugin],
@@ -428,9 +428,9 @@ describe("simulation snapshot restoration", () => {
         kind: "replace",
         task: {
           kind: "operation",
-          operationId: "object.test.fridge.use",
+          operationId: "object.test.fridge.configure",
           hostEntityId: "fridge-1",
-          arguments: {},
+          arguments: { mode: "turbo" },
         },
       },
     });

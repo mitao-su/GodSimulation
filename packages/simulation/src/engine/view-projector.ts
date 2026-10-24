@@ -29,7 +29,10 @@ function decisionTrackProposal(
       return { kind: "continue", label: `Continue current ${track} task` };
     }
     if (directSelection.task.kind === "empty_task") {
-      return { kind: "replace", task: { kind: "empty_task" } };
+      return {
+        kind: "replace",
+        task: { kind: "empty_task" },
+      };
     }
     return {
       kind: "replace",

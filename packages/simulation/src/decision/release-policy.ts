@@ -5,6 +5,7 @@ import {
   type DirectTaskDecision,
   type AgentId,
   type DomainEvent,
+  type DecisionReason,
   type TaskTrack,
 } from "@god-sim/protocol";
 
@@ -12,6 +13,10 @@ import {
   operationInteractionLifecycleProposal,
 } from "../execution/operation-lifecycle";
 import { cancelOperationLifecycle } from "../execution/operation-lifecycle-runner";
+import {
+  advanceHostedOperationBatch,
+  applyHostedOperationBatchResult,
+} from "../execution/action-runner";
 import {
   commitOperationTerminations,
   type OperationTerminationBatchRequest,
@@ -50,10 +55,18 @@ import type {
 } from "../world/world-state";
 
 const TASK_TRACKS = ["HEAD", "BODY"] as const;
+const ZERO_TICKS = 0;
 
 export interface DecisionReleaseTransition {
   readonly world: WorldState;
   readonly events: readonly DomainEvent[];
+  readonly decisionNeeds?: readonly DecisionReleaseNeed[];
+}
+
+/** 放行后同一 Tick 完成的即时 operation 需要再次进入决策循环。 */
+export interface DecisionReleaseNeed {
+  readonly agentId: AgentId;
+  readonly reason: DecisionReason;
 }
 
 interface CancellationLifecycle {
@@ -439,6 +452,74 @@ function prepareCancellationLifecycles(
   return cancellationLifecycles;
 }
 
+function advanceImmediateHostedOperations(
+  world: WorldState,
+  registry: HostedOperationRuntimeRegistry,
+  entries: readonly { readonly agentId: AgentId; readonly operation: OperationRuntimeCall }[],
+  precedingEvents: readonly DomainEvent[],
+): {
+  readonly world: WorldState;
+  readonly events: readonly DomainEvent[];
+  readonly decisionNeeds: readonly DecisionReleaseNeed[];
+} {
+  const immediate = entries.filter(
+    ({ operation }) =>
+      operation.duration.kind === "fixed" &&
+      operation.duration.totalTicks === ZERO_TICKS,
+  );
+  if (immediate.length === 0) {
+    return { world, events: [], decisionNeeds: [] };
+  }
+
+  const batch = advanceHostedOperationBatch(world, registry, immediate);
+  const appliedWorld = applyHostedOperationBatchResult(batch);
+  const failure = batch.results
+    .map(({ result }) =>
+      result.kind === "technical_failure" || result.kind === "termination_pending"
+        ? result.failure
+        : null,
+    )
+    .find((candidate) => candidate !== null);
+  if (failure) {
+    throw new OperationTechnicalFailureError(failure, {
+      world: appliedWorld,
+      events: [...precedingEvents, ...batch.events],
+    });
+  }
+
+  const decisionNeeds = batch.results.flatMap(({ agentId, result }) => {
+    if (
+      result.kind !== "termination_ready" ||
+      result.operation.operationId === "core.think"
+    ) {
+      // HEAD 的显式空闲选择在原 Tick 内完成。它本身不触发新的决策，
+      // 否则模型再次选择 think 时会形成零 Tick 的无限决策循环。
+      return [];
+    }
+    const label = hostedOperationLabel(appliedWorld, registry, result.operation);
+    return [
+      {
+        agentId,
+        reason: {
+          code:
+            result.transaction.outcome === "completed"
+              ? "operation_completed"
+              : result.transaction.source,
+          summary:
+            result.transaction.outcome === "completed"
+              ? `${label} completed`
+              : `${label} terminated`,
+        },
+      },
+    ];
+  });
+  return {
+    world: appliedWorld,
+    events: batch.events,
+    decisionNeeds,
+  };
+}
+
 function releaseDirectDecisionCycle(
   world: WorldState,
   registry: HostedOperationRuntimeRegistry,
@@ -533,6 +614,10 @@ function releaseDirectDecisionCycle(
     decisionCycle: null,
   };
   const events: DomainEvent[] = [...cancellation.events];
+  const startedHostedOperations: Array<{
+    readonly agentId: AgentId;
+    readonly operation: OperationRuntimeCall;
+  }> = [];
   const lifecycleMetadata = {
     causationId: `release:${cycle.id}`,
     correlationId: cycle.id,
@@ -547,6 +632,7 @@ function releaseDirectDecisionCycle(
       if (!isOperationRuntimeCall(operation)) {
         throw new Error(`Direct release started legacy operation ${operation.callId}`);
       }
+      startedHostedOperations.push({ agentId: plan.agentId, operation });
       const written = appendDomainEvent(
         releasedWorld,
         {
@@ -563,7 +649,19 @@ function releaseDirectDecisionCycle(
       events.push(written.event);
     }
   }
-  return { world: releasedWorld, events };
+  const immediate = advanceImmediateHostedOperations(
+    releasedWorld,
+    registry,
+    startedHostedOperations,
+    events,
+  );
+  return {
+    world: immediate.world,
+    events: [...events, ...immediate.events],
+    ...(immediate.decisionNeeds.length === 0
+      ? {}
+      : { decisionNeeds: immediate.decisionNeeds }),
+  };
 }
 
 export function preflightTaskDecision(

@@ -371,6 +371,7 @@ const agentEntityTargetSchema = z
 const agentReadSchema = z
   .object({ hostDefinitionId: OperationHostDefinitionIdSchema })
   .strict();
+const agentThinkSchema = z.object({}).strict();
 const agentRecallSchema = z.object({ query: z.string().min(1) }).strict();
 const agentSpeakSchema = z
   .object({
@@ -431,6 +432,19 @@ const testAgentOperations: readonly AgentOperationDefinition[] = [
           description: "The requested host definition must exist.",
         },
       ],
+    },
+  },
+  {
+    operationId: "core.think" as never,
+    manual: {
+      operationId: "core.think" as never,
+      displayName: "Think",
+      summary: "Remain idle on HEAD and think without advancing world time.",
+      taskSlots: ["HEAD"],
+      parametersSchema: operationParametersJsonSchema(agentThinkSchema),
+      target: { kind: "none" },
+      duration: { kind: "fixed" },
+      worldPreconditions: [],
     },
   },
   {

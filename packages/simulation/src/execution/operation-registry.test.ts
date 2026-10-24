@@ -32,6 +32,7 @@ const coreOperationIds = [
   "core.read",
   "core.recall",
   "core.speak",
+  "core.think",
   "core.wait",
 ] as const;
 
