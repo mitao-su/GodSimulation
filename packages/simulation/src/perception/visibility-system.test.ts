@@ -4,8 +4,27 @@ import { refreshAllPerceptions } from "../engine/tick-pipeline";
 import { createEmptyKnowledge } from "./agent-knowledge";
 import { computeVisibleCells } from "./visibility-system";
 import { simulationTestWorld, testPluginRegistry } from "../testing/simulation-test-fixtures";
+import { createSimulationRulesLock } from "@god-sim/protocol";
 
 describe("computeVisibleCells", () => {
+  it("uses the locked perception radius when no radius is supplied", () => {
+    const base = simulationTestWorld();
+    const world = {
+      ...base,
+      simulationRulesLock: createSimulationRulesLock({
+        ...base.simulationRulesLock.rules,
+        perception: { visionRadius: 1 },
+      }),
+    };
+    const visible = computeVisibleCells(world, testPluginRegistry, "alice" as never);
+
+    expect(visible.has("3,2")).toBe(true);
+    expect(visible.has("2,2")).toBe(true);
+    expect(visible.has("4,2")).toBe(true);
+    expect(visible.has("1,2")).toBe(false);
+    expect(visible.has("3,0")).toBe(false);
+  });
+
   it("includes the blocking wall but not cells hidden directly behind it", () => {
     const base = simulationTestWorld();
     const alice = base.agents.get("alice" as never)!;

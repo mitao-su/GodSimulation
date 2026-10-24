@@ -62,9 +62,9 @@ export class SpatialIndex {
     const object = this.#world.objects.get(entityId);
     if (!object) throw new Error(`Unknown object instance: ${entityId}`);
     const registered = this.#registry.getObject(object.definitionId);
-    if (!registered?.definition.movement) return false;
+    if (!registered?.definition.collision) return false;
     const state = registered.definition.stateSchema.parse(object.state);
-    return registered.definition.movement.blocksMovement(state, {
+    return registered.definition.collision.blocksMovement(state, {
       worldTick: this.#world.tick,
       ...(queryingAgentId === undefined ? {} : { queryingAgentId }),
     });

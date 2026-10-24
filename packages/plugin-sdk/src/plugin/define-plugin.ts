@@ -60,6 +60,12 @@ export function definePlugin(
 
   for (const definition of registrations.objects) {
     ObjectCapabilitiesSchema.parse(definition.capabilities);
+    if (
+      definition.collision === undefined ||
+      typeof definition.collision.blocksMovement !== "function"
+    ) {
+      throw new Error(`Object ${definition.id} requires a collision capability`);
+    }
     JsonValueSchema.parse(definition.stateSchema.parse(definition.initialState()));
     assertUnique(
       `interaction on object ${definition.id}`,

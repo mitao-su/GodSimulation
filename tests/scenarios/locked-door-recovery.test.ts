@@ -66,6 +66,7 @@ const passageDefinition: ObjectDefinition<PassageState> = {
       { x: 0, y: 1 },
     ],
   },
+  collision: { blocksMovement: (state) => !state.raised },
   movement: { blocksMovement: (state) => !state.raised },
   vision: { blocksVision: (state) => !state.raised },
   traversal: { interactionId: "raise" },

@@ -38,6 +38,12 @@ export interface MovementCapability<State> {
   blocksMovement(state: Readonly<State>, context: QueryContext): boolean;
 }
 
+/**
+ * 家具/世界物体的碰撞裁决。几何占格仍由 `placement.footprint` 声明，
+ * 当前状态是否阻挡移动由该函数决定；occupancy 是独立的使用占用规则。
+ */
+export type CollisionCapability<State> = MovementCapability<State>;
+
 export interface VisionCapability<State> {
   blocksVision(state: Readonly<State>, context: QueryContext): boolean;
 }
@@ -63,6 +69,7 @@ export interface ObjectDefinition<State = unknown> {
   initialState(): State;
   readonly resourceId: string;
   readonly placement: PlacementCapability;
+  readonly collision: CollisionCapability<State>;
   readonly movement?: MovementCapability<State>;
   readonly vision?: VisionCapability<State>;
   readonly traversal?: AutomaticTraversalCapability;

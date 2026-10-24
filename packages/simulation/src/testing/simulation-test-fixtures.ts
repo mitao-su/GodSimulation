@@ -34,6 +34,7 @@ const wallDefinition: ObjectDefinition<Record<string, never>> = {
     footprint: [{ x: 0, y: 0 }],
     interactionOffsets: [{ x: 0, y: 1 }],
   },
+  collision: { blocksMovement: () => true },
   movement: { blocksMovement: () => true },
   vision: { blocksVision: () => true },
   interactions: [],
@@ -65,6 +66,7 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
     footprint: [{ x: 0, y: 0 }],
     interactionOffsets: [{ x: 0, y: 1 }],
   },
+  collision: { blocksMovement: () => true },
   movement: { blocksMovement: () => true },
   occupancy: {
     capacity: 1,
@@ -587,6 +589,7 @@ export const testSimulationRulesLock = createSimulationRulesLock({
       timePressureFullAtTicks: 43_200,
     },
     inventory: { capacityUnits: 9 },
+    perception: { visionRadius: 6 },
     operations: {
       move: { ticksPerCell: 2 },
       wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },

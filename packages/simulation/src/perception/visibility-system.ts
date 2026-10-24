@@ -28,7 +28,7 @@ export function computeVisibleCells(
   world: WorldState,
   registry: PluginRegistry,
   agentId: AgentId,
-  radius = Math.max(world.map.width, world.map.height),
+  radius = world.simulationRulesLock.rules.perception.visionRadius,
 ): ReadonlySet<string> {
   const agent = world.agents.get(agentId);
   if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);

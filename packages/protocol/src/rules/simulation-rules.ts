@@ -51,6 +51,14 @@ const ContextRulesSchema = z
     { message: "technicalHardLimitTokens must be at least attentionBudgetTokens" },
   );
 
+const PerceptionRulesSchema = z
+  .object({
+    /** 360° 近身视觉半径；世界锁定后所有感知路径共享该值。 */
+    visionRadius: z.number().int().nonnegative().max(64),
+  })
+  .strict();
+export type PerceptionRules = z.infer<typeof PerceptionRulesSchema>;
+
 const FatigueRulesSchema = z
   .object({
     timeWeight: UnitIntervalSchema,
@@ -131,7 +139,7 @@ const MemoryRulesSchema = z
     { message: "Memory half-lives must descend from critical to low" },
   );
 
-const SoundRulesSchema = z
+export const SoundRulesSchema = z
   .object({
     speakSourceStrength: z
       .object({
@@ -164,6 +172,7 @@ const SoundRulesSchema = z
       message: "Closed-door attenuation must exceed open-door attenuation",
     },
   );
+export type SoundRules = z.infer<typeof SoundRulesSchema>;
 
 export const SimulationRulesSchema = z
   .object({
@@ -172,6 +181,7 @@ export const SimulationRulesSchema = z
     version: PositiveIntegerSchema,
     time: TimeRulesSchema,
     context: ContextRulesSchema,
+    perception: PerceptionRulesSchema,
     fatigue: FatigueRulesSchema,
     inventory: z.object({ capacityUnits: PositiveIntegerSchema }).strict(),
     operations: OperationRulesSchema,

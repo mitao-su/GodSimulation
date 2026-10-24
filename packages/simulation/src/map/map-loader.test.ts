@@ -23,6 +23,7 @@ const testDoor: ObjectDefinition<{ open: boolean; locked: boolean }> = {
     footprint: [{ x: 0, y: 0 }],
     interactionOffsets: [{ x: 0, y: 1 }],
   },
+  collision: { blocksMovement: () => false },
   interactions: [],
   observe: (state) => ({
     status: state.open ? "open" : "closed",
@@ -82,6 +83,7 @@ const simulationRulesLock = SimulationRulesLockSchema.parse({
       timePressureFullAtTicks: 43_200,
     },
     inventory: { capacityUnits: 9 },
+    perception: { visionRadius: 1 },
     operations: {
       move: { ticksPerCell: 2 },
       wait: { defaultDurationTicks: 600, maxDurationTicks: 600 },
