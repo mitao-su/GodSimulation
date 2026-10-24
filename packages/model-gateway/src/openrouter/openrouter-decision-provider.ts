@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   DirectTaskDecisionSchema,
   ModelDecisionRequestSchema,
-  TaskDecisionSchema,
   type ModelDecisionRequest,
   type ModelDecisionProposal,
 } from "@god-sim/protocol";
@@ -35,28 +34,8 @@ function redact(message: string, apiKey: string): string {
     .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [REDACTED]");
 }
 
-function responseFormat(direct: boolean) {
-  const legacySelection = {
-    anyOf: [
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind"],
-        properties: { kind: { const: "continue" } },
-      },
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind", "taskOptionId", "arguments"],
-        properties: {
-          kind: { const: "replace" },
-          taskOptionId: { type: "string" },
-          arguments: { type: "object", additionalProperties: true },
-        },
-      },
-    ],
-  };
-  const directSelection = {
+function responseFormat() {
+  const selection = {
     anyOf: [
       {
         type: "object",
@@ -95,24 +74,21 @@ function responseFormat(direct: boolean) {
       },
     ],
   };
-  const selection = direct ? directSelection : legacySelection;
   return {
     type: "json_schema",
     json_schema: {
-      name: direct ? "direct_task_decision" : "task_decision",
+      name: "direct_task_decision",
       strict: true,
       schema: {
         type: "object",
         additionalProperties: false,
         required: ["schemaVersion", "head", "body", "reason"],
         properties: {
-          schemaVersion: { const: direct ? 3 : 2 },
+          schemaVersion: { const: 3 },
           head: selection,
           body: selection,
           reason: { type: "string" },
-          ...(direct
-            ? { goalUpdates: { type: "object", additionalProperties: true } }
-            : {}),
+          goalUpdates: { type: "object", additionalProperties: true },
         },
       },
     },
@@ -133,7 +109,6 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
     signal: AbortSignal,
   ): Promise<ModelDecisionProposal> {
     const request = ModelDecisionRequestSchema.parse(requestValue);
-    const direct = request.taskOptions === undefined;
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.#config.apiKey}`,
       "content-type": "application/json",
@@ -147,7 +122,7 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
         body: JSON.stringify({
           model: this.#config.model,
           messages: request.messages,
-          response_format: responseFormat(direct),
+          response_format: responseFormat(),
         }),
         signal: AbortSignal.any([signal, AbortSignal.timeout(this.#config.timeoutMs)]),
       });
@@ -162,9 +137,7 @@ export class OpenRouterDecisionProvider implements DecisionProvider {
       } catch (error) {
         throw new Error("OpenRouter assistant content was not valid JSON", { cause: error });
       }
-      return direct
-        ? DirectTaskDecisionSchema.parse(parsedContent)
-        : TaskDecisionSchema.parse(parsedContent);
+      return DirectTaskDecisionSchema.parse(parsedContent);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(redact(message, this.#config.apiKey));

@@ -14,50 +14,17 @@ const request: ModelDecisionRequest = {
   pluginLockHash: "a".repeat(64) as never,
   decisionReason: { code: "initial_task", summary: "Choose" },
   messages: [{ role: "user", content: "Choose" }],
-  taskOptions: [
-    {
-      kind: "empty",
-      id: "task-option:alice:empty-head" as never,
-      label: "Clear head task",
-      taskSlots: ["HEAD"],
-      argumentSchema: {},
-    },
-    {
-      kind: "empty",
-      id: "task-option:alice:empty-body" as never,
-      label: "Clear body task",
-      taskSlots: ["BODY"],
-      argumentSchema: {},
-    },
-    {
-      kind: "operation",
-      id: "task-option:alice:observe-fridge" as never,
-      operationId: "core.observe" as never,
-      label: "Observe fridge",
-      taskSlots: ["HEAD"],
-      argumentSchema: {},
-      fixedArguments: { targetEntityId: "fridge-1" },
-    },
-    {
-      kind: "operation",
-      id: "task-option:alice:wait" as never,
-      operationId: "core.wait" as never,
-      label: "Wait",
-      taskSlots: ["BODY"],
-      argumentSchema: {},
-      fixedArguments: {},
-    },
-  ],
 };
 
 describe("FixedDecisionProvider", () => {
-  it("selects configured choices independently for both tracks", async () => {
+  it("returns configured direct operations independently for both tracks", async () => {
     const provider = new FixedDecisionProvider({
       byAgentAndReason: {
         "alice:initial_task": {
           head: {
             kind: "operation",
             operationId: "core.observe" as never,
+            hostEntityId: "fridge-1",
             arguments: {},
           },
           body: {
@@ -72,36 +39,53 @@ describe("FixedDecisionProvider", () => {
     await expect(
       provider.decide(request, new AbortController().signal),
     ).resolves.toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: {
         kind: "replace",
-        taskOptionId: "task-option:alice:observe-fridge",
-        arguments: {},
+        task: {
+          kind: "operation",
+          operationId: "core.observe",
+          hostEntityId: "fridge-1",
+          arguments: {},
+        },
       },
       body: {
         kind: "replace",
-        taskOptionId: "task-option:alice:wait",
-        arguments: { durationTicks: 10 },
+        task: {
+          kind: "operation",
+          operationId: "core.wait",
+          arguments: { durationTicks: 10 },
+        },
       },
       reason: "Fixed decision for initial_task",
     });
   });
 
-  it("rejects a configured operation that was not offered on its track", async () => {
+  it("passes direct operation identity and arguments through without candidate lookup", async () => {
     const provider = new FixedDecisionProvider({
       defaultDecision: {
         head: { kind: "continue" },
         body: {
           kind: "operation",
           operationId: "core.move" as never,
-          arguments: {},
+          arguments: { destination: "kitchen" },
         },
       },
     });
 
     await expect(
       provider.decide(request, new AbortController().signal),
-    ).rejects.toThrow(/not offered.*BODY/i);
+    ).resolves.toMatchObject({
+      head: { kind: "continue" },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "core.move",
+          arguments: { destination: "kitchen" },
+        },
+      },
+    });
   });
 
   it("can clear one track while continuing the other", async () => {
@@ -118,8 +102,7 @@ describe("FixedDecisionProvider", () => {
       head: { kind: "continue" },
       body: {
         kind: "replace",
-        taskOptionId: "task-option:alice:empty-body",
-        arguments: {},
+        task: { kind: "empty_task" },
       },
     });
   });

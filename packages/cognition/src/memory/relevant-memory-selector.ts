@@ -7,7 +7,6 @@ function terms(input: DecisionPromptInput): ReadonlySet<string> {
     input.decisionReason.code,
     input.decisionReason.summary,
     ...input.activeTasks.operations.map((operation) => operation.label),
-    ...(input.taskOptions ?? []).map((option) => option.label),
     ...input.perception.visibleEntities.map((entity) => entity.displayName),
   ]
     .join(" ")

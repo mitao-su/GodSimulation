@@ -42,24 +42,6 @@ const input = DecisionPromptInputSchema.parse({
     },
   ],
   perception: { zoneId: "living-room", visibleEntities: [], heardEvents: [] },
-  taskOptions: [
-    {
-      kind: "empty",
-      id: "task-option:alice:empty-head",
-      label: "Clear head task",
-      taskSlots: ["HEAD"],
-      argumentSchema: {},
-    },
-    {
-      kind: "operation",
-      id: "task-option:alice:wait",
-      operationId: "core.wait",
-      label: "Wait",
-      taskSlots: ["BODY"],
-      argumentSchema: {},
-      fixedArguments: {},
-    },
-  ],
 });
 
 const alice: AgentDefinition = {
