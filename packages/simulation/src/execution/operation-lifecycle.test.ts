@@ -7,7 +7,6 @@ import {
   accumulateOperationObservations,
   recordFuseResults,
 } from "./operation-lifecycle";
-import { legacyTaskOptionsFor } from "../testing/legacy-task-options";
 import { runTickPipeline } from "../engine/tick-pipeline";
 import {
   simulationTestWorld,
@@ -195,23 +194,18 @@ describe("operation lifecycle results", () => {
       {
         agentId: "alice" as never,
         reason: { code: "test_fuse", summary: "Review movement" },
-        taskOptions: legacyTaskOptionsFor(
-          firstFuse.world,
-          testPluginRegistry,
-          "alice" as never,
-        ),
       },
     ]).world;
     const request = thinking.decisionCycle!.requests.get("alice" as never)!;
     const accepted = acceptDecisionResult(thinking, {
       ...request.identity,
       proposal: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         head: { kind: "continue" },
         body: { kind: "continue" },
         reason: "Keep moving",
       },
-    });
+    }, testPluginRegistry);
     expect(accepted.accepted).toBe(true);
     const released = releaseDecisionCycle(
       accepted.world,
@@ -265,35 +259,25 @@ describe("operation lifecycle results", () => {
       ["alice" as never],
       { causationId: "test:fuse-cancel", correlationId: "test:fuse-cancel" },
     );
-    const taskOptions = legacyTaskOptionsFor(
-      fused.world,
-      testPluginRegistry,
-      "alice" as never,
-    );
-    const emptyBody = taskOptions.find(
-      (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
-    )!;
     const thinking = requestDecisions(fused.world, [
       {
         agentId: "alice" as never,
         reason: { code: "test_fuse", summary: "Stop movement" },
-        taskOptions,
       },
     ]).world;
     const request = thinking.decisionCycle!.requests.get("alice" as never)!;
     const accepted = acceptDecisionResult(thinking, {
       ...request.identity,
       proposal: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         head: { kind: "continue" },
         body: {
           kind: "replace",
-          taskOptionId: emptyBody.id,
-          arguments: {},
+          task: { kind: "empty_task" },
         },
         reason: "Stop moving",
       },
-    });
+    }, testPluginRegistry);
     expect(accepted.accepted).toBe(true);
     const released = releaseDecisionCycle(accepted.world, testPluginRegistry);
 

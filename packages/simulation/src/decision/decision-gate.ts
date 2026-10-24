@@ -6,8 +6,6 @@ import {
   EntityIdSchema,
   ModelDecisionResultSchema,
   RequestIdSchema,
-  resolveTaskDecision,
-  TaskOptionSchema,
   TechnicalFailureSchema,
   type AgentId,
   type DecisionIdentity,
@@ -16,8 +14,6 @@ import {
   type DirectTaskDecision,
   type ModelDecisionResult,
   type RequestId,
-  type TaskDecision,
-  type TaskOption,
   type TechnicalFailure,
 } from "@god-sim/protocol";
 
@@ -32,8 +28,6 @@ import type { GoalUpdateValidator } from "./goal-update-validator";
 export interface DecisionRequestSpec {
   readonly agentId: AgentId;
   readonly reason: DecisionReason;
-  /** Legacy snapshot/test input only; production requests omit dynamic options. */
-  readonly taskOptions?: readonly TaskOption[];
 }
 
 export interface DecisionRequestTransition {
@@ -126,7 +120,6 @@ export function buildDecisionPromptInput(
   agent: AgentState,
   identity: DecisionIdentity,
   reason: DecisionReason,
-  taskOptions?: readonly TaskOption[],
 ): DecisionPromptInput {
   return DecisionPromptInputSchema.parse({
     ...identity,
@@ -152,7 +145,6 @@ export function buildDecisionPromptInput(
       heardEvents: [],
     },
     operationResults: agent.pendingOperationResults,
-    ...(taskOptions === undefined ? {} : { taskOptions }),
   });
 }
 
@@ -180,9 +172,6 @@ export function requestDecisions(
     const agent = world.agents.get(requestSpec.agentId);
     if (!agent) throw new Error(`Unknown agent instance: ${requestSpec.agentId}`);
     const reason = DecisionReasonSchema.parse(requestSpec.reason);
-    const taskOptions = requestSpec.taskOptions?.map((option) =>
-      TaskOptionSchema.parse(option),
-    );
     const identity: DecisionIdentity = {
       requestId: RequestIdSchema.parse(`decision-request:${cycleVersion}:${index}`),
       agentId: requestSpec.agentId,
@@ -196,7 +185,6 @@ export function requestDecisions(
       agent,
       identity,
       reason,
-      taskOptions,
     );
     requests.set(requestSpec.agentId, {
       identity,
@@ -261,77 +249,29 @@ export function acceptDecisionResult(
     return { accepted: false, world, reason: `Request ${result.requestId} has a recorded failure` };
   }
   const proposal = DirectTaskDecisionSchema.safeParse(result.proposal);
-  const expectsDirect = request.promptInput.taskOptions === undefined;
-  if (proposal.success !== expectsDirect) {
+  if (!proposal.success) {
     return {
       accepted: false,
       world,
-      reason: expectsDirect
-        ? "Legacy task decision is not valid for a direct request"
-        : "Direct task decision is not valid for a legacy request",
+      reason: `Invalid direct decision: ${proposal.error.message}`,
     };
   }
-  if (proposal.success && registry === undefined) {
+  if (registry === undefined) {
     return {
       accepted: false,
       world,
       reason: "Direct decision validation requires a hosted operation registry",
     };
   }
-  const acceptedDirect = proposal.success;
-  const acceptedKinds = [...cycle.requests.values()]
-    .map((entry) => entry.acceptedProposal)
-    .filter((entry): entry is DirectTaskDecision | TaskDecision => entry !== null)
-    .map((entry) => DirectTaskDecisionSchema.safeParse(entry).success);
-  if (acceptedKinds.some((isDirect) => isDirect !== acceptedDirect)) {
-    return {
-      accepted: false,
-      world,
-      reason: "Decision cycle cannot mix direct and legacy task protocols",
-    };
-  }
-  let acceptedProposal: DirectTaskDecision | TaskDecision;
-  if (proposal.success) {
-    acceptedProposal = proposal.data;
-  } else {
-    // 旧快照/回放兼容：新的请求没有 taskOptions，因此不会进入该分支。
-    const legacy = result.proposal as TaskDecision;
-    const options = request.promptInput.taskOptions;
-    if (!options) {
-      return {
-        accepted: false,
-        world,
-        reason: `Invalid direct decision: ${proposal.error?.message ?? "schema validation failed"}`,
-      };
-    }
-    try {
-      acceptedProposal = resolveTaskDecision(legacy, options).normalizedDecision;
-    } catch (error) {
-      return {
-        accepted: false,
-        world,
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-  if (!acceptedProposal) {
-    return {
-      accepted: false,
-      world,
-      reason: `Invalid direct decision: ${proposal.error?.message ?? "schema validation failed"}`,
-    };
-  }
-  if (DirectTaskDecisionSchema.safeParse(acceptedProposal).success && registry) {
-    const direct = DirectTaskDecisionSchema.parse(acceptedProposal);
-    const validation = validateDirectDecision(
-      world,
-      registry,
-      result.agentId,
-      direct,
-      goalUpdateValidator,
-    );
-    if (validation) return { accepted: false, world, reason: validation };
-  }
+  const acceptedProposal = proposal.data;
+  const validation = validateDirectDecision(
+    world,
+    registry,
+    result.agentId,
+    acceptedProposal,
+    goalUpdateValidator,
+  );
+  if (validation) return { accepted: false, world, reason: validation };
 
   const requests = new Map(cycle.requests).set(result.agentId, {
     ...request,

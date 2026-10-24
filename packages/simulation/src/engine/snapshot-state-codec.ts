@@ -24,7 +24,6 @@ import {
   OperationTargetReferenceSchema,
   OperationTerminationOutcomeSchema,
   OperationTerminationSourceSchema,
-  TaskDecisionSchema,
   TaskOptionIdSchema,
   TechnicalFailureSchema,
   WorldModeSchema,
@@ -304,7 +303,7 @@ const SerializedDecisionRequestSchema = z
     agentId: AgentIdSchema,
     identity: DecisionIdentitySchema,
     promptInput: DecisionPromptInputSchema,
-    acceptedProposal: z.union([DirectTaskDecisionSchema, TaskDecisionSchema]).nullable(),
+    acceptedProposal: DirectTaskDecisionSchema.nullable(),
     failure: TechnicalFailureSchema.nullable().default(null),
   })
   .strict();

@@ -5,6 +5,7 @@ import {
   WorldSnapshotV2Schema,
   type DirectTaskDecision,
   type WorldSnapshotV1,
+  type WorldSnapshot,
 } from "@god-sim/protocol";
 
 import { acceptDecisionResult, requestDecisions } from "../decision/decision-gate";
@@ -201,6 +202,35 @@ function legacySnapshot(): WorldSnapshotV1 {
   };
 }
 
+function legacyCurrentDecisionSnapshot(
+  stateSchemaVersion: 3 | 4,
+  taskOption: MutableTaskOption,
+  proposal: unknown,
+): WorldSnapshot {
+  const engine = createSimulation({
+    worldDefinition: simulationTestWorld().map,
+    plugins: [testPlugin],
+    reviewRequired: true,
+    seed: 1,
+    pluginLockHash: "a".repeat(64),
+    simulationRulesLock: testSimulationRulesLock,
+  });
+  const snapshot = engine.createSnapshot();
+  const state = structuredClone(snapshot.state) as MutableSnapshotState;
+  state.stateSchemaVersion = stateSchemaVersion;
+  if (stateSchemaVersion === 3) {
+    delete state.pendingOperationTerminations;
+    delete state.terminalOperationCallIds;
+  }
+  const request = state.decisionCycle?.requests.find(
+    (candidate) => candidate.agentId === "alice",
+  );
+  if (!request) throw new Error("Missing Alice current decision fixture");
+  request.promptInput.taskOptions = [taskOption];
+  request.acceptedProposal = proposal;
+  return { ...snapshot, state: state as never };
+}
+
 describe("simulation snapshot restoration", () => {
   it("round-trips an accepted direct decision without legacy task options", () => {
     const base = simulationTestWorld();
@@ -248,6 +278,197 @@ describe("simulation snapshot restoration", () => {
     expect(restoredRequest?.promptInput).not.toHaveProperty("taskOptions");
     expect(restoredRequest?.acceptedProposal).toEqual(proposal);
     expect(restored.mode).toBe("READY_FOR_RELEASE");
+  });
+
+  it.each([3, 4] as const)(
+    "migrates a current V%s task-option decision to the direct protocol",
+    (stateSchemaVersion) => {
+      const waitOption: MutableTaskOption = {
+        id: "task-option:legacy:wait",
+        label: "Wait",
+        kind: "operation",
+        operationId: "core.wait",
+        taskSlots: ["BODY"],
+        argumentSchema: {},
+        fixedArguments: { durationTicks: 10 },
+      };
+      const legacyProposal = {
+        schemaVersion: 2,
+        head: { kind: "continue" },
+        body: {
+          kind: "replace",
+          taskOptionId: waitOption.id,
+          arguments: { durationTicks: 10 },
+        },
+        reason: "Wait for the next tick.",
+      };
+      const snapshot = legacyCurrentDecisionSnapshot(
+        stateSchemaVersion,
+        waitOption,
+        legacyProposal,
+      );
+      const restored = restoreSimulation({
+        snapshot,
+        worldDefinition: simulationTestWorld().map,
+        plugins: [testPlugin],
+        simulationRulesLock: testSimulationRulesLock,
+      });
+      const request = (
+        restored.createSnapshot().state as unknown as MutableSnapshotState
+      ).decisionCycle?.requests.find(
+          (candidate) => candidate.agentId === "alice",
+        );
+
+      expect(request?.promptInput).not.toHaveProperty("taskOptions");
+      expect(request?.acceptedProposal).toEqual({
+        schemaVersion: 3,
+        head: { kind: "continue" },
+        body: {
+          kind: "replace",
+          task: {
+            kind: "operation",
+            operationId: "core.wait",
+            arguments: { durationTicks: 10 },
+          },
+        },
+        reason: "Wait for the next tick.",
+      });
+    },
+  );
+
+  it("migrates synchronized selections and legacy object arguments without wrappers", () => {
+    const synchronizedOption: MutableTaskOption = {
+      id: "task-option:legacy:synchronized-wait",
+      label: "Synchronized wait",
+      kind: "operation",
+      operationId: "test.synchronized_wait",
+      taskSlots: ["HEAD", "BODY"],
+      argumentSchema: {},
+      fixedArguments: { durationTicks: 10 },
+    };
+    const synchronized = restoreSimulation({
+      snapshot: legacyCurrentDecisionSnapshot(4, synchronizedOption, {
+        schemaVersion: 2,
+        head: {
+          kind: "replace",
+          taskOptionId: synchronizedOption.id,
+          arguments: { durationTicks: 10 },
+        },
+        body: {
+          kind: "replace",
+          taskOptionId: synchronizedOption.id,
+          arguments: { durationTicks: 10 },
+        },
+        reason: "Use both tracks",
+      }),
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const synchronizedRequest = (
+      synchronized.createSnapshot().state as unknown as MutableSnapshotState
+    ).decisionCycle?.requests.find(
+        (candidate) => candidate.agentId === "alice",
+      );
+    expect(synchronizedRequest?.acceptedProposal).toMatchObject({
+      schemaVersion: 3,
+      head: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "test.synchronized_wait",
+          arguments: { durationTicks: 10 },
+        },
+      },
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "test.synchronized_wait",
+          arguments: { durationTicks: 10 },
+        },
+      },
+    });
+
+    const objectOption: MutableTaskOption = {
+      id: "task-option:legacy:fridge-use",
+      label: "Use Fridge",
+      kind: "operation",
+      operationId: "object.test.fridge.use",
+      taskSlots: ["BODY"],
+      argumentSchema: {},
+      fixedArguments: {
+        targetEntityId: "fridge-1",
+        parameters: {},
+      },
+    };
+    const objectSimulation = restoreSimulation({
+      snapshot: legacyCurrentDecisionSnapshot(4, objectOption, {
+        schemaVersion: 2,
+        head: { kind: "continue" },
+        body: {
+          kind: "replace",
+          taskOptionId: objectOption.id,
+          arguments: {},
+        },
+        reason: "Use the fridge.",
+      }),
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const objectRequest = (
+      objectSimulation.createSnapshot().state as unknown as MutableSnapshotState
+    ).decisionCycle?.requests.find(
+        (candidate) => candidate.agentId === "alice",
+      );
+    expect(objectRequest?.acceptedProposal).toMatchObject({
+      schemaVersion: 3,
+      body: {
+        kind: "replace",
+        task: {
+          kind: "operation",
+          operationId: "object.test.fridge.use",
+          hostEntityId: "fridge-1",
+          arguments: {},
+        },
+      },
+    });
+  });
+
+  it("migrates an explicit legacy empty-task choice", () => {
+    const emptyOption: MutableTaskOption = {
+      id: "task-option:legacy:clear-head",
+      label: "Clear head task",
+      kind: "empty",
+      taskSlots: ["HEAD"],
+      argumentSchema: {},
+    };
+    const restored = restoreSimulation({
+      snapshot: legacyCurrentDecisionSnapshot(4, emptyOption, {
+        schemaVersion: 2,
+        head: {
+          kind: "replace",
+          taskOptionId: emptyOption.id,
+          arguments: {},
+        },
+        body: { kind: "continue" },
+        reason: "Clear the head track.",
+      }),
+      worldDefinition: simulationTestWorld().map,
+      plugins: [testPlugin],
+      simulationRulesLock: testSimulationRulesLock,
+    });
+    const request = (
+      restored.createSnapshot().state as unknown as MutableSnapshotState
+    ).decisionCycle?.requests.find(
+        (candidate) => candidate.agentId === "alice",
+      );
+    expect(request?.acceptedProposal).toMatchObject({
+      schemaVersion: 3,
+      head: { kind: "replace", task: { kind: "empty_task" } },
+      body: { kind: "continue" },
+    });
   });
 
   it("adopts the supplied rule lock when migrating a version-two snapshot", () => {
@@ -603,25 +824,17 @@ describe("simulation snapshot restoration", () => {
       tracks: { HEAD: null, BODY: null },
       operations: [],
     });
-    expect(restoredRequest.promptInput.taskOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "empty", taskSlots: ["HEAD"] }),
-        expect.objectContaining({ kind: "empty", taskSlots: ["BODY"] }),
-        expect.objectContaining({
-          kind: "operation",
-          id: wait.id,
-          operationId: "core.wait",
-          taskSlots: ["BODY"],
-        }),
-      ]),
-    );
+    expect(restoredRequest.promptInput).not.toHaveProperty("taskOptions");
     expect(restoredRequest.acceptedProposal).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: { kind: "continue" },
       body: {
         kind: "replace",
-        taskOptionId: wait.id,
-        arguments: {},
+        task: {
+          kind: "operation",
+          operationId: "core.wait",
+          arguments: { durationTicks: 600 },
+        },
       },
       reason: "Wait",
     });

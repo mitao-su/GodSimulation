@@ -20,44 +20,6 @@ import {
 const aliceWaitRequest = {
   agentId: "alice" as never,
   reason: { code: "initial_goal", summary: "Choose a first goal" },
-  taskOptions: [
-    {
-      kind: "empty" as const,
-      id: "task-option:alice:empty-head" as never,
-      label: "Clear head task",
-      taskSlots: ["HEAD" as const],
-      argumentSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-    },
-    {
-      kind: "empty" as const,
-      id: "task-option:alice:empty-body" as never,
-      label: "Clear body task",
-      taskSlots: ["BODY" as const],
-      argumentSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-    },
-    {
-      kind: "operation" as const,
-      id: "task-option:alice:wait" as never,
-      operationId: "core.wait" as never,
-      label: "Wait",
-      taskSlots: ["BODY" as const],
-      argumentSchema: {
-        type: "object",
-        properties: { durationTicks: { type: "integer", minimum: 1 } },
-        required: ["durationTicks"],
-        additionalProperties: false,
-      },
-      fixedArguments: {},
-    },
-  ],
 };
 
 describe("decision gate", () => {
@@ -268,28 +230,31 @@ describe("decision gate", () => {
     ]);
   });
 
-  it("accepts only task options offered for the selected track", () => {
+  it("rejects a direct operation that is not registered", () => {
     const thinking = requestDecisions(simulationTestWorld(), [aliceWaitRequest]).world;
     const request = thinking.decisionCycle?.requests.get("alice" as never);
     if (!request) throw new Error("Missing Alice decision request");
     const result: ModelDecisionResult = {
       ...request.identity,
       proposal: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         head: { kind: "continue" },
         body: {
           kind: "replace",
-          taskOptionId: "task-option:alice:not-offered" as never,
-          arguments: {},
+          task: {
+            kind: "operation",
+            operationId: "missing.operation" as never,
+            arguments: {},
+          },
         },
-        reason: "Use an unavailable choice",
+        reason: "Use an unregistered operation",
       },
     };
 
-    const rejected = acceptDecisionResult(thinking, result);
+    const rejected = acceptDecisionResult(thinking, result, testPluginRegistry);
 
     expect(rejected.accepted).toBe(false);
-    expect(rejected.reason).toMatch(/not offered/i);
+    expect(rejected.reason).toMatch(/not registered/i);
     expect(rejected.world).toBe(thinking);
   });
 
@@ -299,47 +264,25 @@ describe("decision gate", () => {
       {
         ...aliceWaitRequest,
         agentId: "bob" as never,
-        taskOptions: [
-          {
-            kind: "empty" as const,
-            id: "task-option:bob:empty-head" as never,
-            label: "Clear head task",
-            taskSlots: ["HEAD" as const],
-            argumentSchema: {},
-          },
-          {
-            kind: "empty" as const,
-            id: "task-option:bob:empty-body" as never,
-            label: "Clear body task",
-            taskSlots: ["BODY" as const],
-            argumentSchema: {},
-          },
-          {
-            kind: "operation" as const,
-            id: "task-option:bob:wait" as never,
-            operationId: "core.wait" as never,
-            label: "Wait",
-            taskSlots: ["BODY" as const],
-            argumentSchema: {},
-            fixedArguments: {},
-          },
-        ],
       },
     ]).world;
     const aliceRequest = initial.decisionCycle!.requests.get("alice" as never)!;
     const aliceAccepted = acceptDecisionResult(initial, {
       ...aliceRequest.identity,
       proposal: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         head: { kind: "continue" },
         body: {
           kind: "replace",
-          taskOptionId: "task-option:alice:wait" as never,
-          arguments: { durationTicks: 10 },
+          task: {
+            kind: "operation",
+            operationId: "core.wait" as never,
+            arguments: { durationTicks: 10 },
+          },
         },
         reason: "Wait",
       },
-    }).world;
+    }, testPluginRegistry).world;
     const bobRequest = aliceAccepted.decisionCycle!.requests.get("bob" as never)!;
     const blocked = recordDecisionFailure(aliceAccepted, {
       id: "failure-1",
@@ -359,8 +302,11 @@ describe("decision gate", () => {
     expect(retried.technicalFailure).toBeNull();
     expect(retriedAlice.acceptedProposal?.body).toEqual({
       kind: "replace",
-      taskOptionId: "task-option:alice:wait",
-      arguments: { durationTicks: 10 },
+      task: {
+        kind: "operation",
+        operationId: "core.wait",
+        arguments: { durationTicks: 10 },
+      },
     });
     expect(retriedBob.acceptedProposal).toBeNull();
     expect(retriedBob.identity.requestId).not.toBe(bobRequest.identity.requestId);
@@ -373,31 +319,6 @@ describe("decision gate", () => {
       {
         ...aliceWaitRequest,
         agentId: "bob" as never,
-        taskOptions: [
-          {
-            kind: "empty" as const,
-            id: "task-option:bob:empty-head" as never,
-            label: "Clear head task",
-            taskSlots: ["HEAD" as const],
-            argumentSchema: {},
-          },
-          {
-            kind: "empty" as const,
-            id: "task-option:bob:empty-body" as never,
-            label: "Clear body task",
-            taskSlots: ["BODY" as const],
-            argumentSchema: {},
-          },
-          {
-            kind: "operation" as const,
-            id: "task-option:bob:wait" as never,
-            operationId: "core.wait" as never,
-            label: "Wait",
-            taskSlots: ["BODY" as const],
-            argumentSchema: {},
-            fixedArguments: {},
-          },
-        ],
       },
     ]).world;
     const aliceRequest = initial.decisionCycle!.requests.get("alice" as never)!;

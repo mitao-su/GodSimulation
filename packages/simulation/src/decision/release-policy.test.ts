@@ -6,8 +6,6 @@ import type {
   DirectOperationReference,
   DirectTaskDecision,
   ModelDecisionResult,
-  TaskDecision,
-  TaskOption,
 } from "@god-sim/protocol";
 
 import { acceptDecisionResult, requestDecisions } from "./decision-gate";
@@ -15,11 +13,7 @@ import {
   applyReleasePolicy,
   releaseDecisionCycle,
 } from "./release-policy";
-import { legacyTaskOptionsFor } from "../testing/legacy-task-options";
-import {
-  prepareDirectOperationCall,
-  prepareOperationCall,
-} from "../execution/operation-planner";
+import { prepareDirectOperationCall } from "../execution/operation-planner";
 import type {
   HostedOperationRuntime,
   HostedOperationRuntimeRegistry,
@@ -28,45 +22,7 @@ import {
   simulationTestWorld,
   testPluginRegistry,
 } from "../testing/simulation-test-fixtures";
-import type { DecisionRequestState, WorldState } from "../world/world-state";
-
-const SYNCHRONIZED_WAIT: TaskOption = {
-  kind: "operation",
-  id: "task-option:synchronized-wait" as never,
-  operationId: "test.synchronized_wait" as never,
-  label: "Synchronized wait",
-  taskSlots: ["HEAD", "BODY"],
-  argumentSchema: {},
-  fixedArguments: {},
-};
-
-function optionsFor(
-  world: WorldState,
-  agentId: AgentId,
-  synchronized = false,
-): readonly TaskOption[] {
-  const options = legacyTaskOptionsFor(world, testPluginRegistry, agentId);
-  return synchronized
-    ? [
-        ...options,
-        { ...SYNCHRONIZED_WAIT, id: `task-option:${agentId}:synchronized-wait` as never },
-      ]
-    : options;
-}
-
-function requests(
-  world: WorldState = simulationTestWorld(),
-  synchronized = false,
-): WorldState {
-  return requestDecisions(
-    world,
-    (["alice", "bob"] as const).map((agentId) => ({
-      agentId: agentId as AgentId,
-      reason: { code: "test_decision", summary: "Choose tasks" },
-      taskOptions: optionsFor(world, agentId as AgentId, synchronized),
-    })),
-  ).world;
-}
+import type { WorldState } from "../world/world-state";
 
 function directRequests(
   world: WorldState = simulationTestWorld(),
@@ -124,54 +80,31 @@ function acceptDirect(
   return accepted.world;
 }
 
-function legacyOptions(
-  request: DecisionRequestState | undefined,
-): readonly TaskOption[] {
-  const options = request?.promptInput.taskOptions;
-  if (!options) throw new Error("Missing legacy task options in this fixture");
-  return options;
-}
-
-function waitDecision(world: WorldState, agentId: "alice" | "bob"): TaskDecision {
-  const request = world.decisionCycle?.requests.get(agentId as never);
-  const wait = legacyOptions(request).find(
-    (option) => option.kind === "operation" && option.operationId === "core.wait",
-  );
-  if (!wait) throw new Error(`Missing wait task for ${agentId}`);
-  return {
-    schemaVersion: 2,
-    head: { kind: "continue" },
-    body: {
-      kind: "replace",
-      taskOptionId: wait.id,
-      arguments: { durationTicks: 10 },
-    },
-    reason: "Wait",
-  };
+function waitDecision(): DirectTaskDecision {
+  return directWaitDecision();
 }
 
 function synchronizedDecision(
-  world: WorldState,
-  agentId: "alice" | "bob",
   headTicks = 10,
   bodyTicks = headTicks,
-): TaskDecision {
-  const request = world.decisionCycle?.requests.get(agentId as never);
-  const option = legacyOptions(request).find(
-    (candidate) => candidate.label === "Synchronized wait",
-  );
-  if (!option) throw new Error(`Missing synchronized task for ${agentId}`);
+): DirectTaskDecision {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     head: {
       kind: "replace",
-      taskOptionId: option.id,
-      arguments: { durationTicks: headTicks },
+      task: {
+        kind: "operation",
+        operationId: "test.direct_synchronized_wait" as never,
+        arguments: { durationTicks: headTicks },
+      },
     },
     body: {
       kind: "replace",
-      taskOptionId: option.id,
-      arguments: { durationTicks: bodyTicks },
+      task: {
+        kind: "operation",
+        operationId: "test.direct_synchronized_wait" as never,
+        arguments: { durationTicks: bodyTicks },
+      },
     },
     reason: "Use both tracks",
   };
@@ -180,7 +113,7 @@ function synchronizedDecision(
 function resultFor(
   world: WorldState,
   agentId: "alice" | "bob",
-  proposal: TaskDecision,
+  proposal: DirectTaskDecision,
 ): ModelDecisionResult {
   const request = world.decisionCycle?.requests.get(agentId as never);
   if (!request) throw new Error(`Missing request for ${agentId}`);
@@ -191,11 +124,13 @@ function accept(
   world: WorldState,
   identityWorld: WorldState,
   agentId: "alice" | "bob",
-  proposal: TaskDecision,
+  proposal: DirectTaskDecision,
+  registry: HostedOperationRuntimeRegistry = testPluginRegistry,
 ): WorldState {
   const accepted = acceptDecisionResult(
     world,
     resultFor(identityWorld, agentId, proposal),
+    registry,
   );
   if (!accepted.accepted) throw new Error(accepted.reason ?? "Decision rejected");
   return accepted.world;
@@ -209,86 +144,12 @@ function readyWorld(
     thinking,
     thinking,
     agentId,
-    waitDecision(thinking, agentId),
+    waitDecision(),
   );
 }
 
 function worldWithStartedFridgeUse(): WorldState {
-  const base = { ...simulationTestWorld(), reviewRequired: false };
-  const aliceId = "alice" as never;
-  const fridgeId = "fridge-1" as never;
-  const alice = base.agents.get(aliceId)!;
-  const knownFridge = {
-    entityId: fridgeId,
-    displayName: "Fridge",
-    status: "available",
-    summary: "Available",
-    observable: { holder: null },
-    interactionAvailability: [],
-    position: { x: 4, y: 1 },
-    sourceEventId: "event:test:fridge" as never,
-    observedAtTick: 0,
-    observationKind: "vision" as const,
-  };
-  const inRange = {
-    ...base,
-    agents: new Map(base.agents).set(aliceId, {
-      ...alice,
-      position: { x: 4, y: 2 },
-      knowledge: {
-        ...alice.knowledge,
-        objects: new Map([[fridgeId, knownFridge]]),
-        visibleEntityIds: new Set([fridgeId]),
-      },
-    }),
-  };
-  const option = legacyTaskOptionsFor(inRange, testPluginRegistry, aliceId).find(
-    (candidate) =>
-      candidate.kind === "operation" &&
-      candidate.operationId === "object.test.fridge.use",
-  );
-  if (!option || option.kind !== "operation") {
-    throw new Error("Missing fridge use task");
-  }
-  const prepared = prepareOperationCall(
-    inRange,
-    testPluginRegistry,
-    aliceId,
-    option,
-    { parameters: {} },
-    "operation-call:test:fridge-use" as never,
-  );
-  if (prepared.kind !== "prepared") throw new Error(prepared.summary);
-  const action = prepared.operation.plan.actions[0];
-  if (!action || action.kind !== "interact_object") {
-    throw new Error("Fridge use did not create an interaction action");
-  }
-  const operation = {
-    ...prepared.operation,
-    progressTicks: 2,
-    plan: {
-      ...prepared.operation.plan,
-      actions: [{ ...action, started: true, progressTicks: 2 }],
-    },
-  };
-  const activeAlice = inRange.agents.get(aliceId)!;
-  const fridge = inRange.objects.get(fridgeId)!;
-  return {
-    ...inRange,
-    agents: new Map(inRange.agents).set(aliceId, {
-      ...activeAlice,
-      taskTracks: {
-        HEAD: { kind: "empty" },
-        BODY: { kind: "operation", callId: operation.callId },
-      },
-      activeOperations: new Map([[operation.callId, operation]]),
-    }),
-    objects: new Map(inRange.objects).set(fridgeId, {
-      ...fridge,
-      version: 1,
-      state: { holder: "alice" },
-    }),
-  };
+  return worldWithStartedHostedFridgeUse(testPluginRegistry);
 }
 
 function worldWithStartedHostedFridgeUse(
@@ -357,11 +218,14 @@ function synchronizedDirectRegistry(): {
   readonly registry: HostedOperationRuntimeRegistry;
   readonly resolveDuration: ReturnType<typeof vi.fn>;
 } {
-  const baseRuntime = testPluginRegistry.getHostedOperation("core.wait", {
-    kind: "agent",
-    hostDefinitionId: "test.alice" as never,
-  });
-  if (!baseRuntime) throw new Error("Missing hosted wait runtime");
+  const baseRuntimeFor = (hostDefinitionId: string): HostedOperationRuntime => {
+    const runtime = testPluginRegistry.getHostedOperation("core.wait", {
+      kind: "agent",
+      hostDefinitionId: hostDefinitionId as never,
+    });
+    if (!runtime) throw new Error(`Missing hosted wait runtime for ${hostDefinitionId}`);
+    return runtime;
+  };
   const parametersSchema = z
     .object({ durationTicks: z.number().int().positive().default(10) })
     .strict();
@@ -375,17 +239,18 @@ function synchronizedDirectRegistry(): {
       totalTicks: parametersSchema.parse(argumentsValue).durationTicks,
     }),
   );
-  const runtime: HostedOperationRuntime = {
-    ...baseRuntime,
+  const runtimeFor = (hostDefinitionId: string): HostedOperationRuntime => ({
+    ...baseRuntimeFor(hostDefinitionId),
     id: "test.direct_synchronized_wait" as never,
+    host: { kind: "agent", hostDefinitionId: hostDefinitionId as never },
     taskSlots: ["HEAD", "BODY"],
     parametersSchema,
     resolveDuration,
-  };
+  });
   const registry: HostedOperationRuntimeRegistry = {
     ...testPluginRegistry,
     resolveOperationReference(context, track, reference) {
-      if (reference.operationId !== runtime.id) {
+      if (reference.operationId !== "test.direct_synchronized_wait") {
         return testPluginRegistry.resolveOperationReference(
           context,
           track,
@@ -418,7 +283,7 @@ function synchronizedDirectRegistry(): {
       return {
         kind: "resolved",
         binding: {
-          runtime,
+          runtime: runtimeFor(agent.definitionId),
           host: { kind: "agent", hostEntityId: context.agentId },
           target: { kind: "none" },
           arguments: parsed.data,
@@ -426,10 +291,11 @@ function synchronizedDirectRegistry(): {
       };
     },
     getHostedOperation(operationId, host) {
-      return operationId === runtime.id &&
+      return operationId === "test.direct_synchronized_wait" &&
         host.kind === "agent" &&
-        host.hostDefinitionId === "test.alice"
-        ? runtime
+        (host.hostDefinitionId === "test.alice" ||
+          host.hostDefinitionId === "test.bob")
+        ? runtimeFor(host.hostDefinitionId)
         : testPluginRegistry.getHostedOperation(operationId, host);
     },
   };
@@ -670,7 +536,7 @@ describe("decision release policy", () => {
   });
 
   it("keeps every task unchanged until all requested agents are ready", () => {
-    const thinking = requests();
+    const thinking = directRequests();
     const aliceBefore = thinking.agents.get("alice" as never)!;
     const bobBefore = thinking.agents.get("bob" as never)!;
 
@@ -678,7 +544,7 @@ describe("decision release policy", () => {
       thinking,
       thinking,
       "alice",
-      waitDecision(thinking, "alice"),
+      waitDecision(),
     );
     const pending = applyReleasePolicy(first, testPluginRegistry);
 
@@ -691,18 +557,18 @@ describe("decision release policy", () => {
   });
 
   it("atomically creates every new call at progress zero when review is disabled", () => {
-    const thinking = requests({ ...simulationTestWorld(), reviewRequired: false });
+    const thinking = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     const aliceReady = accept(
       thinking,
       thinking,
       "alice",
-      waitDecision(thinking, "alice"),
+      waitDecision(),
     );
     const ready = accept(
       aliceReady,
       thinking,
       "bob",
-      waitDecision(thinking, "bob"),
+      waitDecision(),
     );
 
     const released = applyReleasePolicy(ready, testPluginRegistry);
@@ -737,21 +603,20 @@ describe("decision release policy", () => {
   });
 
   it("emits one start event for each synchronized call instead of one per track", () => {
-    const thinking = requests(
-      { ...simulationTestWorld(), reviewRequired: false },
-      true,
-    );
+    const { registry } = synchronizedDirectRegistry();
+    const thinking = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     let ready = thinking;
     for (const agentId of ["alice", "bob"] as const) {
       ready = accept(
         ready,
         thinking,
         agentId,
-        synchronizedDecision(thinking, agentId),
+        synchronizedDecision(),
+        registry,
       );
     }
 
-    const released = releaseDecisionCycle(ready, testPluginRegistry);
+    const released = releaseDecisionCycle(ready, registry);
 
     expect(
       released.events.filter((event) => event.type === "operation_started"),
@@ -770,22 +635,10 @@ describe("decision release policy", () => {
   });
 
   it("replacing both tracks with empty tasks creates no calls", () => {
-    const thinking = requests({ ...simulationTestWorld(), reviewRequired: false });
+    const thinking = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     let ready = thinking;
     for (const agentId of ["alice", "bob"] as const) {
-      const request = thinking.decisionCycle!.requests.get(agentId as never)!;
-      const head = legacyOptions(request).find(
-        (option) => option.kind === "empty" && option.taskSlots[0] === "HEAD",
-      )!;
-      const body = legacyOptions(request).find(
-        (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
-      )!;
-      ready = accept(ready, thinking, agentId, {
-        schemaVersion: 2,
-        head: { kind: "replace", taskOptionId: head.id, arguments: {} },
-        body: { kind: "replace", taskOptionId: body.id, arguments: {} },
-        reason: "Clear both tracks",
-      });
+      ready = accept(ready, thinking, agentId, directEmptyDecision());
     }
 
     const released = releaseDecisionCycle(ready, testPluginRegistry);
@@ -798,14 +651,16 @@ describe("decision release policy", () => {
   });
 
   it("rejects selecting a synchronized task on only one declared track", () => {
-    const thinking = requests({ ...simulationTestWorld(), reviewRequired: false }, true);
-    const full = synchronizedDecision(thinking, "alice");
+    const { registry } = synchronizedDirectRegistry();
+    const thinking = directRequests({ ...simulationTestWorld(), reviewRequired: false });
+    const full = synchronizedDecision();
     const result = acceptDecisionResult(
       readyWorld(thinking, "bob"),
       resultFor(thinking, "alice", {
         ...full,
         body: { kind: "continue" },
       }),
+      registry,
     );
 
     expect(result).toMatchObject({
@@ -815,60 +670,61 @@ describe("decision release policy", () => {
   });
 
   it("rejects different arguments for the two halves of a synchronized task", () => {
-    const thinking = requests({ ...simulationTestWorld(), reviewRequired: false }, true);
+    const { registry } = synchronizedDirectRegistry();
+    const thinking = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     const result = acceptDecisionResult(
       readyWorld(thinking, "bob"),
       resultFor(
         thinking,
         "alice",
-        synchronizedDecision(thinking, "alice", 10, 11),
+        synchronizedDecision(10, 11),
       ),
+      registry,
     );
 
     expect(result).toMatchObject({
       accepted: false,
-      reason: expect.stringMatching(/same arguments/i),
+      reason: expect.stringMatching(/same host and normalized arguments/i),
     });
   });
 
   it("rejects replacing only one half of an existing synchronized call", () => {
-    const initial = requests({ ...simulationTestWorld(), reviewRequired: false }, true);
+    const { registry } = synchronizedDirectRegistry();
+    const initial = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     let ready = initial;
     for (const agentId of ["alice", "bob"] as const) {
       ready = accept(
         ready,
         initial,
         agentId,
-        synchronizedDecision(initial, agentId),
+        synchronizedDecision(),
+        registry,
       );
     }
-    const running = releaseDecisionCycle(ready, testPluginRegistry).world;
-    const thinking = requests(running);
-    const aliceRequest = thinking.decisionCycle!.requests.get("alice" as never)!;
-    const emptyHead = legacyOptions(aliceRequest).find(
-      (option) => option.kind === "empty" && option.taskSlots[0] === "HEAD",
-    )!;
-    const aliceReady = accept(readyWorld(thinking, "bob"), thinking, "alice", {
-      schemaVersion: 2,
-      head: {
-        kind: "replace",
-        taskOptionId: emptyHead.id,
-        arguments: {},
-      },
+    const running = releaseDecisionCycle(ready, registry).world;
+    const thinking = directRequests(running);
+    const result = acceptDecisionResult(
+      thinking,
+      resultFor(thinking, "alice", {
+      schemaVersion: 3,
+      head: { kind: "replace", task: { kind: "empty_task" } },
       body: { kind: "continue" },
       reason: "Replace only head",
-    });
-
-    expect(() => releaseDecisionCycle(aliceReady, testPluginRegistry)).toThrow(
-      /synchronized call/i,
+      }),
+      registry,
     );
+
+    expect(result).toMatchObject({
+      accepted: false,
+      reason: expect.stringMatching(/synchronized call/i),
+    });
   });
 
   it("keeps an independent continued call object and its progress unchanged", () => {
-    const initial = requests({ ...simulationTestWorld(), reviewRequired: false });
+    const initial = directRequests({ ...simulationTestWorld(), reviewRequired: false });
     let ready = initial;
     for (const agentId of ["alice", "bob"] as const) {
-      ready = accept(ready, initial, agentId, waitDecision(initial, agentId));
+      ready = accept(ready, initial, agentId, waitDecision());
     }
     const running = releaseDecisionCycle(ready, testPluginRegistry).world;
     const alice = running.agents.get("alice" as never)!;
@@ -881,18 +737,10 @@ describe("decision release policy", () => {
         activeOperations: new Map([[bodyCall.callId, progressedCall]]),
       }),
     };
-    const thinking = requests(progressed);
-    const aliceRequest = thinking.decisionCycle!.requests.get("alice" as never)!;
-    const emptyHead = legacyOptions(aliceRequest).find(
-      (option) => option.kind === "empty" && option.taskSlots[0] === "HEAD",
-    )!;
+    const thinking = directRequests(progressed);
     const aliceReady = accept(readyWorld(thinking, "bob"), thinking, "alice", {
-      schemaVersion: 2,
-      head: {
-        kind: "replace",
-        taskOptionId: emptyHead.id,
-        arguments: {},
-      },
+      schemaVersion: 3,
+      head: { kind: "replace", task: { kind: "empty_task" } },
       body: { kind: "continue" },
       reason: "Keep waiting",
     });
@@ -919,25 +767,12 @@ describe("decision release policy", () => {
       {
         agentId: "alice" as never,
         reason: { code: "change_task", summary: "Stop using the fridge" },
-        taskOptions: legacyTaskOptionsFor(
-          running,
-          testPluginRegistry,
-          "alice" as never,
-        ),
       },
     ]).world;
-    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
-    const emptyBody = legacyOptions(request).find(
-      (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
-    )!;
     const ready = accept(thinking, thinking, "alice", {
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: { kind: "continue" },
-      body: {
-        kind: "replace",
-        taskOptionId: emptyBody.id,
-        arguments: {},
-      },
+      body: { kind: "replace", task: { kind: "empty_task" } },
       reason: "Stop",
     });
 
@@ -1004,7 +839,6 @@ describe("decision release policy", () => {
       {
         agentId: "alice" as never,
         reason: { code: "change_task", summary: "Stop hosted use" },
-        taskOptions: legacyTaskOptionsFor(promptWorld, registry, "alice" as never),
       },
     ]).world;
     const thinking = {
@@ -1015,18 +849,10 @@ describe("decision release policy", () => {
         activeOperations: active.activeOperations,
       }),
     };
-    const request = thinking.decisionCycle!.requests.get("alice" as never)!;
-    const emptyBody = legacyOptions(request).find(
-      (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
-    )!;
     const ready = accept(thinking, thinking, "alice", {
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: { kind: "continue" },
-      body: {
-        kind: "replace",
-        taskOptionId: emptyBody.id,
-        arguments: {},
-      },
+      body: { kind: "replace", task: { kind: "empty_task" } },
       reason: "Stop hosted use",
     });
 

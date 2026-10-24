@@ -2,12 +2,9 @@ import {
   OperationCallIdSchema,
   JsonObjectSchema,
   DirectTaskDecisionSchema,
-  TaskDecisionSchema,
-  resolveTaskDecision,
   type DirectTaskDecision,
   type AgentId,
   type DomainEvent,
-  type ResolvedTaskSelection,
   type TaskTrack,
 } from "@god-sim/protocol";
 
@@ -25,7 +22,6 @@ import {
 } from "../execution/operation-failure-classifier";
 import {
   prepareDirectOperationCall,
-  prepareOperationCall,
 } from "../execution/operation-planner";
 import {
   createOperationRuntimeContext,
@@ -58,12 +54,6 @@ const TASK_TRACKS = ["HEAD", "BODY"] as const;
 export interface DecisionReleaseTransition {
   readonly world: WorldState;
   readonly events: readonly DomainEvent[];
-}
-
-interface AgentDecisionPlan {
-  readonly agentId: AgentId;
-  readonly resolved: Readonly<Record<TaskTrack, ResolvedTaskSelection>>;
-  readonly removedCallIds: ReadonlySet<ActiveOperation["callId"]>;
 }
 
 interface CancellationLifecycle {
@@ -215,37 +205,6 @@ function applyDirectAgentDecisionPlan(
   return next;
 }
 
-function resolveSelections(
-  agent: AgentState,
-  request: DecisionRequestState,
-): Readonly<Record<TaskTrack, ResolvedTaskSelection>> {
-  if (request.acceptedProposal === null) {
-    throw new Error("Cannot resolve an empty decision proposal");
-  }
-  const legacy = TaskDecisionSchema.safeParse(request.acceptedProposal);
-  if (!legacy.success || request.promptInput.taskOptions === undefined) {
-    throw new Error(`Decision ${request.identity.requestId} is not a legacy task decision`);
-  }
-  const resolved = resolveTaskDecision(
-    legacy.data,
-    request.promptInput.taskOptions,
-  ).tracks;
-
-  for (const operation of agent.activeOperations.values()) {
-    if (operation.taskSlots.length === 1) continue;
-    const replacements = operation.taskSlots.filter(
-      (track) => resolved[track].kind !== "continue",
-    );
-    if (replacements.length > 0 && replacements.length !== operation.taskSlots.length) {
-      throw new Error(
-        `Existing synchronized call ${operation.callId} must be replaced on every occupied track`,
-      );
-    }
-  }
-
-  return resolved;
-}
-
 function assertCurrentCallsMatchTracks(agent: AgentState): void {
   for (const [callId, operation] of agent.activeOperations) {
     const referencedTracks = TASK_TRACKS.filter((track) => {
@@ -265,109 +224,6 @@ function assertCurrentCallsMatchTracks(agent: AgentState): void {
       throw new Error(`Task track ${track} references missing call ${state.callId}`);
     }
   }
-}
-
-function analyzeTaskDecision(
-  world: WorldState,
-  agentId: AgentId,
-  request: DecisionRequestState,
-): AgentDecisionPlan {
-  const cycle = world.decisionCycle;
-  if (!cycle) throw new Error("No decision cycle is active");
-  const agent = world.agents.get(agentId);
-  if (!agent) throw new Error(`Unknown agent instance: ${agentId}`);
-  if (request.acceptedProposal === null) {
-    throw new Error(`Decision cycle ${cycle.id} is incomplete for ${agentId}`);
-  }
-  assertCurrentCallsMatchTracks(agent);
-  const resolved = resolveSelections(agent, request);
-  const removedCallIds = new Set(
-    TASK_TRACKS.flatMap((track) => {
-      if (resolved[track].kind === "continue") return [];
-      const current = agent.taskTracks[track];
-      return current.kind === "operation" ? [current.callId] : [];
-    }),
-  );
-  return { agentId, resolved, removedCallIds };
-}
-
-function applyAgentDecisionPlan(
-  world: WorldState,
-  registry: OperationRuntimeRegistry,
-  plan: AgentDecisionPlan,
-  pendingOperationResults: AgentState["pendingOperationResults"] = [],
-): AgentState {
-  const cycle = world.decisionCycle;
-  if (!cycle) throw new Error("No decision cycle is active");
-  const agent = world.agents.get(plan.agentId);
-  if (!agent) throw new Error(`Unknown agent instance: ${plan.agentId}`);
-  const activeOperations = new Map(
-    [...agent.activeOperations].filter(
-      ([callId]) => !plan.removedCallIds.has(callId),
-    ),
-  );
-  const taskTracks: Record<TaskTrack, TaskTrackState> = {
-    HEAD: agent.taskTracks.HEAD,
-    BODY: agent.taskTracks.BODY,
-  };
-  const preparedByOption = new Map<
-    string,
-    ActiveOperation
-  >();
-  let callIndex = 0;
-
-  for (const track of TASK_TRACKS) {
-    const selected = plan.resolved[track];
-    if (selected.kind === "continue") continue;
-    if (selected.kind === "empty") {
-      taskTracks[track] = { kind: "empty" };
-      continue;
-    }
-
-    const existing = preparedByOption.get(selected.option.id);
-    if (existing) {
-      taskTracks[track] = {
-        kind: "operation",
-        callId: existing.callId,
-      };
-      continue;
-    }
-
-    const callId = OperationCallIdSchema.parse(
-      `operation-call:${cycle.id}:${plan.agentId}:${callIndex}`,
-    );
-    callIndex += 1;
-    if (activeOperations.has(callId)) {
-      throw new Error(`Operation call ID ${callId} already exists`);
-    }
-    const preparation = prepareOperationCall(
-      world,
-      registry,
-      plan.agentId,
-      selected.option,
-      selected.arguments,
-      callId,
-    );
-    if (preparation.kind === "blocked") {
-      throw new Error(
-        `Task option ${selected.option.id} cannot start: ${preparation.reasonCode}: ${preparation.summary}`,
-      );
-    }
-    preparedByOption.set(selected.option.id, preparation.operation);
-    activeOperations.set(callId, preparation.operation);
-    for (const occupiedTrack of preparation.operation.taskSlots) {
-      taskTracks[occupiedTrack] = { kind: "operation", callId };
-    }
-  }
-
-  const next = {
-    ...agent,
-    taskTracks: taskTracks as TaskTracks,
-    activeOperations,
-    pendingOperationResults,
-  };
-  assertCurrentCallsMatchTracks(next);
-  return next;
 }
 
 function acknowledgeFuseResults(
@@ -717,22 +573,19 @@ export function preflightTaskDecision(
   request: DecisionRequestState,
   goalUpdateValidator?: GoalUpdateValidator,
 ): AgentState {
-  if (DirectTaskDecisionSchema.safeParse(request.acceptedProposal).success) {
-    return applyDirectAgentDecisionPlan(
-      world,
-      analyzeDirectTaskDecision(
-        world,
-        registry as HostedOperationRuntimeRegistry,
-        agentId,
-        request,
-        goalUpdateValidator,
-      ),
-    );
+  const parsed = DirectTaskDecisionSchema.safeParse(request.acceptedProposal);
+  if (!parsed.success) {
+    throw new Error(`Decision ${request.identity.requestId} is not a direct decision`);
   }
-  return applyAgentDecisionPlan(
+  return applyDirectAgentDecisionPlan(
     world,
-    registry,
-    analyzeTaskDecision(world, agentId, request),
+    analyzeDirectTaskDecision(
+      world,
+      registry as HostedOperationRuntimeRegistry,
+      agentId,
+      request,
+      goalUpdateValidator,
+    ),
   );
 }
 
@@ -747,195 +600,11 @@ export function releaseDecisionCycle(
     throw new Error(`Decision cycle ${cycle.id} is not ready for release`);
   }
 
-  const directFlags = cycle.requestedAgentIds.map((agentId) => {
-    const request = cycle.requests.get(agentId);
-    return request !== undefined && DirectTaskDecisionSchema.safeParse(request.acceptedProposal).success;
-  });
-  if (directFlags.some(Boolean)) {
-    if (directFlags.some((isDirect) => !isDirect)) {
-      throw new Error(`Decision cycle ${cycle.id} mixes direct and legacy proposals`);
-    }
-    return releaseDirectDecisionCycle(
-      world,
-      registry as HostedOperationRuntimeRegistry,
-      goalUpdateValidator,
-    );
-  }
-
-  const plans: AgentDecisionPlan[] = [];
-  for (const agentId of cycle.requestedAgentIds) {
-    const request = cycle.requests.get(agentId);
-    if (!request) {
-      throw new Error(`Decision cycle ${cycle.id} is incomplete for ${agentId}`);
-    }
-    plans.push(analyzeTaskDecision(world, agentId, request));
-  }
-
-  const acknowledgedWorld = acknowledgeFuseResults(
+  return releaseDirectDecisionCycle(
     world,
-    registry,
-    plans.map((plan) => plan.agentId),
-  );
-  const cancellationLifecycles: CancellationLifecycle[] = [];
-  plans.forEach((plan) => {
-    const agent = acknowledgedWorld.agents.get(plan.agentId)!;
-    [...plan.removedCallIds]
-      .sort((left, right) => left.localeCompare(right))
-      .forEach((callId) => {
-        const operation = agent.activeOperations.get(callId);
-        if (!operation) {
-          throw new Error(`Cannot cancel missing operation ${callId}`);
-        }
-        if (isOperationRuntimeCall(operation)) {
-          const hostedRegistry = registry as OperationRuntimeRegistry &
-            Partial<HostedOperationRegistry>;
-          if (!hostedRegistry.getHostedOperation) {
-            throw new OperationTechnicalFailureError(
-              operationTechnicalFailure(
-                "configuration",
-                "hosted_operation_registry_unavailable",
-                `Hosted operation ${operation.operationId} cannot be cancelled without a hosted registry.`,
-                false,
-              ),
-            );
-          }
-          const lifecycle = cancelOperationLifecycle(
-            {
-              world: acknowledgedWorld,
-              registry: registry as HostedOperationRuntimeRegistry,
-              agentId: agent.id,
-              operation,
-            },
-            "task_replaced",
-          );
-          if (lifecycle.kind === "technical_failure") {
-            throw new OperationTechnicalFailureError(lifecycle.failure, {
-              world: acknowledgedWorld,
-              events: [],
-            });
-          }
-          cancellationLifecycles.push({
-            agentId: agent.id,
-            callId: operation.callId,
-            request: {
-              kind: "hosted",
-              request: {
-                transaction: lifecycle.transaction,
-                operation: lifecycle.operation,
-              },
-            },
-          });
-          return;
-        }
-        const lifecycle = operationInteractionLifecycleProposal(
-          acknowledgedWorld,
-          registry,
-          agent.id,
-          operation,
-          "cancel",
-        );
-        cancellationLifecycles.push({
-          agentId: agent.id,
-          callId: operation.callId,
-          request: {
-            kind: "active",
-            request: {
-              agentId: agent.id,
-              operation,
-              outcome: "cancelled",
-              source: "task_replaced",
-              proposal: { effects: lifecycle.effects },
-              ...(lifecycle.result === null ? {} : { resultOverride: lifecycle.result }),
-            },
-          },
-        });
-      });
-  });
-  const cancellation = commitOperationTerminations(
-    acknowledgedWorld,
     registry as HostedOperationRuntimeRegistry,
-    cancellationLifecycles.map((lifecycle) => lifecycle.request),
-    {
-      causationId: `release:${cycle.id}`,
-      correlationId: cycle.id,
-    },
+    goalUpdateValidator,
   );
-  if (cancellation.kind === "technical_failure") {
-    throw new OperationTechnicalFailureError(cancellation.failure, {
-      world: acknowledgedWorld,
-      events: [],
-    });
-  }
-
-  const candidateWorld = cancellation.world;
-  const preparedAgents = new Map<AgentId, AgentState>();
-  for (const plan of plans) {
-    const cancelledCallIds = new Set(
-      cancellationLifecycles
-        .filter((lifecycle) => lifecycle.agentId === plan.agentId)
-        .map((lifecycle) => lifecycle.callId),
-    );
-    const terminalCancellationResults = candidateWorld
-      .agents.get(plan.agentId)!
-      .pendingOperationResults.filter(
-        (result) => result.terminal && cancelledCallIds.has(result.callId),
-      );
-    preparedAgents.set(
-      plan.agentId,
-      applyAgentDecisionPlan(
-        candidateWorld,
-        registry,
-        plan,
-        terminalCancellationResults,
-      ),
-    );
-  }
-
-  const agents = new Map(candidateWorld.agents);
-  for (const [agentId, agent] of preparedAgents) agents.set(agentId, agent);
-  let releasedWorld: WorldState = {
-    ...candidateWorld,
-    version: candidateWorld.version + 1,
-    mode: "RUNNING",
-    agents,
-    decisionCycle: null,
-  };
-  const events: DomainEvent[] = [...cancellation.events];
-  const lifecycleMetadata = {
-    causationId: `release:${cycle.id}`,
-    correlationId: cycle.id,
-  };
-
-  for (const plan of [...plans].sort((left, right) =>
-    left.agentId.localeCompare(right.agentId),
-  )) {
-    const previousAgent = world.agents.get(plan.agentId)!;
-    const nextAgent = releasedWorld.agents.get(plan.agentId)!;
-    const started = [...nextAgent.activeOperations.values()]
-      .filter((operation) => !previousAgent.activeOperations.has(operation.callId))
-      .sort((left, right) => left.callId.localeCompare(right.callId));
-    for (const operation of started) {
-      const written = appendDomainEvent(
-        releasedWorld,
-        {
-          type: "operation_started",
-          agentId: plan.agentId,
-          callId: operation.callId,
-          operationId: operation.operationId,
-          taskSlots: operation.taskSlots,
-          label: operation.label,
-        },
-        lifecycleMetadata,
-      );
-      releasedWorld = written.world;
-      events.push(written.event);
-    }
-  }
-
-  return {
-    world: releasedWorld,
-    events,
-  };
 }
 
 export function applyReleasePolicy(

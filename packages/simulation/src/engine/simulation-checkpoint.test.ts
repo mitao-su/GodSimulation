@@ -24,7 +24,7 @@ function bufferWaitDecision(
   engine: SimulationEngine,
   request: DecisionPromptInput,
 ): void {
-  expect(request.taskOptions).toBeUndefined();
+  expect(request).not.toHaveProperty("taskOptions");
   const result = engine.acceptDecision({
     identity: {
       requestId: request.requestId,
