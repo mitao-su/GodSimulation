@@ -9,6 +9,15 @@ const StableIdSchema = z
 export const WorldIdSchema = StableIdSchema.brand<"WorldId">();
 export type WorldId = z.infer<typeof WorldIdSchema>;
 
+/**
+ * 可回放时间线的分支身份。
+ *
+ * 分支不是数据库里的展示字段：它是请求、事件和快照的作用域，任何
+ * 异步记忆结果都必须带着同一分支身份回到权威模拟进程。
+ */
+export const BranchIdSchema = StableIdSchema.brand<"BranchId">();
+export type BranchId = z.infer<typeof BranchIdSchema>;
+
 export const AgentIdSchema = StableIdSchema.brand<"AgentId">();
 export type AgentId = z.infer<typeof AgentIdSchema>;
 
@@ -32,6 +41,9 @@ export type QueryId = z.infer<typeof QueryIdSchema>;
 
 export const DecisionCycleIdSchema = StableIdSchema.brand<"DecisionCycleId">();
 export type DecisionCycleId = z.infer<typeof DecisionCycleIdSchema>;
+
+export const ConsolidationCycleIdSchema = StableIdSchema.brand<"ConsolidationCycleId">();
+export type ConsolidationCycleId = z.infer<typeof ConsolidationCycleIdSchema>;
 
 export const GoalOptionIdSchema = StableIdSchema.brand<"GoalOptionId">();
 export type GoalOptionId = z.infer<typeof GoalOptionIdSchema>;

@@ -178,6 +178,10 @@ export class SessionCoordinator {
           checkpointId: message.checkpointId,
         });
         return;
+      case "memory_request":
+      case "memory_result_ack":
+        // W5-IF 只先发布协议；在 W5-B/C 接线前不能静默忽略记忆消息。
+        throw new Error(`Memory IPC message ${message.type} is not implemented`);
       case "event_batch":
       case "snapshot_ready":
         throw new Error(`Legacy world-history message ${message.type} is not supported`);
@@ -333,14 +337,27 @@ export class SessionCoordinator {
       message.type === "checkpoint_ready" ||
       message.type === "technical_failure" ||
       error instanceof DecisionPersistenceError;
+    const unsupportedMemoryMessage =
+      message.type === "memory_request" || message.type === "memory_result_ack";
+    const persistWorldId =
+      message.type === "memory_request"
+        ? message.request.identity.worldId
+        : message.type === "memory_result_ack"
+          ? message.acknowledgement.request.worldId
+          : undefined;
     await this.#publishHostFailure({
       error: rootError,
-      category: persistenceMessage ? "persistence" : "worker",
+      category: persistenceMessage
+        ? "persistence"
+        : unsupportedMemoryMessage
+          ? "protocol"
+          : "worker",
       retryable: persistenceMessage,
-      blockWorker: persistenceMessage,
+      blockWorker: persistenceMessage || unsupportedMemoryMessage,
       ...(message.type === "decision_requested"
         ? { requestId: message.request.requestId }
         : {}),
+      ...(persistWorldId === undefined ? {} : { persistWorldId }),
     });
   }
 

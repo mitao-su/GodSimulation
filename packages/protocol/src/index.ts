@@ -27,6 +27,7 @@ export * from "./execution/task-contract";
 export * from "./identity/ids";
 export * from "./ipc/host-worker-message";
 export * from "./json/json-value";
+export * from "./memory";
 export * from "./model/decision-contract";
 export * from "./queries/world-query";
 export * from "./rules/simulation-rules";

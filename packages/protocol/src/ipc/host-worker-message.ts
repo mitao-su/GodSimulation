@@ -20,6 +20,11 @@ import {
   WorldSnapshotCurrentSchema,
   WorldSnapshotSchema,
 } from "../world/world-snapshot";
+import {
+  MemoryRequestSchema,
+  MemoryResultAcknowledgementSchema,
+  MemoryResultSchema,
+} from "../memory/memory-contract";
 
 export const PluginLockEntrySchema = z
   .object({
@@ -92,6 +97,13 @@ const CheckpointCommittedMessageSchema = z
   })
   .strict();
 
+const MemoryResultMessageSchema = z
+  .object({
+    type: z.literal("memory_result"),
+    result: MemoryResultSchema,
+  })
+  .strict();
+
 const ShutdownMessageSchema = z.object({ type: z.literal("shutdown") }).strict();
 
 export const HostToWorkerMessageSchema = z.discriminatedUnion("type", [
@@ -102,6 +114,7 @@ export const HostToWorkerMessageSchema = z.discriminatedUnion("type", [
   HostTechnicalFailureMessageSchema,
   RequestSnapshotMessageSchema,
   CheckpointCommittedMessageSchema,
+  MemoryResultMessageSchema,
   ShutdownMessageSchema,
 ]);
 
@@ -152,6 +165,20 @@ const CheckpointReadyMessageSchema = z
   })
   .strict();
 
+const MemoryRequestMessageSchema = z
+  .object({
+    type: z.literal("memory_request"),
+    request: MemoryRequestSchema,
+  })
+  .strict();
+
+const MemoryResultAcknowledgementMessageSchema = z
+  .object({
+    type: z.literal("memory_result_ack"),
+    acknowledgement: MemoryResultAcknowledgementSchema,
+  })
+  .strict();
+
 const WorldViewMessageSchema = z
   .object({
     type: z.literal("world_view"),
@@ -173,6 +200,8 @@ export const WorkerToHostMessageSchema = z.discriminatedUnion("type", [
   EventBatchMessageSchema,
   SnapshotReadyMessageSchema,
   CheckpointReadyMessageSchema,
+  MemoryRequestMessageSchema,
+  MemoryResultAcknowledgementMessageSchema,
   WorldViewMessageSchema,
   TechnicalFailureMessageSchema,
 ]);

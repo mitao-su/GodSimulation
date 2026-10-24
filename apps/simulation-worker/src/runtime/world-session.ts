@@ -188,6 +188,9 @@ export class WorldSession {
         return { shutdownReady: false };
       case "checkpoint_committed":
         return { shutdownReady: this.#acknowledgeCheckpoint(message.checkpointId) };
+      case "memory_result":
+        // W5-IF 只先发布协议；在 W5-C 接线前不能静默丢弃异步结果。
+        throw new Error("Memory result handling is not implemented in this worker");
       case "shutdown":
         return { shutdownReady: this.#requestShutdown() };
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type {
+  ConsolidationRequestIdentity,
   HostToWorkerMessage,
   DirectTaskDecision,
   ModelDecisionRequest,
@@ -92,6 +93,25 @@ function checkpointReady(): Extract<WorkerToHostMessage, { type: "checkpoint_rea
   };
 }
 
+function memoryIdentity(): ConsolidationRequestIdentity {
+  return {
+    schemaVersion: 1,
+    requestId: "memory-request:1" as never,
+    worldId: "starter-world" as never,
+    branchId: "branch:main" as never,
+    agentId: "alice" as never,
+    checkpointId: "checkpoint:starter-world:1:0" as never,
+    worldVersion: 1,
+    worldTick: 0,
+    lastEventSequence: 0,
+    simulationRulesHash: "c".repeat(64) as never,
+    pluginLockHash: "a".repeat(64) as never,
+    inputHash: "d".repeat(64) as never,
+    kind: "consolidation",
+    consolidationCycleId: "consolidation-cycle:1" as never,
+  };
+}
+
 class FakeWorker implements WorkerTransport {
   readonly sent: HostToWorkerMessage[] = [];
   #listener: ((message: WorkerToHostMessage) => void) | null = null;
@@ -137,6 +157,84 @@ function deferredProvider() {
 }
 
 describe("SessionCoordinator", () => {
+  it.each(["memory_request", "memory_result_ack"] as const)(
+    "blocks the worker when an unimplemented %s reaches the host",
+    async (messageType) => {
+      const worker = new FakeWorker();
+      const failures: string[] = [];
+      const store: TimelineStore = {
+        async commitCheckpoint() {},
+        async savePluginLock() {},
+        async saveModelCall() {},
+        async recordFailure(_worldId, failure) {
+          failures.push(failure.message);
+        },
+        async loadLatest() {
+          return { snapshot: null, events: [] };
+        },
+        async close() {},
+      };
+      const coordinator = new SessionCoordinator({
+        worker,
+        decisionProvider: deferredProvider().provider,
+        persistence: new PersistenceWriter(store),
+        modelId: "fixed-test",
+        now: () => "2026-08-31T00:00:00.000Z",
+      });
+      await coordinator.start();
+
+      try {
+        worker.emit({ type: "world_view", view: worldView() });
+        const identity = memoryIdentity();
+        if (messageType === "memory_request") {
+          worker.emit({
+            type: messageType,
+            request: {
+              identity,
+              input: { conversations: [], retainedMemories: [], semanticMap: {} },
+            },
+          });
+        } else {
+          worker.emit({
+            type: messageType,
+            acknowledgement: {
+              schemaVersion: 1,
+              request: identity,
+              requestReceiptSequence: 1,
+              resultReceiptSequence: 1,
+              disposition: "queued",
+              acknowledgedWorldTick: 0,
+            },
+          });
+        }
+
+        await vi.waitFor(() =>
+          expect(coordinator.getView()).toMatchObject({
+            mode: "TECHNICALLY_BLOCKED",
+            technicalFailure: {
+              category: "protocol",
+              retryable: false,
+              message: `Memory IPC message ${messageType} is not implemented`,
+            },
+          }),
+        );
+        await coordinator.waitForIdle();
+        expect(failures).toEqual([
+          `Memory IPC message ${messageType} is not implemented`,
+        ]);
+        expect(worker.sent).toContainEqual({
+          type: "technical_failure",
+          failure: expect.objectContaining({
+            category: "protocol",
+            retryable: false,
+          }),
+        });
+      } finally {
+        await coordinator.stop();
+      }
+    },
+  );
+
   it("acknowledges a checkpoint only after its atomic commit resolves", async () => {
     let markCommitStarted: (() => void) | undefined;
     const commitStarted = new Promise<void>((resolve) => {
