@@ -424,7 +424,7 @@ const testAgentOperations: readonly AgentOperationDefinition[] = [
       taskSlots: ["HEAD"],
       parametersSchema: operationParametersJsonSchema(agentReadSchema),
       target: { kind: "none" },
-      duration: { kind: "indeterminate" },
+      duration: { kind: "fixed" },
       worldPreconditions: [
         {
           failureCode: "unknown_host_definition",

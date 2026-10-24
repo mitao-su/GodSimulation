@@ -262,7 +262,7 @@ describe("operation planner", () => {
     });
     expect(observing.kind === "prepared" && observing.operation.duration).toEqual({
       kind: "fixed",
-      totalTicks: 1,
+      totalTicks: 0,
     });
   });
 

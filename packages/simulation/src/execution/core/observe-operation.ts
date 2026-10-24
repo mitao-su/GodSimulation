@@ -40,10 +40,9 @@ export function createObserveOperation(): RegisteredOperation {
             details: { summary: `${targetEntityId ?? "Target"} is not currently visible` },
           };
     },
-    resolveDuration: (context) => ({
+    resolveDuration: () => ({
       kind: "fixed",
-      totalTicks:
-        context.world.simulationRulesLock.rules.operations.observe.durationTicks,
+      totalTicks: 0,
     }),
     createPlan: (_context, value, callId, duration) => {
       if (duration.kind !== "fixed") {
@@ -69,10 +68,9 @@ export function createObserveOperation(): RegisteredOperation {
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation,
     terminalResult: () => ({}),
-    validateRestored: (context, operation) => {
+    validateRestored: (_context, operation) => {
       const parsed = ENTITY_TARGET_ARGUMENTS_SCHEMA.parse(operation.arguments);
-      const expectedTicks =
-        context.world.simulationRulesLock.rules.operations.observe.durationTicks;
+      const expectedTicks = 0;
       const action = operation.plan.actions[0];
       if (
         operation.duration.kind !== "fixed" ||

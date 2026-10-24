@@ -222,6 +222,20 @@ export function advanceOperations(
         continue;
       }
 
+      // 旧 ActiveOperation 快照仍可能经过 legacy runner。观察/等待的
+      // 零时长动作不应伪造一个 Tick 的进度，否则会违反 progress <= duration。
+      if (
+        action.durationTicks === 0 &&
+        (action.kind === "observe" || action.kind === "wait")
+      ) {
+        const finished = finishCurrentAction(agent, operation);
+        agent = finished.agent;
+        if (finished.operationCompleted) {
+          completedOperations.push({ agentId, callId, label: operation.label });
+        }
+        continue;
+      }
+
       const progressedOperation = {
         ...operation,
         progressTicks: operation.progressTicks + 1,
@@ -1279,7 +1293,7 @@ export function advanceHostedOperation(
   if (
     operation.duration.kind === "fixed" &&
     (!Number.isSafeInteger(operation.duration.totalTicks) ||
-      operation.duration.totalTicks <= Number.MIN_VALUE)
+      operation.duration.totalTicks < 0)
   ) {
     return hostedTechnicalFailure(
       world,
@@ -1324,6 +1338,7 @@ export function advanceHostedOperation(
   }
   if (
     operation.duration.kind === "fixed" &&
+    operation.firstStepState === "started" &&
     operation.progressTicks === operation.duration.totalTicks
   ) {
     return completeHostedOperation(
@@ -1336,7 +1351,14 @@ export function advanceHostedOperation(
     );
   }
 
-  const nextProgress = operation.progressTicks + 1;
+  // 固定零 Tick 调用仍必须先经过 start，才能执行首步世界校验和
+  // 生命周期提议；start 完成后在同一批次直接进入 complete，进度保持为 0。
+  const immediate =
+    operation.duration.kind === "fixed" &&
+    operation.duration.totalTicks === 0;
+  const nextProgress = immediate
+    ? operation.progressTicks
+    : operation.progressTicks + 1;
   if (!Number.isSafeInteger(nextProgress)) {
     return hostedTechnicalFailure(
       world,
@@ -1388,6 +1410,21 @@ export function advanceHostedOperation(
   }
 
   const progressed = { ...advancedOperation, progressTicks: nextProgress };
+
+  if (immediate && operation.firstStepState === "pending") {
+    const completed = completeHostedOperation(
+      evaluationWorld,
+      registry,
+      agentId,
+      progressed,
+      [],
+      "duration_elapsed",
+      transitionProposal === undefined || transitionPhase === undefined
+        ? undefined
+        : { proposal: transitionProposal, phase: transitionPhase },
+    );
+    return { ...completed, world, events: [] };
+  }
 
   if (step.kind === "completion_signal") {
     if (

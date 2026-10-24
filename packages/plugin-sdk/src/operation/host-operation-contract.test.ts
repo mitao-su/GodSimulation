@@ -45,7 +45,7 @@ const manual = OperationManualSchema.parse({
   taskSlots: ["HEAD"],
   parametersSchema: operationParametersJsonSchema(parametersSchema),
   target: { kind: "none" },
-  duration: { kind: "indeterminate" },
+  duration: { kind: "fixed" },
   worldPreconditions: [
     {
       failureCode: "unknown_definition",
@@ -538,7 +538,7 @@ describe("hosted operation SDK contract", () => {
       ["task slots", { taskSlots: ["BODY"] }],
       ["parameter schema", { parametersSchema: z.object({}).strict() }],
       ["target requirement", { target: { kind: "character" } }],
-      ["duration declaration", { duration: { kind: "fixed" } }],
+      ["duration declaration", { duration: { kind: "indeterminate" } }],
     ];
     for (const [message, mismatch] of mismatches) {
       expect(() =>

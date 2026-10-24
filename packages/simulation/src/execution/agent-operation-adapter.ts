@@ -376,7 +376,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     displayName: "Read",
     trigger: "active_command",
     target: { kind: "none" },
-    duration: { kind: "indeterminate" },
+    duration: { kind: "fixed" },
     taskSlots: ["HEAD"],
     eventIgnore: [],
     publicBehavior: { kind: "hidden" },
@@ -393,7 +393,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     stateSchema: ReadOperationStateSchema,
     parametersSchema: ReadOperationArgumentsSchema,
     initialState: () => ({ result: null }),
-    resolveDuration: () => ({ kind: "indeterminate" }),
+    resolveDuration: () => ({ kind: "fixed", totalTicks: 0 }),
     start: (context, operation) => {
       const { hostDefinitionId } = ReadOperationArgumentsSchema.parse(
         operation.arguments,

@@ -48,7 +48,7 @@ export const OperationDurationSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("fixed"),
-      totalTicks: z.number().int().positive(),
+      totalTicks: z.number().int().nonnegative(),
     })
     .strict(),
   z.object({ kind: z.literal("indeterminate") }).strict(),

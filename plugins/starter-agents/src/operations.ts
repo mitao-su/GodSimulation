@@ -68,7 +68,7 @@ export const starterAgentOperations = [
       taskSlots: ["HEAD"],
       parametersSchema: operationParametersJsonSchema(readSchema),
       target: { kind: "none" },
-      duration: { kind: "indeterminate" },
+      duration: { kind: "fixed" },
       worldPreconditions: [
         {
           failureCode: "unknown_host_definition",

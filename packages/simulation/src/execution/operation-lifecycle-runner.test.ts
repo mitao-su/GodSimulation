@@ -249,6 +249,72 @@ function runningWorld(): WorldState {
 }
 
 describe("hosted operation lifecycle runner", () => {
+  it("starts and completes a fixed zero-tick call in one hosted advancement", () => {
+    const fixture = fixtureRuntime();
+    const result = advanceHostedOperation(
+      runningWorld(),
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "fixed", totalTicks: 0 } }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "termination_ready",
+      operation: {
+        firstStepState: "started",
+        progressTicks: 0,
+      },
+      transaction: {
+        outcome: "completed",
+        source: "duration_elapsed",
+      },
+    });
+    expect(fixture.calls.start).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.tick).not.toHaveBeenCalled();
+    expect(fixture.calls.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes multiple zero-tick calls in one engine tick", () => {
+    const fixture = fixtureRuntime();
+    const first = runtimeCall({
+      callId: OperationCallIdSchema.parse("operation-call:zero:first"),
+      duration: { kind: "fixed", totalTicks: 0 },
+    });
+    const second = runtimeCall({
+      callId: OperationCallIdSchema.parse("operation-call:zero:second"),
+      duration: { kind: "fixed", totalTicks: 0 },
+    });
+    const base = runningWorld();
+    const agent = base.agents.get(agentId)!;
+    const world: WorldState = {
+      ...base,
+      agents: new Map(base.agents).set(agentId, {
+        ...agent,
+        taskTracks: {
+          HEAD: { kind: "operation", callId: first.callId },
+          BODY: { kind: "operation", callId: second.callId },
+        },
+        activeOperations: new Map([
+          [first.callId, first as unknown as ActiveOperation],
+          [second.callId, second as unknown as ActiveOperation],
+        ]),
+      }),
+    };
+
+    const result = runTickPipeline(world, fixture.registry);
+
+    expect(result.world.tick).toBe(world.tick + 1);
+    expect(result.world.agents.get(agentId)?.activeOperations.size).toBe(0);
+    expect(
+      result.events.filter(
+        (event) => event.type === "operation_result" && event.terminal,
+      ),
+    ).toHaveLength(2);
+    expect(fixture.calls.start).toHaveBeenCalledTimes(2);
+    expect(fixture.calls.tick).not.toHaveBeenCalled();
+    expect(fixture.calls.complete).toHaveBeenCalledTimes(2);
+  });
+
   it("runs start once, then tick and complete at the locked fixed duration", () => {
     const fixture = fixtureRuntime();
     const world = runningWorld();
@@ -615,25 +681,95 @@ describe("hosted operation lifecycle runner", () => {
     expect(fixture.calls.start).not.toHaveBeenCalled();
   });
 
-  it.each([0, -1])(
-    "rejects a fixed call with non-positive locked duration (%s)",
-    (totalTicks) => {
-      const fixture = fixtureRuntime();
-      const result = advanceHostedOperation(
-        runningWorld(),
-        fixture.registry,
-        agentId,
-        runtimeCall({ duration: { kind: "fixed", totalTicks } }),
-      );
+  it("rejects a fixed call with a negative locked duration", () => {
+    const totalTicks = -1;
+    const fixture = fixtureRuntime();
+    const result = advanceHostedOperation(
+      runningWorld(),
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "fixed", totalTicks } }),
+    );
 
-      expect(result).toMatchObject({
-        kind: "technical_failure",
-        failure: { code: "operation_duration_invalid" },
-        events: [],
-      });
-      expect(fixture.calls.start).not.toHaveBeenCalled();
-    },
-  );
+    expect(result).toMatchObject({
+      kind: "technical_failure",
+      failure: { code: "operation_duration_invalid" },
+      events: [],
+    });
+    expect(fixture.calls.start).not.toHaveBeenCalled();
+  });
+
+  it("completes an already-started zero-tick call at its locked boundary", () => {
+    const fixture = fixtureRuntime();
+    const result = advanceHostedOperation(
+      runningWorld(),
+      fixture.registry,
+      agentId,
+      runtimeCall({
+        duration: { kind: "fixed", totalTicks: 0 },
+        firstStepState: "started",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "termination_ready",
+      transaction: { outcome: "completed", source: "duration_elapsed" },
+    });
+    expect(fixture.calls.start).not.toHaveBeenCalled();
+    expect(fixture.calls.tick).not.toHaveBeenCalled();
+    expect(fixture.calls.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a fixed call with a non-integer locked duration", () => {
+    const fixture = fixtureRuntime();
+    const result = advanceHostedOperation(
+      runningWorld(),
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "fixed", totalTicks: 0.5 } }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "technical_failure",
+      failure: { code: "operation_duration_invalid" },
+      events: [],
+    });
+    expect(fixture.calls.start).not.toHaveBeenCalled();
+  });
+
+  it("rejects a fixed call with an unsafe locked duration", () => {
+    const fixture = fixtureRuntime();
+    const result = advanceHostedOperation(
+      runningWorld(),
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "fixed", totalTicks: Number.MAX_SAFE_INTEGER + 1 } }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "technical_failure",
+      failure: { code: "operation_duration_invalid" },
+      events: [],
+    });
+    expect(fixture.calls.start).not.toHaveBeenCalled();
+  });
+
+  it("rejects a pending call that has progress with a zero duration", () => {
+    const fixture = fixtureRuntime();
+    const result = advanceHostedOperation(
+      runningWorld(),
+      fixture.registry,
+      agentId,
+      runtimeCall({ duration: { kind: "fixed", totalTicks: 0 }, progressTicks: 1 }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "technical_failure",
+      failure: { code: "operation_pending_with_progress" },
+      events: [],
+    });
+    expect(fixture.calls.start).not.toHaveBeenCalled();
+  });
 
   it("rejects progress overflow before invoking lifecycle code or effects", () => {
     const tick = vi.fn(
