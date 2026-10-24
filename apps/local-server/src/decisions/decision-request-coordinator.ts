@@ -1,8 +1,6 @@
 import {
   DirectTaskDecisionSchema,
-  TaskDecisionSchema,
   ModelDecisionResultSchema,
-  resolveTaskDecision,
   TechnicalFailureSchema,
   type ModelDecisionProposal,
   type ModelDecisionRequest,
@@ -41,25 +39,16 @@ export interface DecisionRequestCoordinatorOptions {
 }
 
 function validateProposal(
-  request: ModelDecisionRequest,
+  _request: ModelDecisionRequest,
   value: ModelDecisionProposal,
 ): ModelDecisionProposal {
-  if (request.taskOptions === undefined) {
-    const direct = DirectTaskDecisionSchema.safeParse(value);
-    if (!direct.success) {
-      throw new Error(
-        "Model returned a legacy task decision without task options",
-      );
-    }
-    return direct.data;
-  }
-  const legacy = TaskDecisionSchema.safeParse(value);
-  if (!legacy.success) {
+  const direct = DirectTaskDecisionSchema.safeParse(value);
+  if (!direct.success) {
     throw new Error(
-      "Model returned a direct task decision for a legacy request with task options",
+      "Model returned a legacy task decision; production requests require a direct task decision",
     );
   }
-  return resolveTaskDecision(legacy.data, request.taskOptions).normalizedDecision;
+  return direct.data;
 }
 
 export class DecisionRequestCoordinator {
@@ -207,8 +196,7 @@ export class DecisionRequestCoordinator {
             decisionReasonCode: request.decisionReason.code,
             modelId: this.#modelId,
             status: "accepted",
-            // The legacy audit column cannot represent a direct proposal yet.
-            taskDecision: proposal.schemaVersion === 2 ? proposal : null,
+            taskDecision: proposal,
             responseReason: proposal.reason,
             latencyMs: Math.max(0, Math.round(this.#monotonicNow() - startedAt)),
             retryOfRequestId: request.retryOfRequestId ?? null,

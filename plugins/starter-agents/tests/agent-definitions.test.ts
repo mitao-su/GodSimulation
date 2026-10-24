@@ -10,6 +10,7 @@ describe("starter agent definitions", () => {
     "core.read",
     "core.recall",
     "core.speak",
+    "core.think",
     "core.wait",
   ];
 

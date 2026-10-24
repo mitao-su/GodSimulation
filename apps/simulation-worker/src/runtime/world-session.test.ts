@@ -74,7 +74,7 @@ describe("WorldSession restoration", () => {
         message.type === "decision_requested",
     );
     for (const { request } of requests) {
-      expect(request.taskOptions).toBeUndefined();
+      expect(request).not.toHaveProperty("taskOptions");
       session.handle({
         type: "decision_result",
         result: {

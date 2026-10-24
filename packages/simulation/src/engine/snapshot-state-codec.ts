@@ -24,7 +24,6 @@ import {
   OperationTargetReferenceSchema,
   OperationTerminationOutcomeSchema,
   OperationTerminationSourceSchema,
-  TaskDecisionSchema,
   TaskOptionIdSchema,
   TechnicalFailureSchema,
   WorldModeSchema,
@@ -47,7 +46,7 @@ export const SnapshotObservationKindSchema = z.enum([
 
 const OperationActionBaseShape = {
   id: z.string().min(1),
-  durationTicks: z.number().int().positive(),
+  durationTicks: z.number().int().nonnegative(),
   progressTicks: z.number().int().nonnegative(),
 };
 
@@ -304,7 +303,7 @@ const SerializedDecisionRequestSchema = z
     agentId: AgentIdSchema,
     identity: DecisionIdentitySchema,
     promptInput: DecisionPromptInputSchema,
-    acceptedProposal: z.union([DirectTaskDecisionSchema, TaskDecisionSchema]).nullable(),
+    acceptedProposal: DirectTaskDecisionSchema.nullable(),
     failure: TechnicalFailureSchema.nullable().default(null),
   })
   .strict();

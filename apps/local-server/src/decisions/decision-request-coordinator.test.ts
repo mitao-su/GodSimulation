@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  DirectTaskDecision,
-  ModelDecisionRequest,
-  TaskDecision,
-} from "@god-sim/protocol";
+import type { DirectTaskDecision, ModelDecisionRequest } from "@god-sim/protocol";
 import type { ModelCallRecord, TimelineStore } from "@god-sim/timeline";
 
 import { PersistenceWriter } from "../persistence/persistence-writer";
@@ -20,33 +16,22 @@ const request: ModelDecisionRequest = {
   pluginLockHash: "a".repeat(64) as never,
   decisionReason: { code: "initial_task", summary: "Choose" },
   messages: [{ role: "user", content: "Choose" }],
-  taskOptions: [
-    {
-      kind: "empty",
-      id: "task-option:alice:empty-head" as never,
-      label: "Clear head task",
-      taskSlots: ["HEAD"],
-      argumentSchema: {},
-    },
-    {
-      kind: "operation",
-      id: "task-option:alice:wait" as never,
-      operationId: "core.wait" as never,
-      label: "Wait",
-      taskSlots: ["BODY"],
-      argumentSchema: {},
-      fixedArguments: {},
-    },
-  ],
 };
 
-const waitDecision: TaskDecision = {
-  schemaVersion: 2,
+const waitDecision: DirectTaskDecision = {
+  schemaVersion: 3,
   head: { kind: "continue" },
   body: {
     kind: "replace",
-    taskOptionId: "task-option:alice:wait" as never,
-    arguments: { durationTicks: 10 },
+    task: {
+      kind: "operation",
+      operationId: "core.wait" as never,
+      hostEntityId: "alice" as never,
+      arguments: { durationTicks: 10 },
+    },
+  },
+  goalUpdates: {
+    updates: [{ kind: "set", goalId: "goal:rest", status: "active" }],
   },
   reason: "Alice waits",
 };
@@ -68,7 +53,7 @@ function storeWith(
 
 function coordinator(
   records: ModelCallRecord[],
-  decide: () => Promise<TaskDecision> = async () => waitDecision,
+  decide: () => Promise<DirectTaskDecision> = async () => waitDecision,
 ): DecisionRequestCoordinator {
   return new DecisionRequestCoordinator({
     provider: { decide },
@@ -84,38 +69,14 @@ function coordinator(
 }
 
 describe("DecisionRequestCoordinator", () => {
-  it("forwards direct production decisions without legacy task options", async () => {
+  it("forwards and audits a direct production decision without task options", async () => {
     const records: ModelCallRecord[] = [];
     const requests: ModelDecisionRequest[] = [];
-    const directRequest: ModelDecisionRequest = {
-      requestId: "request:direct" as never,
-      agentId: "alice" as never,
-      worldId: "starter-world" as never,
-      worldVersion: 1,
-      decisionCycleId: "cycle-direct" as never,
-      schemaVersion: 1,
-      pluginLockHash: "a".repeat(64) as never,
-      decisionReason: { code: "initial_task", summary: "Choose" },
-      messages: [{ role: "user", content: "Choose" }],
-    };
-    const directDecision: DirectTaskDecision = {
-      schemaVersion: 3,
-      head: { kind: "continue" },
-      body: {
-        kind: "replace",
-        task: {
-          kind: "operation",
-          operationId: "core.wait" as never,
-          arguments: { durationTicks: 10 },
-        },
-      },
-      reason: "Alice waits",
-    };
     const decisionCoordinator = new DecisionRequestCoordinator({
       provider: {
         async decide(requestValue) {
           requests.push(requestValue);
-          return directDecision;
+          return waitDecision;
         },
       },
       persistence: new PersistenceWriter(
@@ -128,65 +89,37 @@ describe("DecisionRequestCoordinator", () => {
       monotonicNow: () => 10,
     });
 
-    const outcome = await decisionCoordinator.decide(directRequest);
+    const outcome = await decisionCoordinator.decide(request);
 
     expect(outcome).toMatchObject({
       type: "result",
-      result: { proposal: directDecision },
+      result: { proposal: waitDecision },
     });
     expect(requests).toHaveLength(1);
     expect(requests[0]).not.toHaveProperty("taskOptions");
-    expect(records[0]).toMatchObject({ status: "accepted", taskDecision: null });
+    expect(records[0]).toMatchObject({ status: "accepted", taskDecision: waitDecision });
   });
 
-  it("normalizes synchronized fixed arguments before persistence and forwarding", async () => {
+  it("preserves direct operation identity, arguments, and goal updates in the audit record", async () => {
     const records: ModelCallRecord[] = [];
-    const synchronizedRequest: ModelDecisionRequest = {
-      ...request,
-      taskOptions: [
-        {
-          kind: "operation",
-          id: "task-option:alice:sleep" as never,
-          operationId: "core.sleep" as never,
-          label: "Sleep",
-          taskSlots: ["HEAD", "BODY"],
-          argumentSchema: {},
-          fixedArguments: { bedId: "bed-1" },
-        },
-      ],
-    };
-    const decision: TaskDecision = {
-      schemaVersion: 2,
-      head: {
-        kind: "replace",
-        taskOptionId: "task-option:alice:sleep" as never,
-        arguments: {},
-      },
-      body: {
-        kind: "replace",
-        taskOptionId: "task-option:alice:sleep" as never,
-        arguments: { bedId: "bed-1" },
-      },
-      reason: "Sleep",
-    };
-
-    const outcome = await coordinator(records, async () => decision).decide(
-      synchronizedRequest,
-    );
+    const outcome = await coordinator(records).decide(request);
 
     expect(outcome).toMatchObject({
       type: "result",
       result: {
         proposal: {
-          head: { arguments: { bedId: "bed-1" } },
-          body: { arguments: { bedId: "bed-1" } },
+          body: {
+            task: {
+              operationId: "core.wait",
+              hostEntityId: "alice",
+              arguments: { durationTicks: 10 },
+            },
+          },
+          goalUpdates: { updates: [{ goalId: "goal:rest" }] },
         },
       },
     });
-    expect(records[0]?.taskDecision).toMatchObject({
-      head: { arguments: { bedId: "bed-1" } },
-      body: { arguments: { bedId: "bed-1" } },
-    });
+    expect(records[0]?.taskDecision).toEqual(waitDecision);
   });
 
   it("does not disguise an accepted-result persistence error as a model failure", async () => {
@@ -204,9 +137,7 @@ describe("DecisionRequestCoordinator", () => {
       monotonicNow: () => 10,
     });
 
-    await expect(decisionCoordinator.decide(request)).rejects.toThrow(
-      "disk unavailable",
-    );
+    await expect(decisionCoordinator.decide(request)).rejects.toThrow("disk unavailable");
     expect(attemptedRecords).toEqual([
       expect.objectContaining({
         status: "accepted",
@@ -242,41 +173,21 @@ describe("DecisionRequestCoordinator", () => {
     expect(records[0]).not.toHaveProperty("messages");
   });
 
-  it.each([
-    {
-      name: "unoffered option",
-      proposal: {
-        ...waitDecision,
-        body: {
-          kind: "replace" as const,
-          taskOptionId: "task-option:alice:hidden" as never,
-          arguments: {},
-        },
-      },
-      message: /not offered/i,
-    },
-    {
-      name: "option on the wrong track",
-      proposal: {
-        ...waitDecision,
-        head: {
-          kind: "replace" as const,
-          taskOptionId: "task-option:alice:wait" as never,
-          arguments: {},
-        },
-        body: { kind: "continue" as const },
-      },
-      message: /does not occupy HEAD/i,
-    },
-  ])("rejects $name before recording an accepted call", async ({ proposal, message }) => {
+  it("rejects a legacy v2 proposal and records a failed call", async () => {
     const records: ModelCallRecord[] = [];
-    const decisionCoordinator = coordinator(records, async () => proposal);
+    const legacy = {
+      schemaVersion: 2,
+      head: { kind: "continue" },
+      body: { kind: "continue" },
+      reason: "Legacy response",
+    } as never;
+    const decisionCoordinator = coordinator(records, async () => legacy);
 
     const outcome = await decisionCoordinator.decide(request);
 
     expect(outcome).toMatchObject({
       type: "failure",
-      failure: { message: expect.stringMatching(message) },
+      failure: { message: expect.stringMatching(/legacy|direct/i) },
     });
     expect(records).toEqual([
       expect.objectContaining({ status: "failed", taskDecision: null }),

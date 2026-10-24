@@ -63,6 +63,8 @@ function invalidOperationCallBinding(message: string): OperationTechnicalFailure
 }
 
 const FailureDetailsSchema = z.object({}).strict();
+const ThinkOperationArgumentsSchema = z.object({}).strict();
+const ZERO_TICKS = 0;
 
 function agentOperationMounts(
   definition: AgentDefinition,
@@ -376,7 +378,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     displayName: "Read",
     trigger: "active_command",
     target: { kind: "none" },
-    duration: { kind: "indeterminate" },
+    duration: { kind: "fixed" },
     taskSlots: ["HEAD"],
     eventIgnore: [],
     publicBehavior: { kind: "hidden" },
@@ -393,7 +395,7 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     stateSchema: ReadOperationStateSchema,
     parametersSchema: ReadOperationArgumentsSchema,
     initialState: () => ({ result: null }),
-    resolveDuration: () => ({ kind: "indeterminate" }),
+    resolveDuration: () => ({ kind: "fixed", totalTicks: ZERO_TICKS }),
     start: (context, operation) => {
       const { hostDefinitionId } = ReadOperationArgumentsSchema.parse(
         operation.arguments,
@@ -456,6 +458,42 @@ function createReadRuntime(): UnboundAgentOperationRuntime {
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation.state,
     mapArbitrationFailure: (_context, _operationCall, failure) =>
+      mapOperationArbitrationFailure({}, [], failure),
+  };
+}
+
+function createThinkRuntime(): UnboundAgentOperationRuntime {
+  return {
+    id: OperationIdSchema.parse("core.think"),
+    displayName: "Think",
+    trigger: "active_command",
+    target: { kind: "none" },
+    duration: { kind: "fixed" },
+    taskSlots: ["HEAD"],
+    eventIgnore: [],
+    publicBehavior: { kind: "visible", label: "thinking" },
+    domainFailures: [],
+    arbitrationFailureMappings: {},
+    resultSchema: EMPTY_RESULT_SCHEMA,
+    stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
+    parametersSchema: ThinkOperationArgumentsSchema,
+    initialState: () => ({}),
+    resolveDuration: () => ({ kind: "fixed", totalTicks: ZERO_TICKS }),
+    start: (_context, operation) => {
+      ThinkOperationArgumentsSchema.parse(operation.arguments);
+      EMPTY_OPERATION_STATE_SCHEMA.parse(operation.state);
+      return {
+        kind: "started",
+        proposal: { effects: [] },
+        nextState: {},
+      };
+    },
+    complete: () => ({ effects: [], result: {} }),
+    fail: () => ({ effects: [], result: {} }),
+    cancel: () => ({ effects: [], result: {} }),
+    fuse: () => null,
+    acknowledgeFuseResult: (_context, operation) => operation.state,
+    mapArbitrationFailure: (_context, _operation, failure) =>
       mapOperationArbitrationFailure({}, [], failure),
   };
 }
@@ -573,6 +611,7 @@ function coreAgentOperationImplementations(): ReadonlyMap<
         ),
     }),
     createReadRuntime(),
+    createThinkRuntime(),
     unavailableRuntime({
       id: "core.recall",
       displayName: "Recall",
@@ -730,48 +769,8 @@ export function bindAgentOperationRuntime(
   return Object.freeze(runtime);
 }
 
-function operationIsMounted(
-  context: OperationRuntimeContext,
-  operationId: OperationId,
-): boolean {
-  const agent = context.world.agents.get(context.agentId);
-  if (!agent) return false;
-  const definition = context.registry.getAgent(agent.definitionId)?.definition;
-  return (
-    definition !== undefined &&
-    agentOperationMounts(definition).some(
-      (operation) => operation.operationId === operationId,
-    )
-  );
-}
-
-export function restrictLegacyAgentOperationToMounts(
-  operation: RegisteredOperation,
-): RegisteredOperation {
-  return {
-    ...operation,
-    offers: (context) =>
-      operationIsMounted(context, operation.id) ? operation.offers(context) : [],
-    canStart: (context, argumentsValue) =>
-      operationIsMounted(context, operation.id)
-        ? operation.canStart(context, argumentsValue)
-        : {
-            available: false,
-            reasonCode: "operation_not_mounted",
-            summary: `Operation ${operation.id} is not mounted on this character definition`,
-            details: {
-              summary: `Operation ${operation.id} is not mounted on this character definition`,
-            },
-          },
-  };
-}
-
 export function legacyCoreAgentOperations(): readonly RegisteredOperation[] {
-  return [
-    restrictLegacyAgentOperationToMounts(createWaitOperation()),
-    restrictLegacyAgentOperationToMounts(createObserveOperation()),
-    restrictLegacyAgentOperationToMounts(createMoveOperation()),
-  ];
+  return [createWaitOperation(), createObserveOperation(), createMoveOperation()];
 }
 
 export function mountedAgentOperationRuntimes(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DomainEventSchema,
+  type DirectTaskDecision,
   SimulationRulesLockSchema,
   WorldSnapshotCurrentSchema,
   type DomainEvent,
@@ -137,6 +138,31 @@ function modelCall(): ModelCallRecord {
   };
 }
 
+function directModelCall(): ModelCallRecord {
+  const taskDecision: DirectTaskDecision = {
+    schemaVersion: 3,
+    head: { kind: "continue" },
+    body: {
+      kind: "replace",
+      task: {
+        kind: "operation",
+        operationId: "core.wait" as never,
+        hostEntityId: "alice" as never,
+        arguments: { durationTicks: 10 },
+      },
+    },
+    goalUpdates: {
+      updates: [{ kind: "set", goalId: "goal:rest", status: "active" }],
+    },
+    reason: "Alice waits",
+  };
+  return {
+    ...modelCall(),
+    requestId: "request:direct" as never,
+    taskDecision,
+  };
+}
+
 describe("SQLite timeline store", () => {
   it("rolls back events when snapshot insertion fails", async () => {
     const store = await createSqliteTimelineStore({
@@ -248,6 +274,26 @@ describe("SQLite timeline store", () => {
             ...record.taskDecision!,
             body: { kind: "continue" },
           },
+        }),
+      ).rejects.toThrow(/model call replay conflicts/i);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("persists direct proposal bodies and goal updates in the existing audit column", async () => {
+    const store = await createSqliteTimelineStore({ filename: ":memory:" });
+    const record = directModelCall();
+    try {
+      await store.saveModelCall(record);
+      await store.saveModelCall(record);
+      await expect(
+        store.saveModelCall({
+          ...record,
+          taskDecision: {
+            ...record.taskDecision!,
+            goalUpdates: { updates: [{ kind: "delete", goalId: "goal:rest" }] },
+          } as DirectTaskDecision,
         }),
       ).rejects.toThrow(/model call replay conflicts/i);
     } finally {

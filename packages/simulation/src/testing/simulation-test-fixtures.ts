@@ -320,9 +320,8 @@ const fridgeDefinition: ObjectDefinition<FridgeState> = {
       target: { kind: "none" },
       duration: { kind: "fixed" },
       taskSlots: ["BODY"],
-      // Deliberately parameter-requiring: `available_interactions` queries
-      // cannot preview this interaction with empty arguments and must
-      // surface it as parameter-requiring instead of throwing.
+      // Deliberately parameter-requiring so validation rejects omitted mode
+      // values instead of invoking the duration resolver with invalid input.
       parametersSchema: z.object({ mode: z.enum(["eco", "turbo"]) }).strict(),
       resolveDuration: (_state, _context, parameters) => ({
         kind: "fixed",
@@ -372,6 +371,7 @@ const agentEntityTargetSchema = z
 const agentReadSchema = z
   .object({ hostDefinitionId: OperationHostDefinitionIdSchema })
   .strict();
+const agentThinkSchema = z.object({}).strict();
 const agentRecallSchema = z.object({ query: z.string().min(1) }).strict();
 const agentSpeakSchema = z
   .object({
@@ -425,13 +425,26 @@ const testAgentOperations: readonly AgentOperationDefinition[] = [
       taskSlots: ["HEAD"],
       parametersSchema: operationParametersJsonSchema(agentReadSchema),
       target: { kind: "none" },
-      duration: { kind: "indeterminate" },
+      duration: { kind: "fixed" },
       worldPreconditions: [
         {
           failureCode: "unknown_host_definition",
           description: "The requested host definition must exist.",
         },
       ],
+    },
+  },
+  {
+    operationId: "core.think" as never,
+    manual: {
+      operationId: "core.think" as never,
+      displayName: "Think",
+      summary: "Remain idle on HEAD and think without advancing world time.",
+      taskSlots: ["HEAD"],
+      parametersSchema: operationParametersJsonSchema(agentThinkSchema),
+      target: { kind: "none" },
+      duration: { kind: "fixed" },
+      worldPreconditions: [],
     },
   },
   {
@@ -529,7 +542,6 @@ const synchronizedWaitOperation: RegisteredOperation = {
   argumentsSchema: () =>
     z.object({ durationTicks: z.number().int().positive() }).strict(),
   initialState: () => ({}),
-  offers: () => [],
   canStart: () => ({ available: true }),
   resolveDuration: (_context, value) => ({
     kind: "fixed",

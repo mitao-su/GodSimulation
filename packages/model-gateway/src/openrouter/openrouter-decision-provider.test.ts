@@ -13,18 +13,7 @@ const request: ModelDecisionRequest = {
   schemaVersion: 1,
   pluginLockHash: "a".repeat(64) as never,
   decisionReason: { code: "initial_task", summary: "Choose tasks" },
-  messages: [{ role: "user", content: "Choose offered tasks" }],
-  taskOptions: [
-    {
-      kind: "operation",
-      id: "task-option:alice:wait" as never,
-      operationId: "core.wait" as never,
-      label: "Wait",
-      taskSlots: ["BODY"],
-      argumentSchema: {},
-      fixedArguments: {},
-    },
-  ],
+  messages: [{ role: "user", content: "Choose operations" }],
 };
 
 const config = {
@@ -35,7 +24,7 @@ const config = {
 };
 
 describe("OpenRouterDecisionProvider", () => {
-  it("requires and parses a complete HEAD/BODY task decision", async () => {
+  it("requires and parses a complete direct HEAD/BODY task decision", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -43,12 +32,15 @@ describe("OpenRouterDecisionProvider", () => {
             {
               message: {
                 content: JSON.stringify({
-                  schemaVersion: 2,
+                  schemaVersion: 3,
                   head: { kind: "continue" },
                   body: {
                     kind: "replace",
-                    taskOptionId: "task-option:alice:wait",
-                    arguments: { durationTicks: 10 },
+                    task: {
+                      kind: "operation",
+                      operationId: "core.wait",
+                      arguments: { durationTicks: 10 },
+                    },
                   },
                   reason: "Waiting is appropriate",
                 }),
@@ -64,12 +56,15 @@ describe("OpenRouterDecisionProvider", () => {
     await expect(
       provider.decide(request, new AbortController().signal),
     ).resolves.toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: { kind: "continue" },
       body: {
         kind: "replace",
-        taskOptionId: "task-option:alice:wait",
-        arguments: { durationTicks: 10 },
+        task: {
+          kind: "operation",
+          operationId: "core.wait",
+          arguments: { durationTicks: 10 },
+        },
       },
       reason: "Waiting is appropriate",
     });
@@ -82,6 +77,7 @@ describe("OpenRouterDecisionProvider", () => {
       response_format: {
         type: "json_schema",
         json_schema: {
+          name: "direct_task_decision",
           strict: true,
           schema: {
             required: ["schemaVersion", "head", "body", "reason"],
@@ -91,7 +87,7 @@ describe("OpenRouterDecisionProvider", () => {
     });
   });
 
-  it("rejects a legacy single-goal assistant response", async () => {
+  it("accepts the stable empty_task branch", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -99,8 +95,46 @@ describe("OpenRouterDecisionProvider", () => {
             {
               message: {
                 content: JSON.stringify({
-                  schemaVersion: 1,
-                  goalOptionId: "task-option:alice:wait",
+                  schemaVersion: 3,
+                  head: {
+                    kind: "replace",
+                    task: { kind: "empty_task" },
+                  },
+                  body: { kind: "continue" },
+                  reason: "Clear the idle track",
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const provider = new OpenRouterDecisionProvider(config, fetchImplementation);
+
+    await expect(
+      provider.decide(request, new AbortController().signal),
+    ).resolves.toMatchObject({
+      head: { kind: "replace", task: { kind: "empty_task" } },
+      body: { kind: "continue" },
+    });
+  });
+
+  it("rejects a legacy v2 assistant response", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  schemaVersion: 2,
+                  head: { kind: "continue" },
+                  body: {
+                    kind: "replace",
+                    taskOptionId: "task-option:alice:wait",
+                    arguments: {},
+                  },
                   reason: "Legacy response",
                 }),
               },

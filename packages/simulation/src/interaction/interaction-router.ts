@@ -3,13 +3,11 @@ import type {
   Coordinate,
   EntityId,
   JsonObject,
-  OperationDuration,
   TaskTrack,
 } from "@god-sim/protocol";
 import {
   InteractionContextSchema,
   type EffectProposal,
-  type InteractionAvailability,
   type InteractionDefinition,
 } from "@god-sim/plugin-sdk";
 
@@ -26,27 +24,7 @@ export type ObjectQuery =
   | {
       readonly type: "occupancy";
       readonly entityId: EntityId;
-    }
-  | {
-      readonly type: "available_interactions";
-      readonly entityId: EntityId;
-      readonly agentId: AgentId;
     };
-
-export interface InteractionQueryView {
-  readonly id: string;
-  readonly displayName: string;
-  readonly taskSlots: readonly TaskTrack[];
-  /**
-   * True when the interaction's parameters schema rejects an empty object,
-   * meaning duration and availability cannot be previewed without concrete
-   * parameters. In that case `duration` and `availability` are `null` and
-   * callers must supply real parameters through the proposal path instead.
-   */
-  readonly requiresParameters: boolean;
-  readonly duration: OperationDuration | null;
-  readonly availability: InteractionAvailability | null;
-}
 
 export type ObjectQueryResult =
   | {
@@ -54,11 +32,7 @@ export type ObjectQueryResult =
       readonly blocked: boolean;
       readonly objectIds: readonly EntityId[];
     }
-  | { readonly type: "occupancy"; readonly occupiedBy: string | null }
-  | {
-      readonly type: "available_interactions";
-      readonly interactions: readonly InteractionQueryView[];
-    };
+  | { readonly type: "occupancy"; readonly occupiedBy: string | null };
 
 function getObjectAndDefinition(
   world: WorldState,
@@ -134,50 +108,6 @@ export function queryObject(
         type: "occupancy",
         occupiedBy: spatial.occupant(query.entityId),
       };
-    case "available_interactions": {
-      const { definition, state } = getObjectAndDefinition(
-        world,
-        registry,
-        query.entityId,
-      );
-      const context = createInteractionContext(
-        world,
-        registry,
-        query.entityId,
-        query.agentId,
-      );
-      return {
-        type: "available_interactions",
-        interactions: definition.interactions.map((interaction) => {
-          // Interactions with required parameters cannot be previewed with
-          // an empty argument object; surface them as parameter-requiring
-          // entries instead of letting the schema error escape the query.
-          const parameters = interaction.parametersSchema.safeParse({});
-          if (!parameters.success) {
-            return {
-              id: interaction.id,
-              displayName: interaction.displayName,
-              taskSlots: interaction.taskSlots,
-              requiresParameters: true,
-              duration: null,
-              availability: null,
-            };
-          }
-          return {
-            id: interaction.id,
-            displayName: interaction.displayName,
-            taskSlots: interaction.taskSlots,
-            requiresParameters: false,
-            duration: interaction.resolveDuration(
-              state,
-              context,
-              parameters.data,
-            ),
-            availability: interaction.canStart(state, context, parameters.data),
-          };
-        }),
-      };
-    }
   }
 }
 

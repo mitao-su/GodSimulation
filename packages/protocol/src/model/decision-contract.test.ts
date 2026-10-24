@@ -49,28 +49,34 @@ describe("decision contract", () => {
     ).toBe(false);
   });
 
-  it("accepts a complete decision for both task tracks", () => {
+  it("accepts a direct operation decision for both task tracks", () => {
     expect(
       ModelDecisionResultSchema.parse({
         ...identity,
         proposal: {
-          schemaVersion: 2,
+          schemaVersion: 3,
           head: { kind: "continue" },
           body: {
             kind: "replace",
-            taskOptionId: "task-option:alice:wait",
-            arguments: { durationTicks: 10 },
+            task: {
+              kind: "operation",
+              operationId: "core.wait",
+              arguments: { durationTicks: 10 },
+            },
           },
           reason: "Wait briefly",
         },
       }).proposal,
     ).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       head: { kind: "continue" },
       body: {
         kind: "replace",
-        taskOptionId: "task-option:alice:wait",
-        arguments: { durationTicks: 10 },
+        task: {
+          kind: "operation",
+          operationId: "core.wait",
+          arguments: { durationTicks: 10 },
+        },
       },
       reason: "Wait briefly",
     });
@@ -81,7 +87,7 @@ describe("decision contract", () => {
       ModelDecisionResultSchema.safeParse({
         requestId: "request-1",
         proposal: {
-          schemaVersion: 2,
+          schemaVersion: 3,
           head: { kind: "continue" },
           body: { kind: "continue" },
           reason: "Continue",
@@ -90,7 +96,7 @@ describe("decision contract", () => {
     ).toBe(false);
   });
 
-  it("accepts active tasks and task options in subjective prompt input", () => {
+  it("accepts active tasks without dynamic task options in subjective prompt input", () => {
     const parsed = DecisionPromptInputSchema.parse({
       ...identity,
       decisionReason: { code: "initial_task", summary: "Choose initial tasks" },
@@ -102,11 +108,10 @@ describe("decision contract", () => {
         visibleEntities: [],
         heardEvents: [],
       },
-      taskOptions: [waitOption],
     });
 
     expect(parsed.activeTasks).toEqual(emptyActiveTasks);
-    expect(parsed.taskOptions).toEqual([waitOption]);
+    expect(parsed).not.toHaveProperty("taskOptions");
   });
 
   it("rejects legacy goal fields and objective world state in current input", () => {
@@ -121,8 +126,12 @@ describe("decision contract", () => {
         visibleEntities: [],
         heardEvents: [],
       },
-      taskOptions: [waitOption],
     };
+
+    expect(
+      DecisionPromptInputSchema.safeParse({ ...base, taskOptions: [waitOption] })
+        .success,
+    ).toBe(false);
 
     expect(
       DecisionPromptInputSchema.safeParse({

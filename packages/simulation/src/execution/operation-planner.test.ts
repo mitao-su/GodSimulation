@@ -12,7 +12,7 @@ import {
   type TaskOption,
 } from "@god-sim/protocol";
 
-import { buildTaskOptions } from "./operation-catalog";
+import { legacyTaskOptionsFor } from "../testing/legacy-task-options";
 import { createObjectInteractionOperation } from "./object-interaction-adapter";
 import { prepareOperationCall } from "./operation-planner";
 import {
@@ -123,7 +123,7 @@ describe("operation planner", () => {
   it("prepares move as one indeterminate BODY operation", () => {
     const world = knownFridgeWorld(false);
     const option = operationOption(
-      buildTaskOptions(world, testPluginRegistry, "alice" as never),
+      legacyTaskOptionsFor(world, testPluginRegistry, "alice" as never),
       "core.move",
     );
 
@@ -148,7 +148,7 @@ describe("operation planner", () => {
   it("never inserts movement into an object interaction operation", () => {
     const world = knownFridgeWorld(true);
     const option = operationOption(
-      buildTaskOptions(world, testPluginRegistry, "alice" as never),
+      legacyTaskOptionsFor(world, testPluginRegistry, "alice" as never),
       "object.test.fridge.use",
     );
 
@@ -178,7 +178,7 @@ describe("operation planner", () => {
     operations.set(registered.id, registered);
     try {
       const world = knownFridgeWorld(true);
-      const options = buildTaskOptions(
+      const options = legacyTaskOptionsFor(
         world,
         testPluginRegistry,
         "alice" as never,
@@ -235,7 +235,7 @@ describe("operation planner", () => {
 
   it("uses world-locked timing for wait and observe", () => {
     const world = knownFridgeWorld(true);
-    const options = buildTaskOptions(world, testPluginRegistry, "alice" as never);
+    const options = legacyTaskOptionsFor(world, testPluginRegistry, "alice" as never);
     const wait = operationOption(options, "core.wait");
     const observe = operationOption(options, "core.observe");
 
@@ -262,14 +262,14 @@ describe("operation planner", () => {
     });
     expect(observing.kind === "prepared" && observing.operation.duration).toEqual({
       kind: "fixed",
-      totalTicks: 1,
+      totalTicks: 0,
     });
   });
 
   it("resolves every core duration through the registered runtime", () => {
     const world = knownFridgeWorld(true);
     const wait = operationOption(
-      buildTaskOptions(world, testPluginRegistry, "alice" as never),
+      legacyTaskOptionsFor(world, testPluginRegistry, "alice" as never),
       "core.wait",
     );
     const registered = testPluginRegistry.getOperation("core.wait")!;

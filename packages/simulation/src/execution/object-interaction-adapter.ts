@@ -12,7 +12,6 @@ import {
   EntityIdSchema,
   OperationDurationSchema,
   OperationIdSchema,
-  type EntityId,
   type JsonObject,
   type OperationId,
   type OperationTechnicalFailure,
@@ -21,8 +20,6 @@ import {
 import {
   EMPTY_OPERATION_STATE_SCHEMA,
   blocked,
-  isAtInteractionPosition,
-  knownObjects,
 } from "./core/core-operation-helpers";
 import type {
   HostedOperationRuntime,
@@ -89,21 +86,6 @@ function hostedDomainFailure(
   };
 }
 
-function interactionIsKnownUnavailable(
-  context: OperationRuntimeContext,
-  entityId: EntityId,
-  interactionId: string,
-): boolean {
-  return (
-    context.world.agents
-      .get(context.agentId)
-      ?.knowledge.objects.get(entityId)
-      ?.interactionAvailability.some(
-        (entry) => entry.interactionId === interactionId && !entry.available,
-      ) ?? false
-  );
-}
-
 function interactionBinding<State>(
   context: OperationRuntimeContext,
   definition: ObjectDefinition<State>,
@@ -155,25 +137,6 @@ export function createObjectInteractionOperation<State>(
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => argumentsSchema,
     initialState: () => ({}),
-    offers: (context) =>
-      knownObjects(context).flatMap((known) => {
-        const object = context.world.objects.get(known.entityId);
-        if (
-          !object ||
-          object.definitionId !== definition.id ||
-          !isAtInteractionPosition(context, object.id) ||
-          interactionIsKnownUnavailable(context, object.id, interaction.id)
-        ) {
-          return [];
-        }
-        return [
-          {
-            id: `task-option:${context.agentId}:${object.id}:${interaction.id}`,
-            label: interaction.displayName,
-            fixedArguments: { targetEntityId: object.id },
-          },
-        ];
-      }),
     canStart: (context, value) => {
       const binding = interactionBinding(context, definition, interaction, value);
       if (!binding) {

@@ -1,10 +1,8 @@
 import {
   EntityIdSchema,
-  TaskDecisionSchema,
   WorldViewSchema,
   type AgentId,
   type DomainEvent,
-  type TaskDecision,
   type WorldView,
 } from "@god-sim/protocol";
 import { ObservationContextSchema } from "@god-sim/plugin-sdk";
@@ -31,7 +29,10 @@ function decisionTrackProposal(
       return { kind: "continue", label: `Continue current ${track} task` };
     }
     if (directSelection.task.kind === "empty_task") {
-      return { kind: "replace", task: { kind: "empty_task" } };
+      return {
+        kind: "replace",
+        task: { kind: "empty_task" },
+      };
     }
     return {
       kind: "replace",
@@ -45,27 +46,7 @@ function decisionTrackProposal(
       },
     };
   }
-  const legacy = TaskDecisionSchema.parse(proposal) as TaskDecision;
-  const legacySelection = track === "HEAD" ? legacy.head : legacy.body;
-  if (legacySelection.kind !== "replace") {
-    return { kind: "continue", label: `Continue current ${track} task` };
-  }
-  const options = request.promptInput.taskOptions;
-  if (!options) {
-    throw new Error(`Accepted decision for ${track} has no direct operation reference`);
-  }
-  const option = options.find((candidate) => candidate.id === legacySelection.taskOptionId);
-  if (!option) throw new Error(`Accepted decision references missing task option ${legacySelection.taskOptionId}`);
-  return option.kind === "empty"
-    ? { kind: "replace", task: { kind: "empty_task" } }
-    : {
-        kind: "replace",
-        task: {
-          kind: "operation",
-          operationId: option.operationId,
-          arguments: legacySelection.arguments,
-        },
-      };
+  throw new Error(`Accepted decision for ${track} is not a direct task decision`);
 }
 
 function pauseReason(world: WorldState): WorldView["pauseReason"] {

@@ -49,13 +49,6 @@ export function createWaitOperation(): RegisteredOperation {
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema,
     initialState: () => ({}),
-    offers: (context) => [
-      {
-        id: `task-option:${context.agentId}:wait`,
-        label: "Wait",
-        fixedArguments: {},
-      },
-    ],
     canStart: (context, value) =>
       argumentsSchema(context).safeParse(value).success
         ? AVAILABLE

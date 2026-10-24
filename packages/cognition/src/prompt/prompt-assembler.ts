@@ -69,9 +69,9 @@ export function assembleDecisionRequest(
     "core_rules",
     [
       "Return one decision for HEAD and one decision for BODY.",
-      "For each track, either continue its current task or replace it with an empty_task or a direct operation reference.",
+      "For each track, either continue its current task, clear it with the stable empty_task branch, or replace it with a direct operation reference. Use core.think for HEAD idle and core.wait for BODY idle when an explicit idle operation is appropriate.",
       "Do not invent dynamic task options. Query a host definition with the character's HEAD read operation when you need an operation manual.",
-      "An empty_task is a stable empty branch and never creates an operation call.",
+      "An empty_task never creates an operation call; operation choices must use the operation's declared arguments.",
       "Use only the character's listed sensations, memories, perception, and active tasks.",
       "Do not invent hidden world facts or execution steps; the program handles movement and interaction.",
       "Return only the required JSON object.",

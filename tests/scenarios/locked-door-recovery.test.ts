@@ -11,7 +11,6 @@ import {
 } from "@god-sim/plugin-sdk";
 import {
   acceptDecisionResult,
-  buildTaskOptions,
   createSimulationRegistry,
   loadWorldDefinition,
   prepareOperationCall,
@@ -767,31 +766,22 @@ describe("capability-based traversal recovery", () => {
 
   it("keeps the traversal cancel result out of a cancelled move terminal result", () => {
     const active = activateTraversal(resultingWorld(), resultingRegistry, true);
-    const taskOptions = buildTaskOptions(active, resultingRegistry, "alice" as never);
-    const emptyBody = taskOptions.find(
-      (option) => option.kind === "empty" && option.taskSlots[0] === "BODY",
-    )!;
     const thinking = requestDecisions(active, [
       {
         agentId: "alice" as never,
         reason: { code: "test_cancel", summary: "Stop movement" },
-        taskOptions,
       },
     ]).world;
     const request = thinking.decisionCycle!.requests.get("alice" as never)!;
     const accepted = acceptDecisionResult(thinking, {
       ...request.identity,
       proposal: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         head: { kind: "continue" },
-        body: {
-          kind: "replace",
-          taskOptionId: emptyBody.id,
-          arguments: {},
-        },
+        body: { kind: "replace", task: { kind: "empty_task" } },
         reason: "Stop moving",
       },
-    });
+    }, resultingRegistry);
     expect(accepted.accepted).toBe(true);
 
     const released = releaseDecisionCycle(accepted.world, resultingRegistry);

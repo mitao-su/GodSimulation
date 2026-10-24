@@ -1,6 +1,7 @@
 import type {
   AgentId,
   DecisionCycleId,
+  DirectTaskDecision,
   PluginLockHash,
   RequestId,
   TaskDecision,
@@ -18,7 +19,8 @@ export interface ModelCallRecord {
   readonly decisionReasonCode: string;
   readonly modelId: string;
   readonly status: "accepted" | "failed" | "rejected";
-  readonly taskDecision: TaskDecision | null;
+  /** 新请求记录 direct proposal；旧 v2 记录仍可回放。 */
+  readonly taskDecision: TaskDecision | DirectTaskDecision | null;
   readonly responseReason: string | null;
   readonly latencyMs: number;
   readonly retryOfRequestId: RequestId | null;

@@ -42,24 +42,6 @@ const input = DecisionPromptInputSchema.parse({
     },
   ],
   perception: { zoneId: "living-room", visibleEntities: [], heardEvents: [] },
-  taskOptions: [
-    {
-      kind: "empty",
-      id: "task-option:alice:empty-head",
-      label: "Clear head task",
-      taskSlots: ["HEAD"],
-      argumentSchema: {},
-    },
-    {
-      kind: "operation",
-      id: "task-option:alice:wait",
-      operationId: "core.wait",
-      label: "Wait",
-      taskSlots: ["BODY"],
-      argumentSchema: {},
-      fixedArguments: {},
-    },
-  ],
 });
 
 const alice: AgentDefinition = {
@@ -101,6 +83,7 @@ describe("assembleDecisionRequest", () => {
     expect(prompt).not.toContain("occupied by Bob");
     expect(prompt).toContain('"head"');
     expect(prompt).toContain('"body"');
+    expect(prompt).toContain("empty_task");
     expect(request).not.toHaveProperty("taskOptions");
     expect(prompt).not.toContain("task-option:alice:wait");
   });

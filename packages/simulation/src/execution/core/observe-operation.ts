@@ -5,10 +5,11 @@ import {
   EMPTY_OPERATION_STATE_SCHEMA,
   EMPTY_RESULT_SCHEMA,
   ENTITY_TARGET_ARGUMENTS_SCHEMA,
-  knownObjects,
   targetObject,
 } from "./core-operation-helpers";
 import type { RegisteredOperation } from "../operation-runtime";
+
+const ZERO_TICKS = 0;
 
 export function createObserveOperation(): RegisteredOperation {
   return {
@@ -25,25 +26,6 @@ export function createObserveOperation(): RegisteredOperation {
     stateSchema: EMPTY_OPERATION_STATE_SCHEMA,
     argumentsSchema: () => ENTITY_TARGET_ARGUMENTS_SCHEMA,
     initialState: () => ({}),
-    offers: (context) => {
-      const agent = context.world.agents.get(context.agentId)!;
-      return knownObjects(context)
-        .filter((object) => agent.knowledge.visibleEntityIds.has(object.entityId))
-        .flatMap((object) => {
-          const definition = context.registry.getObject(
-            context.world.objects.get(object.entityId)?.definitionId ?? "",
-          )?.definition;
-          return definition
-            ? [
-                {
-                  id: `task-option:${context.agentId}:${object.entityId}:observe`,
-                  label: `Observe ${definition.displayName}`,
-                  fixedArguments: { targetEntityId: object.entityId },
-                },
-              ]
-            : [];
-        });
-    },
     canStart: (context, value) => {
       const object = targetObject(context, value);
       const targetEntityId = ENTITY_TARGET_ARGUMENTS_SCHEMA.safeParse(value).data
@@ -60,10 +42,9 @@ export function createObserveOperation(): RegisteredOperation {
             details: { summary: `${targetEntityId ?? "Target"} is not currently visible` },
           };
     },
-    resolveDuration: (context) => ({
+    resolveDuration: () => ({
       kind: "fixed",
-      totalTicks:
-        context.world.simulationRulesLock.rules.operations.observe.durationTicks,
+      totalTicks: ZERO_TICKS,
     }),
     createPlan: (_context, value, callId, duration) => {
       if (duration.kind !== "fixed") {
@@ -89,10 +70,9 @@ export function createObserveOperation(): RegisteredOperation {
     fuse: () => null,
     acknowledgeFuseResult: (_context, operation) => operation,
     terminalResult: () => ({}),
-    validateRestored: (context, operation) => {
+    validateRestored: (_context, operation) => {
       const parsed = ENTITY_TARGET_ARGUMENTS_SCHEMA.parse(operation.arguments);
-      const expectedTicks =
-        context.world.simulationRulesLock.rules.operations.observe.durationTicks;
+      const expectedTicks = ZERO_TICKS;
       const action = operation.plan.actions[0];
       if (
         operation.duration.kind !== "fixed" ||

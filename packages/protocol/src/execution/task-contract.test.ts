@@ -15,15 +15,19 @@ describe("task execution contract", () => {
     expect(TaskTrackSchema.safeParse("HANDS").success).toBe(false);
   });
 
-  it("accepts only fixed positive or indeterminate operation durations", () => {
+  it("accepts fixed non-negative or indeterminate operation durations", () => {
     expect(
       OperationDurationSchema.parse({ kind: "fixed", totalTicks: 3 }),
     ).toEqual({ kind: "fixed", totalTicks: 3 });
     expect(OperationDurationSchema.parse({ kind: "indeterminate" })).toEqual({
       kind: "indeterminate",
     });
+    expect(OperationDurationSchema.parse({ kind: "fixed", totalTicks: 0 })).toEqual({
+      kind: "fixed",
+      totalTicks: 0,
+    });
     expect(
-      OperationDurationSchema.safeParse({ kind: "fixed", totalTicks: 0 })
+      OperationDurationSchema.safeParse({ kind: "fixed", totalTicks: -1 })
         .success,
     ).toBe(false);
   });

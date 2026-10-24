@@ -4,6 +4,7 @@ import { Kysely, SqliteDialect, type Selectable, type Transaction } from "kysely
 import {
   CheckpointIdSchema,
   DomainEventSchema,
+  DirectTaskDecisionSchema,
   PluginLockSchema,
   TaskDecisionSchema,
   TechnicalFailureSchema,
@@ -364,7 +365,7 @@ class SqliteTimelineStore implements ArchiveTimelineStore {
     const taskDecision =
       record.taskDecision === null
         ? null
-        : TaskDecisionSchema.parse(record.taskDecision);
+        : DirectTaskDecisionSchema.or(TaskDecisionSchema).parse(record.taskDecision);
     await this.#db.transaction().execute(async (transaction) => {
       await ensureWorld(transaction, record.worldId);
       const values = {

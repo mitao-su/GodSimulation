@@ -13,8 +13,6 @@ import {
 } from "../identity/ids";
 import {
   ActiveTasksContextSchema,
-  TaskDecisionSchema,
-  TaskOptionSchema,
 } from "../execution/task-contract";
 import { DirectTaskDecisionSchema } from "../execution/host-operation-contract";
 import { OperationTerminationOutcomeSchema } from "../events/operation-terminated.event";
@@ -131,10 +129,6 @@ export type SubjectiveDecisionContext = z.infer<typeof SubjectiveDecisionContext
 
 export const DecisionPromptInputSchema = DecisionIdentitySchema.extend({
   ...SubjectiveDecisionContextSchema.shape,
-  /**
-   * 旧快照兼容字段。生产请求不会生成或发送动态候选；P3 迁移完成后删除。
-   */
-  taskOptions: z.array(TaskOptionSchema).min(1).optional(),
 }).strict();
 
 export type DecisionPromptInput = z.infer<typeof DecisionPromptInputSchema>;
@@ -149,8 +143,6 @@ export const ModelMessageSchema = z
 export const ModelDecisionRequestSchema = DecisionIdentitySchema.extend({
   decisionReason: DecisionReasonSchema,
   messages: z.array(ModelMessageSchema).min(1),
-  /** 旧调用记录读取兼容；新的 assembler 不再写入该字段。 */
-  taskOptions: z.array(TaskOptionSchema).min(1).optional(),
 }).strict();
 
 export type ModelDecisionRequest = z.infer<typeof ModelDecisionRequestSchema>;
@@ -158,7 +150,6 @@ export type ModelDecisionRequest = z.infer<typeof ModelDecisionRequestSchema>;
 /** 当前生产协议使用 direct decision；旧 v2 任务决策只保留在迁移/回放边界。 */
 export const ModelDecisionProposalSchema = z.union([
   DirectTaskDecisionSchema,
-  TaskDecisionSchema,
 ]);
 export type ModelDecisionProposal = z.infer<typeof ModelDecisionProposalSchema>;
 

@@ -107,7 +107,7 @@ describe("WorkerMessageHandler", () => {
         message.type === "decision_requested",
     );
     for (const { request } of requests) {
-      expect(request.taskOptions).toBeUndefined();
+      expect(request).not.toHaveProperty("taskOptions");
       handler.handle({
         type: "decision_result",
         result: {

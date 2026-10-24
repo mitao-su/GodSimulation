@@ -4,7 +4,6 @@ import {
   JsonValueSchema,
   WorldSnapshotSchema,
   DirectTaskDecisionSchema,
-  TaskDecisionSchema,
   type AgentId,
   type EntityId,
   type OperationCallId,
@@ -222,33 +221,7 @@ function restoreDecisionCycle(
     ) {
       throw new Error(`Snapshot decision identity is inconsistent for ${agentId}`);
     }
-    if (
-      request.acceptedProposal !== null &&
-      TaskDecisionSchema.safeParse(request.acceptedProposal).success
-    ) {
-      const legacyProposal = TaskDecisionSchema.parse(request.acceptedProposal);
-      const legacyTaskOptions = prompt.taskOptions;
-      if (!legacyTaskOptions) {
-        throw new Error(
-          `Snapshot decision for ${agentId} has a legacy proposal without task options`,
-        );
-      }
-      for (const selection of [
-        legacyProposal.head,
-        legacyProposal.body,
-      ]) {
-        if (
-          selection.kind === "replace" &&
-          !legacyTaskOptions.some(
-            (option) => option.id === selection.taskOptionId,
-          )
-        ) {
-          throw new Error(
-            `Snapshot decision for ${agentId} accepted an unoffered task`,
-          );
-        }
-      }
-    } else if (request.acceptedProposal !== null) {
+    if (request.acceptedProposal !== null) {
       DirectTaskDecisionSchema.parse(request.acceptedProposal);
     }
     const requestFailure =
