@@ -1,7 +1,10 @@
 # Third-Party Asset Notices
 
 This repository includes selected visual assets only for use as part of the God Simulation game.
-The original asset packs, archives, mock scenes, and unused sprites are not redistributed here.
+The original asset packs and archives are not redistributed here. The default Starter Home
+uses the Modern Pixel atlases documented in
+[Starter Home modern pixel apartment](docs/architecture/visual-overhaul/modern-pixel-apartment.md).
+The legacy PNGs listed below remain in the repository for the historical visual audit.
 
 ## Pixel 16 Interiors
 
@@ -23,9 +26,9 @@ The original asset packs, archives, mock scenes, and unused sprites are not redi
 - Supplied license permits personal and commercial game use, modification, and distribution as
   part of a game, while prohibiting standalone asset redistribution, generative-AI training,
   AI-service use, and crypto/blockchain/NFT use.
-- Project use: these images are rendered only as game sprites. They are not sent to a model or
-  used for model training. The project maintainer reports that the creator expressly confirmed
-  this open-source game's use of the sprites.
+- Project use: these images were rendered only as game sprites and are still referenced by the
+  visual audit. They are not sent to a model or used for model training. The project maintainer
+  reports that the creator expressly confirmed this open-source game's use of the sprites.
 
 All rights not covered by the supplied licenses or the recorded project-specific permissions
 remain with their respective copyright holders.

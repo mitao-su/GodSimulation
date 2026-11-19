@@ -1,7 +1,6 @@
 # 视觉升级（Visual Overhaul）调研索引与决策记录
 
-> 调研日期：2026-10-23。本轮**只读调研**，未修改任何源码、素材与测试。
-> 状态：调研阶段收尾（用户决定「调研先到这里」）；实施尚未开始。
+> 以下保留 2026-10-23 的调研结论。Starter Home 现已接入[现代像素公寓图集](modern-pixel-apartment.md)，这一版使用项目生成和修整的素材。
 
 ## 文件索引
 
@@ -10,6 +9,7 @@
 | [render-audit.md](render-audit.md) | 渲染管线 + 地图编排审计：4 类破绽的逐项证据（file:line / 像素测量）、图集帧勘误表、目标渲染架构（L0–L7、y-sort、墙体系统、autotile、相机）、P0/P1/P2 落地计划与测试策略 |
 | [asset-candidates.md](asset-candidates.md) | 15 个公寓/室内像素素材库调研：规格、价格、授权原文摘录、能否提交进公开仓库、5 种合规落地方式、Top 2 推荐、素材替换工程改造清单 |
 | [scene-mock.md](scene-mock.md) | 用现有素材手工重编排的单房间 mock、素材来源标注图、素材缺口清单、manifest 勘误 |
+| [modern-pixel-apartment.md](modern-pixel-apartment.md) | 新版 Starter Home 实景、图集规格、素材制作方式与复用约定 |
 | [images/](images/) | 审计配图与 mock 产出（8 张） |
 
 ## 已确认结论（供后续实施直接引用）
@@ -21,8 +21,7 @@
 5. **下一步（用户选择：先定素材库，再做风格验证 mock）**：需要先购买并下载 LimeZu 包，再用它 + Memao 角色制作卧室/客厅/厨房/卫生间风格验证 mock，确认 48×48 角色与 16px 家具的比例、以及目标观感，之后才动渲染管线（P0/P1 计划已备好）。
 6. **风格备注（2026-10-23 用户反馈）**：现有 mock「少了点公寓的感觉，没有个人房间」——后续场景编排需要体现「个人房间」属性（各房间的功能区分、个人物品/生活痕迹），不能只做成家具陈列 demo。
 
-## 仍未做 / 待用户提供
+## 原调研方案的后续事项
 
 - LimeZu 素材包（购买后建议放 `workspace/external-assets/limezu-modern-interiors/`；该目录已被 gitignore，不会进仓库）。
 - 素材验证 mock（角色比例 + 观感确认）完成前不动 P0 代码。
-- 本轮 3 份文档尚未提交 git；实施前按仓库纪律从最新 `main` 切分支、随首个功能 PR 一并入库。

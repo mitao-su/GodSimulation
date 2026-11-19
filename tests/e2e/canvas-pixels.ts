@@ -63,3 +63,31 @@ export async function inspectNonBackgroundCanvasPixels(
 export async function countNonBackgroundCanvasPixels(page: Page): Promise<number> {
   return (await inspectNonBackgroundCanvasPixels(page)).count;
 }
+
+export async function readWorldTilePixels(
+  page: Page,
+  cell: { readonly x: number; readonly y: number },
+  map: { readonly width: number; readonly height: number },
+): Promise<number[]> {
+  const margins = await inspectNonBackgroundCanvasPixels(page);
+  return page.locator("canvas").evaluate((canvas, { cell, map, margins }) => {
+    const source = canvas as HTMLCanvasElement;
+    const bounds = source.getBoundingClientRect();
+    const xScale = source.width / bounds.width;
+    const yScale = source.height / bounds.height;
+    const mapLeft = margins.leftMargin * xScale;
+    const mapTop = margins.topMargin * yScale;
+    const cellWidth = (source.width - mapLeft - margins.rightMargin * xScale) / map.width;
+    const cellHeight = (source.height - mapTop - margins.bottomMargin * yScale) / map.height;
+    const tile = document.createElement("canvas");
+    tile.width = tile.height = 16;
+    const ctx = tile.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Unable to sample a tile from the world canvas");
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      source, mapLeft + cell.x * cellWidth, mapTop + cell.y * cellHeight,
+      cellWidth, cellHeight, 0, 0, tile.width, tile.height,
+    );
+    return Array.from(ctx.getImageData(0, 0, tile.width, tile.height).data);
+  }, { cell, map, margins });
+}

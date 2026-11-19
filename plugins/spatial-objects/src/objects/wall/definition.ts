@@ -12,7 +12,7 @@ export const wallDefinition: ObjectDefinition<WallState> = {
   capabilities: ["approachable", "observable"],
   stateSchema: WallStateSchema,
   initialState: () => ({}),
-  resourceId: "pixel-16-interiors.wall",
+  resourceId: "modern-pixel.wall",
   placement: {
     kind: "cell",
     footprint: [{ x: 0, y: 0 }],

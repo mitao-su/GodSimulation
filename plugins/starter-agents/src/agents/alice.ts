@@ -17,7 +17,7 @@ export const aliceDefinition: AgentDefinition = {
     { id: "alice-knows-kitchen", summary: "The refrigerator is in the kitchen." },
     { id: "alice-knows-bathroom", summary: "The toilet is in the bathroom." },
   ],
-  resourceId: "starter-agents.memao.alice",
-  animationSetId: "starter-agents.memao.humanoid",
+  resourceId: "starter-agents.modern-pixel.alice",
+  animationSetId: "starter-agents.modern-pixel.humanoid",
   operations: starterAgentOperations,
 };

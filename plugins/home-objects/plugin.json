@@ -5,6 +5,11 @@
   "stateVersion": 1,
   "engineApiVersion": 1,
   "entry": "./dist/index.js",
-  "objectDefinitionIds": ["home.refrigerator", "home.toilet"],
+  "objectDefinitionIds": [
+    "home.refrigerator", "home.toilet", "home.bookcase", "home.sofa", "home.plant",
+    "home.coffee-table", "home.records", "home.media-stand", "home.wardrobe", "home.bed",
+    "home.nightstand", "home.desk", "home.chair", "home.cooktop", "home.counter",
+    "home.sink", "home.bathtub", "home.vanity", "home.washer"
+  ],
   "agentDefinitionIds": []
 }

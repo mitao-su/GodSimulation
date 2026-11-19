@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadLocalConfig } from "../../apps/local-server/src/config/local-config";
 import { startLocalServer } from "../../apps/local-server/src/bootstrap/start-local-server";
+import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const temporaryDirectories: string[] = [];
@@ -36,7 +37,7 @@ describe("local server startup", () => {
         const response = await running.app.inject({ method: "GET", url: "/api/world" });
         expect(response.statusCode).toBe(200);
         expect(response.json()).toMatchObject({
-          worldId: "starter-world",
+          worldId: starterHome.id,
           worldTick: 0,
           mode: "READY_FOR_RELEASE",
         });

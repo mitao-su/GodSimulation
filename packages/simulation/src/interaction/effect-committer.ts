@@ -3,6 +3,7 @@ import { EffectProposalSchema, type EffectProposal } from "@god-sim/plugin-sdk";
 
 import { createEffectEvents, type EventChange, type EventMetadata } from "./domain-event-factory";
 import type { PluginRegistry } from "../world/plugin-registry";
+import { facingToward } from "../world/facing";
 import { SpatialIndex } from "../world/spatial-index";
 import { hasElapsedMoveStep } from "../execution/core/hosted-move-state";
 import { bladderSensation, type WorldState } from "../world/world-state";
@@ -86,7 +87,11 @@ export function commitProposal(
           if (!hasElapsedMoveStep(operation.state, world.simulationRulesLock.rules.operations.move.ticksPerCell)) {
             return rejected(world, effectIndex, "movement_too_early", "Movement has not consumed a cell's travel time.");
           }
-          agents.set(effect.agentId, { ...agent, position: effect.to });
+          agents.set(effect.agentId, {
+            ...agent,
+            position: effect.to,
+            facing: facingToward(effect.from, effect.to) ?? agent.facing,
+          });
         } else {
           const object = objects.get(effect.entityId);
           const definition = object && registry.getObject(object.definitionId)?.definition;

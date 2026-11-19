@@ -23,7 +23,9 @@ export interface AssetAnchor {
 export interface StaticAssetResource {
   readonly id: string;
   readonly anchor: AssetAnchor;
+  readonly gridAnchor?: AssetAnchor;
   readonly frames: Readonly<Record<string, AssetFrame>>;
+  readonly connectionGroup?: string;
 }
 
 export interface CharacterSheet extends AssetSheet {
@@ -50,6 +52,7 @@ export interface AnimationSet {
 }
 
 export interface AssetCatalog {
+  readonly pixelsPerTile: number;
   readonly sheets: ReadonlyMap<string, AssetSheet>;
   readonly staticResources: ReadonlyMap<string, StaticAssetResource>;
   readonly characterSheets: ReadonlyMap<string, CharacterSheet>;
@@ -91,10 +94,13 @@ function integer(value: unknown, label: string, minimum = 0): number {
   return parsed;
 }
 
-function anchor(value: unknown, label: string): AssetAnchor {
+function point(value: unknown, label: string): AssetAnchor {
   const parsed = record(value, label);
-  const x = number(parsed.x, `${label}.x`);
-  const y = number(parsed.y, `${label}.y`);
+  return { x: number(parsed.x, `${label}.x`), y: number(parsed.y, `${label}.y`) };
+}
+
+function anchor(value: unknown, label: string): AssetAnchor {
+  const { x, y } = point(value, label);
   if (x > 1 || y > 1) throw new Error(`${label} values must be between 0 and 1`);
   return { x, y };
 }
@@ -143,6 +149,15 @@ export function parseAssetCatalog(
   const animationManifest = record(animationManifestValue, "animationManifest");
   assertSchemaVersion(assetManifest, "assetManifest");
   assertSchemaVersion(animationManifest, "animationManifest");
+  const pixelsPerTile = integer(assetManifest.pixelsPerTile, "assetManifest.pixelsPerTile", 1);
+  const characterPixelsPerTile = integer(
+    animationManifest.pixelsPerTile,
+    "animationManifest.pixelsPerTile",
+    1,
+  );
+  if (characterPixelsPerTile !== pixelsPerTile) {
+    throw new Error("Static and character atlases must use the same tile density");
+  }
 
   const sheets = new Map<string, AssetSheet>();
   for (const [index, sheetValue] of array(assetManifest.sheets, "assetManifest.sheets").entries()) {
@@ -169,7 +184,17 @@ export function parseAssetCatalog(
     }
     uniqueSet(
       staticResources,
-      { id, anchor: anchor(parsed.anchor, `${id}.anchor`), frames },
+      {
+        id,
+        anchor: anchor(parsed.anchor, `${id}.anchor`),
+        ...(parsed.gridAnchor === undefined
+          ? {}
+          : { gridAnchor: point(parsed.gridAnchor, `${id}.gridAnchor`) }),
+        frames,
+        ...(parsed.connectionGroup === undefined
+          ? {}
+          : { connectionGroup: string(parsed.connectionGroup, `${id}.connectionGroup`) }),
+      },
       "static resource ID",
     );
   }
@@ -261,5 +286,5 @@ export function parseAssetCatalog(
     characterResources.set(resource.resourceId, resource);
   }
 
-  return { sheets, staticResources, characterSheets, characterResources, animationSets };
+  return { pixelsPerTile, sheets, staticResources, characterSheets, characterResources, animationSets };
 }

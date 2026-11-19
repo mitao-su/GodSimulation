@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "starter-world",
+  "id": "starter-world-modern-pixel",
   "name": "Starter Home",
   "rules": { "id": "default", "version": 1 },
   "tileSize": 16,
@@ -17,7 +17,7 @@
       "y": 0,
       "width": 9,
       "height": 6,
-      "resourceId": "pixel-16-interiors.floor",
+      "resourceId": "modern-pixel.floor",
       "frameId": "living-wood"
     },
     {
@@ -25,7 +25,7 @@
       "y": 7,
       "width": 9,
       "height": 5,
-      "resourceId": "pixel-16-interiors.floor",
+      "resourceId": "modern-pixel.floor",
       "frameId": "bedroom-wood"
     },
     {
@@ -33,7 +33,7 @@
       "y": 0,
       "width": 8,
       "height": 6,
-      "resourceId": "pixel-16-interiors.floor",
+      "resourceId": "modern-pixel.floor",
       "frameId": "kitchen-tile"
     },
     {
@@ -41,39 +41,51 @@
       "y": 7,
       "width": 8,
       "height": 5,
-      "resourceId": "pixel-16-interiors.floor",
+      "resourceId": "modern-pixel.floor",
       "frameId": "bathroom-tile"
     }
   ],
   "decorations": [
     {
       "id": "rug-living",
-      "position": { "x": 4, "y": 3 },
-      "resourceId": "pixel-16-interiors.carpet",
+      "position": { "x": 3, "y": 4 },
+      "resourceId": "modern-pixel.carpet",
       "frameId": "blue",
       "renderLayer": 5
     },
     {
       "id": "rug-bedroom",
-      "position": { "x": 4, "y": 9 },
-      "resourceId": "pixel-16-interiors.carpet",
-      "frameId": "orange",
+      "position": { "x": 3, "y": 9 },
+      "resourceId": "modern-pixel.carpet",
+      "frameId": "clay",
       "renderLayer": 5
     },
     {
       "id": "rug-kitchen",
-      "position": { "x": 13, "y": 3 },
-      "resourceId": "pixel-16-interiors.carpet",
-      "frameId": "purple",
+      "position": { "x": 12, "y": 2 },
+      "resourceId": "modern-pixel.carpet",
+      "frameId": "sage",
       "renderLayer": 5
     },
     {
       "id": "rug-bathroom",
-      "position": { "x": 13, "y": 9 },
-      "resourceId": "pixel-16-interiors.carpet",
-      "frameId": "red",
+      "position": { "x": 11, "y": 8 },
+      "resourceId": "modern-pixel.carpet",
+      "frameId": "coral",
       "renderLayer": 5
-    }
+    },
+    { "id": "backdrop-living", "position": { "x": 0, "y": 0 }, "resourceId": "modern-pixel.backdrop", "frameId": "warm", "renderLayer": 2 },
+    { "id": "backdrop-kitchen", "position": { "x": 10, "y": 0 }, "resourceId": "modern-pixel.backdrop", "frameId": "cool", "renderLayer": 2 },
+    { "id": "edge-left", "position": { "x": 0, "y": 0 }, "resourceId": "modern-pixel.edge-left", "frameId": "default", "renderLayer": 3 },
+    { "id": "edge-right", "position": { "x": 17, "y": 0 }, "resourceId": "modern-pixel.edge-right", "frameId": "default", "renderLayer": 3 },
+    { "id": "edge-front", "position": { "x": 0, "y": 11 }, "resourceId": "modern-pixel.edge-front", "frameId": "default", "renderLayer": 4 },
+    { "id": "window-living", "position": { "x": 6, "y": 0 }, "resourceId": "modern-pixel.window", "frameId": "default", "renderLayer": 4 },
+    { "id": "window-kitchen", "position": { "x": 13, "y": 0 }, "resourceId": "modern-pixel.window", "frameId": "default", "renderLayer": 4 },
+    { "id": "daylight-living", "position": { "x": 6, "y": 1 }, "resourceId": "modern-pixel.daylight", "frameId": "default", "renderLayer": 6 },
+    { "id": "daylight-kitchen", "position": { "x": 13, "y": 1 }, "resourceId": "modern-pixel.daylight", "frameId": "default", "renderLayer": 6 },
+    { "id": "kitchen-herbs", "position": { "x": 15, "y": 1 }, "resourceId": "modern-pixel.countertop", "frameId": "herb-pot", "renderLayer": 16 },
+    { "id": "bathroom-shelf", "position": { "x": 16, "y": 6 }, "resourceId": "modern-pixel.wall-fixture", "frameId": "bath-shelf", "renderLayer": 16 },
+    { "id": "bathroom-towel", "position": { "x": 11, "y": 6 }, "resourceId": "modern-pixel.wall-fixture", "frameId": "towel", "renderLayer": 16 }
   ],
   "zones": [
     { "id": "living-room", "name": "Living Room", "x": 0, "y": 0, "width": 9, "height": 6 },
@@ -114,8 +126,30 @@
     { "id": "wall-right-16", "definitionId": "spatial.wall", "position": { "x": 16, "y": 6 }, "facing": "north", "state": {} },
     { "id": "wall-right-17", "definitionId": "spatial.wall", "position": { "x": 17, "y": 6 }, "facing": "north", "state": {} },
 
-    { "id": "fridge-1", "definitionId": "home.refrigerator", "position": { "x": 16, "y": 2 }, "facing": "south", "state": { "occupiedBy": null } },
-    { "id": "toilet-1", "definitionId": "home.toilet", "position": { "x": 16, "y": 8 }, "facing": "south", "state": { "occupiedBy": null } }
+    { "id": "living-bookcase", "definitionId": "home.bookcase", "position": { "x": 1, "y": 1 }, "facing": "south" },
+    { "id": "living-sofa", "definitionId": "home.sofa", "position": { "x": 2, "y": 5 }, "facing": "north" },
+    { "id": "living-plant", "definitionId": "home.plant", "position": { "x": 8, "y": 1 }, "facing": "south" },
+    { "id": "living-table", "definitionId": "home.coffee-table", "position": { "x": 3, "y": 3 }, "facing": "south" },
+    { "id": "living-records", "definitionId": "home.records", "position": { "x": 6, "y": 1 }, "facing": "south" },
+    { "id": "living-media", "definitionId": "home.media-stand", "position": { "x": 3, "y": 1 }, "facing": "south" },
+
+    { "id": "bedroom-wardrobe", "definitionId": "home.wardrobe", "position": { "x": 1, "y": 8 }, "facing": "south" },
+    { "id": "bedroom-bed", "definitionId": "home.bed", "position": { "x": 3, "y": 7 }, "facing": "south" },
+    { "id": "bedroom-lamp", "definitionId": "home.nightstand", "position": { "x": 4, "y": 7 }, "facing": "south" },
+    { "id": "bedroom-desk", "definitionId": "home.desk", "position": { "x": 7, "y": 9 }, "facing": "south" },
+    { "id": "bedroom-chair", "definitionId": "home.chair", "position": { "x": 7, "y": 10 }, "facing": "north" },
+
+    { "id": "kitchen-cooktop", "definitionId": "home.cooktop", "position": { "x": 11, "y": 1 }, "facing": "south" },
+    { "id": "kitchen-counter", "definitionId": "home.counter", "position": { "x": 12, "y": 1 }, "facing": "south" },
+    { "id": "kitchen-sink", "definitionId": "home.sink", "position": { "x": 13, "y": 1 }, "facing": "south" },
+    { "id": "kitchen-counter-end", "definitionId": "home.counter", "position": { "x": 14, "y": 1 }, "facing": "south" },
+    { "id": "kitchen-prep", "definitionId": "home.counter", "position": { "x": 15, "y": 1 }, "facing": "south" },
+    { "id": "fridge-1", "definitionId": "home.refrigerator", "position": { "x": 17, "y": 1 }, "facing": "west", "state": { "occupiedBy": null } },
+
+    { "id": "bathroom-bathtub", "definitionId": "home.bathtub", "position": { "x": 11, "y": 7 }, "facing": "south" },
+    { "id": "bathroom-vanity", "definitionId": "home.vanity", "position": { "x": 16, "y": 7 }, "facing": "south" },
+    { "id": "bathroom-washer", "definitionId": "home.washer", "position": { "x": 13, "y": 7 }, "facing": "south" },
+    { "id": "toilet-1", "definitionId": "home.toilet", "position": { "x": 17, "y": 9 }, "facing": "west", "state": { "occupiedBy": null } }
   ],
   "spawns": [
     { "agentId": "alice", "definitionId": "starter.alice", "position": { "x": 2, "y": 2 }, "facing": "east", "needs": { "bladder": 30 }, "knownObjectIds": ["fridge-1", "toilet-1"] },

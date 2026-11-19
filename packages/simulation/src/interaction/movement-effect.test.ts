@@ -52,8 +52,8 @@ describe("movement effects", () => {
     const before = movingWorld();
     const result = commitProposal(before, testPluginRegistry, { effects: [move] }, metadata);
     if (!result.accepted) throw new Error(result.reason.message);
-    expect(before.agents.get(agentId)!.position).toEqual(move.from);
-    expect(result.world.agents.get(agentId)!.position).toEqual(move.to);
+    expect(before.agents.get(agentId)).toMatchObject({ position: move.from, facing: "north" });
+    expect(result.world.agents.get(agentId)).toMatchObject({ position: move.to, facing: "east" });
     expect(result.events).toEqual([expect.objectContaining({
       type: "agent_moved", agentId, callId, from: move.from, to: move.to,
       ...metadata, worldTick: before.tick, worldVersion: before.version + 1,

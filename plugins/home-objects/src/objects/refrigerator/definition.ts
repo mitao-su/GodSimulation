@@ -13,7 +13,7 @@ export const refrigeratorDefinition: ObjectDefinition<RefrigeratorState> = {
   capabilities: ["approachable", "observable"],
   stateSchema: RefrigeratorStateSchema,
   initialState: () => ({ occupiedBy: null }),
-  resourceId: "pixel-16-interiors.refrigerator",
+  resourceId: "modern-pixel.refrigerator",
   placement: {
     kind: "cell",
     footprint: [{ x: 0, y: 0 }],

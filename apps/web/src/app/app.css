@@ -508,7 +508,54 @@ input:focus-visible {
 
 .world-map__canvas canvas {
   display: block;
-  image-rendering: pixelated;
+}
+
+.world-map__canvas[data-zoomed="true"] {
+  cursor: grab;
+}
+
+.world-map__canvas[data-dragging="true"] canvas {
+  cursor: grabbing !important;
+}
+
+.world-map__controls {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  display: flex;
+  padding: 3px;
+  border: 1px solid #5b6254;
+  border-radius: 6px;
+  background: #202720;
+  box-shadow: 0 2px 8px #16191266;
+}
+
+.world-map__controls button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #d9e3d7;
+  cursor: pointer;
+}
+
+.world-map__controls button:hover:not(:disabled) {
+  background: #3c4b3c;
+}
+
+.world-map__controls button:disabled {
+  color: #869187;
+  cursor: default;
+}
+
+.world-map__canvas:focus-visible,
+.world-map__controls button:focus-visible {
+  outline: 2px solid #9cceab;
+  outline-offset: -3px;
 }
 
 .world-map__error,
