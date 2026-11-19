@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import world from "../../content/worlds/starter-home/world.json" with { type: "json" };
+
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 interface SheetRecord {
@@ -22,6 +24,7 @@ interface FrameRecord {
 }
 
 interface AssetManifest {
+  readonly pixelsPerTile: number;
   readonly sheets: readonly SheetRecord[];
   readonly resources: readonly {
     readonly id: string;
@@ -30,6 +33,7 @@ interface AssetManifest {
 }
 
 interface AnimationManifest {
+  readonly pixelsPerTile: number;
   readonly sheets: readonly (SheetRecord & {
     readonly resourceId: string;
     readonly frameWidth: number;
@@ -55,7 +59,7 @@ async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
-describe("licensed asset manifests", () => {
+describe("Starter Home runtime art", () => {
   it("keeps every declared rectangle inside its source PNG", async () => {
     const assetRoot = resolve(root, "plugins/home-objects/assets");
     const manifest = await readJson<AssetManifest>(resolve(assetRoot, "asset-manifest.json"));
@@ -81,46 +85,85 @@ describe("licensed asset manifests", () => {
     }
   });
 
-  it("defines two complete 8 by 8 Memao character sheets", async () => {
+  it("defines every frame placed in the four rooms", async () => {
+    const manifest = await readJson<AssetManifest>(
+      resolve(root, "plugins/home-objects/assets/asset-manifest.json"),
+    );
+    for (const { resourceId, frameId } of [...world.floorRegions, ...world.decorations]) {
+      const resource = manifest.resources.find(({ id }) => id === resourceId);
+      expect(resource?.frames[frameId], resourceId + "." + frameId).toBeDefined();
+    }
+    const directionalFurniture = new Map([
+      ["living-sofa", "modern-pixel.sofa"],
+      ["bedroom-chair", "modern-pixel.chair"],
+      ["fridge-1", "modern-pixel.refrigerator"],
+      ["toilet-1", "modern-pixel.toilet"],
+    ]);
+    for (const [entityId, resourceId] of directionalFurniture) {
+      const object = world.objects.find(({ id }) => id === entityId);
+      if (!object) throw new Error("Starter Home is missing " + entityId);
+      const frames = manifest.resources.find(({ id }) => id === resourceId)?.frames;
+      const placed = frames?.[object.facing];
+      expect(placed, resourceId + "." + object.facing).toBeDefined();
+      expect(placed, resourceId).not.toEqual(frames?.default);
+    }
+  });
+
+  it("keeps every floor variant at native art density independently of the logical grid", async () => {
+    const manifest = await readJson<AssetManifest>(
+      resolve(root, "plugins/home-objects/assets/asset-manifest.json"),
+    );
+    expect(manifest.pixelsPerTile).toBe(96);
+    expect(world.tileSize).toBe(16);
+    for (const { resourceId, frameId } of world.floorRegions) {
+      const frames = manifest.resources.find(({ id }) => id === resourceId)?.frames;
+      for (const name of [frameId, ...[1, 2, 3].map((variant) => frameId + "." + variant)]) {
+        expect(frames?.[name], name).toMatchObject({
+          width: manifest.pixelsPerTile,
+          height: manifest.pixelsPerTile,
+        });
+      }
+    }
+  });
+
+  it("provides idle, walking and interaction in four directions for both characters", async () => {
     const assetRoot = resolve(root, "plugins/starter-agents/assets");
     const manifest = await readJson<AnimationManifest>(
       resolve(assetRoot, "animation-manifest.json"),
     );
+    expect(manifest.pixelsPerTile).toBe(96);
     expect(manifest.sheets.map((sheet) => sheet.resourceId)).toEqual([
-      "starter-agents.memao.alice",
-      "starter-agents.memao.bob",
+      "starter-agents.modern-pixel.alice",
+      "starter-agents.modern-pixel.bob",
     ]);
     for (const sheet of manifest.sheets) {
-      expect(sheet).toMatchObject({
-        width: 384,
-        height: 384,
-        frameWidth: 48,
-        frameHeight: 48,
-        columns: 8,
-        rows: 8,
-      });
+      expect(sheet.frameWidth).toBe(144);
+      expect(sheet.frameHeight).toBe(168);
       expect(pngDimensions(await readFile(resolve(assetRoot, sheet.file)))).toEqual({
-        width: sheet.width,
-        height: sheet.height,
+        width: sheet.frameWidth * sheet.columns,
+        height: sheet.frameHeight * sheet.rows,
       });
     }
     const humanoid = manifest.animationSets.find(
-      (animationSet) => animationSet.id === "starter-agents.memao.humanoid",
+      (animationSet) => animationSet.id === "starter-agents.modern-pixel.humanoid",
     );
     expect(humanoid).toBeDefined();
-    for (const animation of Object.values(humanoid!.animations)) {
-      for (const frames of Object.values(animation)) {
-        expect(frames.length).toBeGreaterThan(0);
-        expect(Math.max(...frames)).toBeLessThan(64);
+    for (const id of ["idle", "walk", "interact"]) {
+      for (const facing of ["north", "east", "south", "west"] as const) {
+        const frames = humanoid!.animations[id]?.[facing] ?? [];
+        expect(new Set(frames).size).toBeGreaterThanOrEqual(id === "idle" ? 1 : 2);
         expect(Math.min(...frames)).toBeGreaterThanOrEqual(0);
+        for (const sheet of manifest.sheets) {
+          expect(Math.max(...frames)).toBeLessThan(sheet.columns * sheet.rows);
+        }
       }
     }
   });
 
   it("ships only the five selected runtime PNG files", async () => {
     const runtimeRoots = [
-      resolve(root, "plugins/home-objects/assets"),
-      resolve(root, "plugins/starter-agents/assets"),
+      resolve(root, "plugins/home-objects/assets/modern-pixel"),
+      resolve(root, "plugins/starter-agents/assets/modern-pixel"),
     ];
     const pngFiles: string[] = [];
     for (const runtimeRoot of runtimeRoots) {
@@ -138,11 +181,11 @@ describe("licensed asset manifests", () => {
     }
     pngFiles.sort();
     expect(pngFiles).toEqual([
-      "plugins/home-objects/assets/pixel-16-interiors/carpets.png",
-      "plugins/home-objects/assets/pixel-16-interiors/furniture.png",
-      "plugins/home-objects/assets/pixel-16-interiors/tiles.png",
-      "plugins/starter-agents/assets/memao/alice.png",
-      "plugins/starter-agents/assets/memao/bob.png",
+      "plugins/home-objects/assets/modern-pixel/furniture.png",
+      "plugins/home-objects/assets/modern-pixel/textiles.png",
+      "plugins/home-objects/assets/modern-pixel/tiles.png",
+      "plugins/starter-agents/assets/modern-pixel/alice.png",
+      "plugins/starter-agents/assets/modern-pixel/bob.png",
     ]);
   });
 });

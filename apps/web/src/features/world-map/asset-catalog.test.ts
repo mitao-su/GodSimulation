@@ -4,6 +4,7 @@ import { parseAssetCatalog } from "./asset-catalog";
 
 const animationManifest = {
   schemaVersion: 1,
+  pixelsPerTile: 48,
   sheets: [],
   resources: [],
   animationSets: [],
@@ -15,6 +16,7 @@ describe("asset catalog", () => {
       parseAssetCatalog(
         {
           schemaVersion: 1,
+          pixelsPerTile: 48,
           sheets: [],
           resources: [
             {
@@ -41,6 +43,7 @@ describe("asset catalog", () => {
     const catalog = parseAssetCatalog(
       {
         schemaVersion: 1,
+        pixelsPerTile: 48,
         sheets: [{ id: "tiles", file: "tiles.png", width: 32, height: 32 }],
         resources: [
           {
@@ -62,5 +65,12 @@ describe("asset catalog", () => {
       width: 16,
       height: 16,
     });
+  });
+
+  it("rejects a sprite sheet set whose art scale disagrees with the map atlas", () => {
+    expect(() => parseAssetCatalog(
+      { schemaVersion: 1, pixelsPerTile: 48, sheets: [], resources: [] },
+      { ...animationManifest, pixelsPerTile: 16 },
+    )).toThrow(/same tile density/);
   });
 });

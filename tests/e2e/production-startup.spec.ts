@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
+import starterHome from "../../content/worlds/starter-home/world.json" with { type: "json" };
+
 const projectRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 function captureOutput(child: ChildProcessWithoutNullStreams): () => string {
@@ -72,7 +74,7 @@ test("starts the production server and worker bundles without a TypeScript loade
       .toBe(200);
     const response = await fetch(`http://127.0.0.1:${port}/api/world`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ worldId: "starter-world", worldTick: 0 });
+    expect(await response.json()).toMatchObject({ worldId: starterHome.id, worldTick: 0 });
   } finally {
     if (child.exitCode === null) child.kill();
     await waitForExit(child);

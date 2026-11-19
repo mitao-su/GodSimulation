@@ -1,4 +1,5 @@
 import {
+  DirectTaskDecisionSchema,
   EntityIdSchema,
   WorldViewSchema,
   type AgentId,
@@ -7,9 +8,10 @@ import {
 } from "@god-sim/protocol";
 import { ObservationContextSchema } from "@god-sim/plugin-sdk";
 
+import { isOperationRuntimeCall, type HostedOperationRegistry } from "../execution/operation-runtime";
 import type { PluginRegistry } from "../world/plugin-registry";
 import { projectGameTime } from "../world/game-time";
-import { DirectTaskDecisionSchema } from "@god-sim/protocol";
+import { facingToward } from "../world/facing";
 import type {
   AgentState,
   DecisionRequestState,
@@ -149,7 +151,35 @@ function taskView(
   };
 }
 
-function renderEntities(world: WorldState, registry: PluginRegistry): WorldView["entities"] {
+function agentRenderPose(
+  world: WorldState,
+  agent: AgentState,
+  registry: HostedOperationRegistry,
+): Pick<WorldView["entities"][number], "facing" | "status"> {
+  const body = agent.taskTracks.BODY;
+  const idle = { status: world.mode.toLowerCase(), facing: agent.facing };
+  if (world.mode !== "RUNNING" || body.kind !== "operation") return idle;
+  const operation = agent.activeOperations.get(body.callId);
+  if (isOperationRuntimeCall(operation)) {
+    if (operation.firstStepState !== "started") return idle;
+    const runtime = registry.getHostedOperation(operation.operationId, operation.hostDefinition);
+    if (runtime?.publicBehavior.kind !== "visible") return idle;
+    if (operation.operationId === "core.move") return { ...idle, status: "move" };
+    if (operation.host.kind === "furniture" || operation.host.kind === "item") {
+      const host = world.objects.get(operation.host.hostEntityId);
+      return {
+        status: "interact_object",
+        facing: (host && facingToward(agent.position, host.position)) ?? agent.facing,
+      };
+    }
+    return idle;
+  }
+  return { ...idle, status: operation?.plan?.actions[operation.plan.currentActionIndex]?.kind ?? idle.status };
+}
+
+type WorldViewRegistry = PluginRegistry & HostedOperationRegistry;
+
+function renderEntities(world: WorldState, registry: WorldViewRegistry): WorldView["entities"] {
   const observerAgentId = [...world.agents.keys()].sort((left, right) =>
     left.localeCompare(right),
   )[0];
@@ -174,31 +204,14 @@ function renderEntities(world: WorldState, registry: PluginRegistry): WorldView[
     };
   });
   const agents = [...world.agents.values()].map((agent) => {
-    const activeCallId = [agent.taskTracks.HEAD, agent.taskTracks.BODY]
-      .find((track) => track.kind === "operation")?.callId;
-    const operation = activeCallId
-      ? agent.activeOperations.get(activeCallId)
-      : undefined;
-    const operationWithOptionalPlan = operation as unknown as {
-      readonly plan?: {
-        readonly actions: readonly { readonly kind: string }[];
-        readonly currentActionIndex: number;
-      };
-    } | undefined;
-    const action = operationWithOptionalPlan?.plan
-      ? operationWithOptionalPlan.plan.actions[
-          operationWithOptionalPlan.plan.currentActionIndex
-        ]
-      : undefined;
     return {
       entityId: EntityIdSchema.parse(agent.id),
       kind: "agent" as const,
       displayName: agent.displayName,
       resourceId: agent.resourceId,
       position: agent.position,
-      facing: agent.facing,
       renderLayer: 30,
-      status: action?.kind ?? world.mode.toLowerCase(),
+      ...agentRenderPose(world, agent, registry),
     };
   });
   return [...objects, ...agents].sort((left, right) => left.entityId.localeCompare(right.entityId));
@@ -206,7 +219,7 @@ function renderEntities(world: WorldState, registry: PluginRegistry): WorldView[
 
 export function projectWorldView(
   world: WorldState,
-  registry: PluginRegistry,
+  registry: WorldViewRegistry,
   revision: number,
   recentEvents: readonly DomainEvent[],
 ): WorldView {

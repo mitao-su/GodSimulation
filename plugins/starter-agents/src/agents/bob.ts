@@ -17,7 +17,7 @@ export const bobDefinition: AgentDefinition = {
     { id: "bob-knows-kitchen", summary: "The refrigerator is in the kitchen." },
     { id: "bob-knows-bathroom", summary: "The toilet is in the bathroom." },
   ],
-  resourceId: "starter-agents.memao.bob",
-  animationSetId: "starter-agents.memao.humanoid",
+  resourceId: "starter-agents.modern-pixel.bob",
+  animationSetId: "starter-agents.modern-pixel.humanoid",
   operations: starterAgentOperations,
 };

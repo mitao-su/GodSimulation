@@ -13,7 +13,7 @@ export const toiletDefinition: ObjectDefinition<ToiletState> = {
   capabilities: ["approachable", "observable"],
   stateSchema: ToiletStateSchema,
   initialState: () => ({ occupiedBy: null }),
-  resourceId: "pixel-16-interiors.toilet",
+  resourceId: "modern-pixel.toilet",
   placement: {
     kind: "cell",
     footprint: [{ x: 0, y: 0 }],

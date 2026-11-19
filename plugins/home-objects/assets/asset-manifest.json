@@ -1,171 +1,1031 @@
 {
   "schemaVersion": 1,
+  "pixelsPerTile": 96,
   "sheets": [
     {
-      "id": "pixel-16-interiors.tiles",
-      "file": "pixel-16-interiors/tiles.png",
-      "width": 528,
-      "height": 224
+      "id": "modern-pixel.tiles",
+      "file": "modern-pixel/tiles.png",
+      "width": 1760,
+      "height": 1208
     },
     {
-      "id": "pixel-16-interiors.furniture",
-      "file": "pixel-16-interiors/furniture.png",
-      "width": 584,
-      "height": 300
+      "id": "modern-pixel.furniture",
+      "file": "modern-pixel/furniture.png",
+      "width": 1024,
+      "height": 752
     },
     {
-      "id": "pixel-16-interiors.carpets",
-      "file": "pixel-16-interiors/carpets.png",
-      "width": 256,
-      "height": 128
+      "id": "modern-pixel.textiles",
+      "file": "modern-pixel/textiles.png",
+      "width": 640,
+      "height": 320
     }
   ],
   "resources": [
     {
-      "id": "pixel-16-interiors.floor",
-      "anchor": { "x": 0, "y": 0 },
+      "id": "modern-pixel.floor",
+      "anchor": {
+        "x": 0,
+        "y": 0
+      },
       "frames": {
         "living-wood": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 16,
-          "y": 16,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 392,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "living-wood.1": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 504,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "living-wood.2": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 616,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "living-wood.3": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 728,
+          "y": 160,
+          "width": 96,
+          "height": 96
         },
         "bedroom-wood": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 80,
-          "y": 16,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 840,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "bedroom-wood.1": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 952,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "bedroom-wood.2": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1064,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "bedroom-wood.3": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1176,
+          "y": 160,
+          "width": 96,
+          "height": 96
         },
         "kitchen-tile": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 368,
-          "y": 32,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 1288,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "kitchen-tile.1": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "kitchen-tile.2": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1512,
+          "y": 160,
+          "width": 96,
+          "height": 96
+        },
+        "kitchen-tile.3": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1624,
+          "y": 160,
+          "width": 96,
+          "height": 96
         },
         "bathroom-tile": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 368,
-          "y": 64,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 392,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "bathroom-tile.1": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 504,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "bathroom-tile.2": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 616,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "bathroom-tile.3": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 728,
+          "y": 272,
+          "width": 96,
+          "height": 96
         }
       }
     },
     {
-      "id": "pixel-16-interiors.wall",
-      "anchor": { "x": 0, "y": 0 },
+      "id": "modern-pixel.wall",
+      "anchor": {
+        "x": 0,
+        "y": 0
+      },
       "frames": {
+        "join-0": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 840,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-1": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 952,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-2": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1064,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-3": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1176,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-4": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1288,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-5": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-6": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1512,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-7": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1624,
+          "y": 272,
+          "width": 96,
+          "height": 96
+        },
+        "join-8": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 392,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-9": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 504,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-10": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 616,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-11": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 728,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-12": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 840,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-13": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 952,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-14": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1064,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "join-15": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1176,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
         "default": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 48,
-          "y": 112,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 616,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        }
+      },
+      "connectionGroup": "partition"
+    },
+    {
+      "id": "modern-pixel.door",
+      "anchor": {
+        "x": 0,
+        "y": 0
+      },
+      "frames": {
+        "south.open": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1288,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "south.closed": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "east.open": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1512,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "east.closed": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1624,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "north.open": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1288,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "north.closed": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 384,
+          "width": 96,
+          "height": 96
         },
         "north": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 48,
-          "y": 112,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 384,
+          "width": 96,
+          "height": 96
         },
-        "south": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 48,
-          "y": 192,
-          "width": 16,
-          "height": 16
+        "west.open": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1512,
+          "y": 384,
+          "width": 96,
+          "height": 96
         },
-        "east": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 128,
-          "y": 128,
-          "width": 16,
-          "height": 16
+        "west.closed": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1624,
+          "y": 384,
+          "width": 96,
+          "height": 96
         },
         "west": {
-          "sheetId": "pixel-16-interiors.tiles",
-          "x": 32,
-          "y": 128,
-          "width": 16,
-          "height": 16
+          "sheetId": "modern-pixel.tiles",
+          "x": 1624,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "south": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "east": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1624,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        },
+        "default": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 1400,
+          "y": 384,
+          "width": 96,
+          "height": 96
+        }
+      },
+      "connectionGroup": "partition"
+    },
+    {
+      "id": "modern-pixel.backdrop",
+      "anchor": {
+        "x": 0,
+        "y": 0
+      },
+      "frames": {
+        "warm": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 88,
+          "y": 48,
+          "width": 864,
+          "height": 96
+        },
+        "cool": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 968,
+          "y": 48,
+          "width": 768,
+          "height": 96
         }
       }
     },
     {
-      "id": "pixel-16-interiors.door",
-      "anchor": { "x": 0.5, "y": 1 },
+      "id": "modern-pixel.daylight",
+      "anchor": {
+        "x": 0.5,
+        "y": 0
+      },
       "frames": {
         "default": {
-          "sheetId": "pixel-16-interiors.furniture",
-          "x": 464,
-          "y": 152,
-          "width": 32,
-          "height": 40
+          "sheetId": "modern-pixel.tiles",
+          "x": 88,
+          "y": 160,
+          "width": 282,
+          "height": 292
         }
       }
     },
     {
-      "id": "pixel-16-interiors.refrigerator",
-      "anchor": { "x": 0.5, "y": 1 },
+      "id": "modern-pixel.edge-front",
+      "anchor": {
+        "x": 0,
+        "y": 1
+      },
       "frames": {
         "default": {
-          "sheetId": "pixel-16-interiors.furniture",
+          "sheetId": "modern-pixel.tiles",
+          "x": 8,
+          "y": 8,
+          "width": 1728,
+          "height": 24
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.edge-left",
+      "anchor": {
+        "x": 0,
+        "y": 0
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 8,
+          "y": 48,
+          "width": 24,
+          "height": 1152
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.edge-right",
+      "anchor": {
+        "x": 1,
+        "y": 0
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.tiles",
+          "x": 48,
+          "y": 48,
+          "width": 24,
+          "height": 1152
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.refrigerator",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 584,
+          "y": 312,
+          "width": 110,
+          "height": 162
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 584,
+          "y": 312,
+          "width": 110,
+          "height": 162
+        },
+        "west": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 320,
+          "width": 126,
+          "height": 162
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.toilet",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 504,
+          "width": 94,
+          "height": 118
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 504,
+          "width": 94,
+          "height": 118
+        },
+        "west": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 152,
+          "y": 472,
+          "width": 136,
+          "height": 111
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.window",
+      "anchor": {
+        "x": 0.5,
+        "y": 0
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 472,
+          "y": 8,
+          "width": 206,
+          "height": 76
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.wall-fixture",
+      "anchor": {
+        "x": 0.5,
+        "y": 0.6
+      },
+      "frames": {
+        "towel": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 352,
+          "y": 632,
+          "width": 92,
+          "height": 70
+        },
+        "bath-shelf": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 832,
+          "y": 448,
+          "width": 134,
+          "height": 76
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.countertop",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "herb-pot": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 920,
+          "y": 8,
+          "width": 38,
+          "height": 125
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.sofa",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 8,
+          "width": 216,
+          "height": 132
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 8,
+          "width": 216,
+          "height": 132
+        },
+        "north": {
+          "sheetId": "modern-pixel.furniture",
           "x": 240,
-          "y": 240,
-          "width": 32,
-          "height": 48
+          "y": 8,
+          "width": 216,
+          "height": 126
         }
+      },
+      "gridAnchor": {
+        "x": 1.5,
+        "y": 1
       }
     },
     {
-      "id": "pixel-16-interiors.toilet",
-      "anchor": { "x": 0.5, "y": 1 },
+      "id": "modern-pixel.bed",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
       "frames": {
         "default": {
-          "sheetId": "pixel-16-interiors.furniture",
-          "x": 272,
-          "y": 240,
-          "width": 48,
-          "height": 32
+          "sheetId": "modern-pixel.furniture",
+          "x": 472,
+          "y": 104,
+          "width": 160,
+          "height": 188
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 472,
+          "y": 104,
+          "width": 160,
+          "height": 188
+        }
+      },
+      "gridAnchor": {
+        "x": 0.5,
+        "y": 2
+      }
+    },
+    {
+      "id": "modern-pixel.bathtub",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 696,
+          "y": 8,
+          "width": 204,
+          "height": 136
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 696,
+          "y": 8,
+          "width": 204,
+          "height": 136
+        }
+      },
+      "gridAnchor": {
+        "x": 1,
+        "y": 1
+      }
+    },
+    {
+      "id": "modern-pixel.wardrobe",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 240,
+          "y": 152,
+          "width": 142,
+          "height": 178
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 240,
+          "y": 152,
+          "width": 142,
+          "height": 178
         }
       }
     },
     {
-      "id": "pixel-16-interiors.carpet",
-      "anchor": { "x": 0.5, "y": 0.5 },
+      "id": "modern-pixel.bookcase",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 848,
+          "y": 160,
+          "width": 156,
+          "height": 176
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 848,
+          "y": 160,
+          "width": 156,
+          "height": 176
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.coffee-table",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 152,
+          "y": 352,
+          "width": 148,
+          "height": 100
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 152,
+          "y": 352,
+          "width": 148,
+          "height": 100
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.desk",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 400,
+          "y": 312,
+          "width": 166,
+          "height": 156
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 400,
+          "y": 312,
+          "width": 166,
+          "height": 156
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.chair",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 832,
+          "y": 544,
+          "width": 86,
+          "height": 112
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 832,
+          "y": 544,
+          "width": 86,
+          "height": 112
+        },
+        "north": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 248,
+          "y": 632,
+          "width": 86,
+          "height": 112
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.media-stand",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 160,
+          "width": 184,
+          "height": 140
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 8,
+          "y": 160,
+          "width": 184,
+          "height": 140
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.plant",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 712,
+          "y": 312,
+          "width": 102,
+          "height": 134
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 712,
+          "y": 312,
+          "width": 102,
+          "height": 134
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.nightstand",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 712,
+          "y": 464,
+          "width": 104,
+          "height": 124
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 712,
+          "y": 464,
+          "width": 104,
+          "height": 124
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.records",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 648,
+          "y": 160,
+          "width": 182,
+          "height": 130
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 648,
+          "y": 160,
+          "width": 182,
+          "height": 130
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.counter",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 120,
+          "y": 600,
+          "width": 112,
+          "height": 102
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 120,
+          "y": 600,
+          "width": 112,
+          "height": 102
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.sink",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 552,
+          "y": 496,
+          "width": 112,
+          "height": 120
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 552,
+          "y": 496,
+          "width": 112,
+          "height": 120
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.cooktop",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 680,
+          "y": 608,
+          "width": 112,
+          "height": 102
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 680,
+          "y": 608,
+          "width": 112,
+          "height": 102
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.vanity",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 304,
+          "y": 488,
+          "width": 110,
+          "height": 126
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 304,
+          "y": 488,
+          "width": 110,
+          "height": 126
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.washer",
+      "anchor": {
+        "x": 0.5,
+        "y": 1
+      },
+      "frames": {
+        "default": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 432,
+          "y": 488,
+          "width": 102,
+          "height": 126
+        },
+        "south": {
+          "sheetId": "modern-pixel.furniture",
+          "x": 432,
+          "y": 488,
+          "width": 102,
+          "height": 126
+        }
+      }
+    },
+    {
+      "id": "modern-pixel.carpet",
+      "anchor": {
+        "x": 0.5,
+        "y": 0.5
+      },
       "frames": {
         "blue": {
-          "sheetId": "pixel-16-interiors.carpets",
+          "sheetId": "modern-pixel.textiles",
           "x": 8,
-          "y": 24,
-          "width": 40,
-          "height": 32
+          "y": 8,
+          "width": 290,
+          "height": 192
         },
-        "purple": {
-          "sheetId": "pixel-16-interiors.carpets",
-          "x": 56,
-          "y": 24,
-          "width": 40,
-          "height": 32
+        "clay": {
+          "sheetId": "modern-pixel.textiles",
+          "x": 320,
+          "y": 96,
+          "width": 256,
+          "height": 170
         },
-        "orange": {
-          "sheetId": "pixel-16-interiors.carpets",
-          "x": 152,
-          "y": 24,
-          "width": 40,
-          "height": 32
+        "sage": {
+          "sheetId": "modern-pixel.textiles",
+          "x": 320,
+          "y": 8,
+          "width": 258,
+          "height": 66
         },
-        "red": {
-          "sheetId": "pixel-16-interiors.carpets",
-          "x": 56,
-          "y": 72,
-          "width": 40,
-          "height": 40
+        "coral": {
+          "sheetId": "modern-pixel.textiles",
+          "x": 8,
+          "y": 216,
+          "width": 152,
+          "height": 90
         }
       }
     }

@@ -13,7 +13,7 @@ export const doorDefinition: ObjectDefinition<DoorState> = {
   capabilities: ["approachable", "observable"],
   stateSchema: DoorStateSchema,
   initialState: () => ({ open: false, locked: false }),
-  resourceId: "pixel-16-interiors.door",
+  resourceId: "modern-pixel.door",
   placement: {
     kind: "cell",
     footprint: [{ x: 0, y: 0 }],

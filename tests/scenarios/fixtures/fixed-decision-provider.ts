@@ -1,14 +1,19 @@
 import {
+  EntityIdSchema,
   type AgentId,
   type Coordinate,
   type DecisionIdentity,
   type DecisionPromptInput,
   type DirectTaskReplacement,
+  type Facing,
   type JsonObject,
   type WorldCommand,
 } from "@god-sim/protocol";
 import {
+  createPluginRegistry,
   createSimulation,
+  loadWorldDefinition,
+  SpatialIndex,
   type AdoptedDecision,
   type SimulationEngine,
 } from "@god-sim/simulation";
@@ -18,6 +23,19 @@ import agentsPlugin from "@god-sim/starter-agents";
 
 import starterHome from "../../../content/worlds/starter-home/world.json" with { type: "json" };
 import { testSimulationRulesLock } from "../../fixtures/simulation-rules";
+
+const starterPlugins = [spatialPlugin, homePlugin, agentsPlugin];
+
+export function starterInteractionPosition(entityId: string): Coordinate {
+  const registry = createPluginRegistry(starterPlugins);
+  const { world } = loadWorldDefinition(starterHome, registry, {
+    simulationRulesLock: testSimulationRulesLock,
+  });
+  const [position, ...others] = new SpatialIndex(world, registry)
+    .interactionPositions(EntityIdSchema.parse(entityId));
+  if (!position || others.length > 0) throw new Error(`Expected one interaction position for ${entityId}`);
+  return position;
+}
 
 /**
  * Scenario choices intentionally use the production direct-operation shape.
@@ -34,33 +52,30 @@ export function starterEngine(
     readonly aliceBladder?: number;
     readonly bobBladder?: number;
     readonly alicePosition?: Coordinate;
+    readonly aliceFacing?: Facing;
   } = {},
 ): SimulationEngine {
   const worldDefinition = {
     ...starterHome,
     spawns: starterHome.spawns.map((spawn) => {
+      const isAlice = spawn.agentId === "alice";
       const bladder =
-        spawn.agentId === "alice"
+        isAlice
           ? options.aliceBladder
           : spawn.agentId === "bob"
             ? options.bobBladder
             : undefined;
-      return bladder === undefined
-        ? spawn.agentId === "alice" && options.alicePosition !== undefined
-          ? { ...spawn, position: options.alicePosition }
-          : spawn
-        : {
-            ...spawn,
-            ...(spawn.agentId === "alice" && options.alicePosition !== undefined
-              ? { position: options.alicePosition }
-              : {}),
-            needs: { ...spawn.needs, bladder },
-          };
+      return {
+        ...spawn,
+        ...(isAlice && options.alicePosition ? { position: options.alicePosition } : {}),
+        ...(isAlice && options.aliceFacing ? { facing: options.aliceFacing } : {}),
+        ...(bladder === undefined ? {} : { needs: { ...spawn.needs, bladder } }),
+      };
     }),
   };
   return createSimulation({
     worldDefinition,
-    plugins: [spatialPlugin, homePlugin, agentsPlugin],
+    plugins: starterPlugins,
     reviewRequired: options.reviewRequired ?? true,
     seed: 1,
     simulationRulesLock: testSimulationRulesLock,
